@@ -1,41 +1,23 @@
-version: "3.9"
-
 services:
-
-  zeo:
-    image: senaite/senaite:2.x
-    command: zeo
+  app:
+    image: maitux/senaite:latest
+    container_name: senaite-source-clean-2x
+    restart: unless-stopped
+    ports:
+      - 9001:8080
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024MB
     volumes:
       - ./data:/data
-
-  instance1:
-    image: senaite/senaite:2.x
-    ports:
-      - 8081:8080
-    links:
-      - zeo
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: 1024MB
     environment:
-      ZEO_ADDRESS: "zeo:8080"
-
-  instance2:
-    image: senaite/senaite:2.x
-    ports:
-      - 8082:8080
-    links:
-      - zeo
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: 1024MB
-    environment:
-      ZEO_ADDRESS: "zeo:8080"
-
-volumes:
-  data:
-    external: true
+      SITE: senaite
+      PASSWORD: changeme
+      PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+      PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      PYTHONIOENCODING: utf-8
+      CHAMELEON_CACHE: /data/cache

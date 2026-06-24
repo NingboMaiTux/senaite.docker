@@ -1,6 +1,10 @@
 # Use an official Python runtime as a parent image
 FROM python:2.7-slim-buster
 
+ARG HTTP_PROXY=http://host.docker.internal:7897
+ARG HTTPS_PROXY=http://host.docker.internal:7897
+ARG NO_PROXY=127.0.0.1,localhost,::1,host.docker.internal
+
 # Set one or more individual labels
 LABEL maintainer="Ramon Bartl"
 LABEL email="rb@ridingbytes.com"
@@ -11,12 +15,25 @@ ENV PLONE_MAJOR=5.2 \
     PLONE_VERSION=5.2.15 \
     PLONE_MD5=714be71e21098ab148df8681196e78ce \
     PLONE_UNIFIED_INSTALLER=Plone-5.2.15-UnifiedInstaller-1.0 \
+    PLONE_UNIFIED_INSTALLER_COMMIT=1f925681de91391ab4197871f78adbdd01c3b194 \
     SENAITE_HOME=/home/senaite \
     SENAITE_USER=senaite \
     SENAITE_INSTANCE_HOME=/home/senaite/senaitelims \
     SENAITE_DATA=/data \
     SENAITE_FILESTORAGE=/data/filestorage \
-    SENAITE_BLOBSTORAGE=/data/blobstorage
+    SENAITE_BLOBSTORAGE=/data/blobstorage \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn \
+    LANG=zh_CN.UTF-8 \
+    LC_ALL=zh_CN.UTF-8 \
+    PYTHONIOENCODING=utf-8 \
+    DEBIAN_FRONTEND=noninteractive \
+    HTTP_PROXY=$HTTP_PROXY \
+    HTTPS_PROXY=$HTTPS_PROXY \
+    NO_PROXY=$NO_PROXY \
+    http_proxy=$HTTP_PROXY \
+    https_proxy=$HTTPS_PROXY \
+    no_proxy=$NO_PROXY
 
 # Create the senaite user
 RUN useradd --system -m -d $SENAITE_HOME -U -u 500 $SENAITE_USER
@@ -30,34 +47,80 @@ COPY requirements.txt buildout.cfg $SENAITE_INSTANCE_HOME/
 # Copy the build dependencies and startup scripts
 COPY build_deps.txt run_deps.txt docker-initialize.py docker-entrypoint.sh /
 
-# Note: we concatenate all commands to avoid multiple layer generation and reduce the image size
-RUN echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99no-check-valid-until && \
-    sed -i 's|http://deb.debian.org|http://archive.debian.org|g' /etc/apt/sources.list && \
-    sed -i 's|http://security.debian.org|http://archive.debian.org|g' /etc/apt/sources.list && \
-    sed -i '/stretch-updates/d' /etc/apt/sources.list && \
-    sed -i '/buster-updates/d' /etc/apt/sources.list && \
-    apt-get update \
-    # Install system packages
-    && apt-get install -y --no-install-recommends $(grep -vE "^\s*#" /build_deps.txt | tr "\n" " ") \
-    && apt-get install -y --no-install-recommends $(grep -vE "^\s*#" /run_deps.txt | tr "\n" " ") \
-    # Fetch unified installer
-    && wget -O Plone.tgz https://launchpad.net/plone/$PLONE_MAJOR/$PLONE_VERSION/+download/$PLONE_UNIFIED_INSTALLER.tgz \
-    && echo "$PLONE_MD5 Plone.tgz" | md5sum -c - \
-    && tar -xzf /Plone.tgz \
-    && cp -rv $PLONE_UNIFIED_INSTALLER/base_skeleton/* $SENAITE_INSTANCE_HOME \
-    && cp -v $PLONE_UNIFIED_INSTALLER/buildout_templates/buildout.cfg $SENAITE_INSTANCE_HOME/buildout-base.cfg \
-    && rm -rf $PLONE_UNIFIED_INSTALLER Plone.tgz \
-    # Buildout
-    && cd $SENAITE_INSTANCE_HOME \
-    && pip install -r requirements.txt \
-    && buildout \
-    && ln -s $SENAITE_FILESTORAGE/ var/filestorage \
-    && ln -s $SENAITE_BLOBSTORAGE/ var/blobstorage \
-    && chown -R senaite:senaite $SENAITE_HOME $SENAITE_DATA \
-    # Cleanup
-    && apt-get purge -y --auto-remove $(grep -vE "^\s*#" /build_deps.txt  | tr "\n" " ") \
-    && rm -rf /$SENAITE_HOME/buildout-cache \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    sed -i 's/\r$//' /docker-entrypoint.sh /docker-initialize.py /build_deps.txt /run_deps.txt; \
+    chmod +x /docker-entrypoint.sh
+
+RUN set -eux; \
+    echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99no-check-valid-until; \
+    echo "Acquire::Retries \"5\";" > /etc/apt/apt.conf.d/80retries; \
+    printf '%s\n' \
+      'deb http://snapshot.debian.org/archive/debian/20240311T000000Z/ buster main contrib non-free' \
+      'deb http://snapshot.debian.org/archive/debian-security/20240311T000000Z/ buster/updates main contrib non-free' \
+      > /etc/apt/sources.list; \
+    retry_update() { \
+      for attempt in 1 2 3 4 5; do \
+        apt-get update && return 0; \
+        sleep 5; \
+      done; \
+      return 1; \
+    }; \
+    retry_update; \
+    retry_install() { \
+      for attempt in 1 2 3 4 5; do \
+        apt-get install -y --fix-missing --no-install-recommends "$@" && return 0; \
+        sleep 5; \
+      done; \
+      return 1; \
+    }; \
+    build_deps="$(sed 's/\r$//' /build_deps.txt | grep -vE '^[[:space:]]*($|#)' | xargs)"; \
+    run_deps="$(sed 's/\r$//' /run_deps.txt | grep -vE '^[[:space:]]*($|#)' | xargs)"; \
+    set -- $build_deps; \
+    retry_install "$@"; \
+    set -- $run_deps; \
+    retry_install "$@"; \
+    echo 'zh_CN.UTF-8 UTF-8' > /etc/locale.gen; \
+    locale-gen zh_CN.UTF-8; \
+    update-locale LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8
+
+RUN set -eux; \
+    installer_url="https://github.com/plone/Installers-UnifiedInstaller/archive/$PLONE_UNIFIED_INSTALLER_COMMIT.tar.gz"; \
+    mkdir -p /tmp/plone-installer; \
+    wget -O /Plone.tgz --tries=5 --timeout=120 "$installer_url"; \
+    tar -xzf /Plone.tgz -C /tmp/plone-installer --strip-components=1; \
+    cp -rv /tmp/plone-installer/base_skeleton/* $SENAITE_INSTANCE_HOME; \
+    cp -v /tmp/plone-installer/buildout_templates/buildout.cfg $SENAITE_INSTANCE_HOME/buildout-base.cfg; \
+    rm -rf /tmp/plone-installer /Plone.tgz
+
+RUN set -eux; \
+    cd $SENAITE_INSTANCE_HOME; \
+    git --version; \
+    git config --global http.version HTTP/1.1; \
+    git config --global http.proxy "$HTTP_PROXY"; \
+    git config --global https.proxy "$HTTPS_PROXY"; \
+    git config --global http.https://github.com.proxy ""; \
+    git config --global --list || true; \
+    env | sort | grep '^GIT_' || true; \
+    env | sort | grep -Ei '^(HTTP|HTTPS|NO)_PROXY=|^(http|https|no)_proxy=' || true; \
+    pip --version; \
+    python -c "import setuptools; print(setuptools.__version__)"; \
+    mkdir -p /tmp/probe-tuna /tmp/probe-pypi; \
+    wget -S --spider https://pypi.tuna.tsinghua.edu.cn/simple/zope.component/ || true; \
+    wget -S --spider https://pypi.org/simple/zope.component/ || true; \
+    pip download --no-deps --dest /tmp/probe-tuna --index-url "$PIP_INDEX_URL" zope.component==4.6.2 || true; \
+    pip download --no-deps --dest /tmp/probe-pypi --index-url https://pypi.org/simple zope.component==4.6.2 || true; \
+    pip install -r requirements.txt argparse==1.4.0 zope.component==4.6.2 collective.recipe.plonesite; \
+    GIT_TRACE=1 GIT_CURL_VERBOSE=1 buildout
+
+RUN set -eux; \
+    ln -s $SENAITE_FILESTORAGE/ $SENAITE_INSTANCE_HOME/var/filestorage; \
+    ln -s $SENAITE_BLOBSTORAGE/ $SENAITE_INSTANCE_HOME/var/blobstorage; \
+    chown -R senaite:senaite $SENAITE_HOME $SENAITE_DATA
+
+RUN set -eux; \
+    sed 's/\r$//' /build_deps.txt | grep -vE '^[[:space:]]*($|#)' | xargs -r apt-get purge -y --auto-remove; \
+    rm -rf $SENAITE_HOME/buildout-cache; \
+    rm -rf /var/lib/apt/lists/*
 
 # Change working directory
 WORKDIR $SENAITE_INSTANCE_HOME
