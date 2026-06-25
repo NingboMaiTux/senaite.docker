@@ -14,6 +14,27 @@ Use the normal build command:
 docker build -t maitux/senaite:latest .
 ```
 
+Before building, if you add or remove any addon under `d:\AWork\senaite.docker\latest\addons\common`, remember to manually update:
+
+```text
+d:\AWork\senaite.docker\latest\common-addons.cfg
+```
+
+Current common addon config example:
+
+```ini
+[buildout]
+develop +=
+    /opt/addons/common/medai.footercleanup_0.1.0
+eggs +=
+    medai.footercleanup
+
+[plonesite]
+profiles =
+    senaite.lims:default
+    medai.footercleanup:default
+```
+
 If you want detailed build logs:
 
 ```powershell

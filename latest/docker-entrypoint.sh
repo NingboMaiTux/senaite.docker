@@ -7,6 +7,7 @@ START="console start restart"
 # Fixing permissions for external /data volumes
 mkdir -p /data/blobstorage /data/cache /data/filestorage /data/instance /data/log /data/zeoserver
 mkdir -p /home/senaite/senaitelims/src
+
 find /data  -not -user senaite -exec chown senaite:senaite {} \+
 find /home/senaite -not -user senaite -exec chown senaite:senaite {} \+
 

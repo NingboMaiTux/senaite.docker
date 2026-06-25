@@ -16,77 +16,70 @@
 
 ---
 
-## 方式一：pip 安装（推荐）
+## 当前 Docker 项目中的安装方式（推荐）
 
-### 1. 将包复制到目标服务器的 SENAITE 自定义 addon 目录
+本仓库使用手工维护的 `common-addons.cfg` 管理通用 addon，并在 Docker 构建时一并复制到镜像中。
 
-```bash
-# 例如
-cp -r medai.footercleanup_0.1.0 /path/to/senaite/custom_addons/
+当前目录建议保持如下结构：
+
+```text
+latest/
+  addons/
+    common/
+      medai.footercleanup_0.1.0/
 ```
 
-### 2. 进入包目录，用 pip 以开发模式安装
+### 1. 将 addon 放到 `addons/common/`
 
-```bash
-cd /path/to/custom_addons/medai.footercleanup_0.1.0
-pip install -e .
+本包当前路径如下：
+
+```text
+d:\AWork\senaite.docker\latest\addons\common\medai.footercleanup_0.1.0
 ```
 
-### 3. 重启 SENAITE 实例
+镜像构建时会复制 `addons/common/` 到容器内 `/opt/addons/common`。
 
-```bash
-bin/instance restart
-```
-
-### 4. 在 SENAITE 站点中激活
-
-1. 登录 SENAITE -> `Site Setup` -> `Add-ons`
-2. 找到 **MEDAI FOOTER CLEANUP**
-3. 勾选并点击 `Activate`
-
-安装成功后，SENAITE 底部栏的版权文字、外部链接和图标组将被移除。
-
----
-
-## 方式二：buildout 安装
-
-### 1. 将包放入 SENAITE buildout 自定义源码目录
-
-```bash
-cp -r medai.footercleanup_0.1.0 /path/to/buildout/src/
-```
-
-### 2. 编辑 `buildout.cfg`，添加 egg 和 develop 路径
+然后需要在 `latest/common-addons.cfg` 中手工加入本 addon，配置如下：
 
 ```ini
 [buildout]
+develop +=
+    /opt/addons/common/medai.footercleanup_0.1.0
 eggs +=
     medai.footercleanup
 
-develop +=
-    src/medai.footercleanup_0.1.0
-
-[sources]
-medai.footercleanup = fs src/medai.footercleanup_0.1.0
+[plonesite]
+profiles =
+    senaite.lims:default
+    medai.footercleanup:default
 ```
 
-### 3. 重新运行 buildout
+### 2. 重新构建镜像
+
+在 `d:\AWork\senaite.docker\latest` 目录执行：
 
 ```bash
-bin/buildout
+docker compose build app
 ```
 
-### 4. 重启 SENAITE 实例
+### 3. 启动或重建容器
 
 ```bash
-bin/instance restart
+docker compose up -d
 ```
 
-### 5. 在 SENAITE 站点中激活
+### 4. 生效说明
 
-1. 登录 SENAITE -> `Site Setup` -> `Add-ons`
-2. 找到 **MEDAI FOOTER CLEANUP**
-3. 勾选并点击 `Activate`
+- 如果是新建站点，addon 会随站点初始化一起安装
+- 如果是已经存在的站点，代码会进入实例，但通常仍需到 `Site Setup -> Add-ons` 中激活一次
+
+激活成功后，SENAITE 底部栏的版权文字、外部链接和图标组将被移除，浏览器标题将显示为 **MaiTux LIMS**
+
+---
+
+## 非 Docker 场景（仅参考）
+
+如果不是使用当前仓库的 Docker 方案，也可以按常规 Python / buildout 方式手工安装，但这不是本仓库的推荐路径。
 
 ---
 
