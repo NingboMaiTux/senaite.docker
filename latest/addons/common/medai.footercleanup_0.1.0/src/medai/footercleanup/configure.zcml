@@ -1,0 +1,27 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:five="http://namespaces.zope.org/five"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup">
+
+  <include package="Products.Five" />
+  <include package="Products.GenericSetup" file="meta.zcml" />
+
+  <five:registerPackage package="." />
+
+  <include package=".browser" />
+
+  <genericsetup:registerProfile
+      name="default"
+      title="MEDAI FOOTER CLEANUP"
+      directory="profiles/default"
+      description="Removes footer branding text, links and footer icon group"
+      provides="Products.GenericSetup.interfaces.EXTENSION" />
+
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="MEDAI FOOTER CLEANUP (uninstall)"
+      directory="profiles/uninstall"
+      description="Uninstall profile for MEDAI FOOTER CLEANUP"
+      provides="Products.GenericSetup.interfaces.EXTENSION" />
+
+</configure>

@@ -1,0 +1,15 @@
+README.rst
+setup.py
+src/medai/__init__.py
+src/medai.footercleanup.egg-info/PKG-INFO
+src/medai.footercleanup.egg-info/SOURCES.txt
+src/medai.footercleanup.egg-info/dependency_links.txt
+src/medai.footercleanup.egg-info/entry_points.txt
+src/medai.footercleanup.egg-info/namespace_packages.txt
+src/medai.footercleanup.egg-info/not-zip-safe
+src/medai.footercleanup.egg-info/requires.txt
+src/medai.footercleanup.egg-info/top_level.txt
+src/medai/footercleanup/__init__.py
+src/medai/footercleanup/interfaces.py
+src/medai/footercleanup/browser/__init__.py
+src/medai/footercleanup/browser/viewlets.py

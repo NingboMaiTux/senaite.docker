@@ -1,0 +1,4 @@
+setuptools
+senaite.core
+senaite.lims
+zope.interface
