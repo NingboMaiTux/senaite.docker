@@ -47,6 +47,9 @@ COPY requirements.txt buildout.cfg $SENAITE_INSTANCE_HOME/
 # Copy the build dependencies and startup scripts
 COPY build_deps.txt run_deps.txt docker-initialize.py docker-entrypoint.sh /
 
+# Copy the local translation overrides from the build context
+COPY senaite.impress.po senaite.impress.mo /tmp/install-lc-messages/
+
 RUN set -eux; \
     sed -i 's/\r$//' /docker-entrypoint.sh /docker-initialize.py /build_deps.txt /run_deps.txt; \
     chmod +x /docker-entrypoint.sh
@@ -113,6 +116,12 @@ RUN set -eux; \
     GIT_TRACE=1 GIT_CURL_VERBOSE=1 buildout
 
 RUN set -eux; \
+    locale_dir="$SENAITE_INSTANCE_HOME/src/senaite.impress/src/senaite/impress/locales/zh_CN/LC_MESSAGES"; \
+    mkdir -p "$locale_dir"; \
+    install -m 0644 /tmp/install-lc-messages/senaite.impress.po "$locale_dir/senaite.impress.po"; \
+    install -m 0644 /tmp/install-lc-messages/senaite.impress.mo "$locale_dir/senaite.impress.mo"
+
+RUN set -eux; \
     ln -s $SENAITE_FILESTORAGE/ $SENAITE_INSTANCE_HOME/var/filestorage; \
     ln -s $SENAITE_BLOBSTORAGE/ $SENAITE_INSTANCE_HOME/var/blobstorage; \
     chown -R senaite:senaite $SENAITE_HOME $SENAITE_DATA
@@ -120,6 +129,7 @@ RUN set -eux; \
 RUN set -eux; \
     sed 's/\r$//' /build_deps.txt | grep -vE '^[[:space:]]*($|#)' | xargs -r apt-get purge -y --auto-remove; \
     rm -rf $SENAITE_HOME/buildout-cache; \
+    rm -rf /tmp/install-lc-messages; \
     rm -rf /var/lib/apt/lists/*
 
 # Change working directory
