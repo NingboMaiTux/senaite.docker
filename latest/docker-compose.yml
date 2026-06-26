@@ -4,7 +4,7 @@ services:
     container_name: senaite-source-clean-2x
     restart: unless-stopped
     ports:
-      - 9001:8080
+      - 8083:8080
     deploy:
       resources:
         limits:
