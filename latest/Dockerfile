@@ -22,8 +22,13 @@ ENV PLONE_MAJOR=5.2 \
     SENAITE_DATA=/data \
     SENAITE_FILESTORAGE=/data/filestorage \
     SENAITE_BLOBSTORAGE=/data/blobstorage \
+    WHEELHOUSE=/home/senaite/wheelhouse \
     PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
     PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn \
+    PIP_FIND_LINKS=/home/senaite/wheelhouse \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=5 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     LANG=zh_CN.UTF-8 \
     LC_ALL=zh_CN.UTF-8 \
     PYTHONIOENCODING=utf-8 \
@@ -98,7 +103,11 @@ RUN set -eux; \
     cp -v /tmp/plone-installer/buildout_templates/buildout.cfg $SENAITE_INSTANCE_HOME/buildout-base.cfg; \
     rm -rf /tmp/plone-installer /Plone.tgz
 
-RUN set -eux; \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/cache/buildout-downloads \
+    --mount=type=cache,target=/cache/eggs \
+    --mount=type=cache,target=/cache/wheelhouse \
+    set -eux; \
     cd $SENAITE_INSTANCE_HOME; \
     git --version; \
     git config --global http.version HTTP/1.1; \
@@ -110,13 +119,31 @@ RUN set -eux; \
     env | sort | grep -Ei '^(HTTP|HTTPS|NO)_PROXY=|^(http|https|no)_proxy=' || true; \
     pip --version; \
     python -c "import setuptools; print(setuptools.__version__)"; \
-    mkdir -p /tmp/probe-tuna /tmp/probe-pypi; \
-    wget -S --spider https://pypi.tuna.tsinghua.edu.cn/simple/zope.component/ || true; \
-    wget -S --spider https://pypi.org/simple/zope.component/ || true; \
-    pip download --no-deps --dest /tmp/probe-tuna --index-url "$PIP_INDEX_URL" zope.component==4.6.2 || true; \
-    pip download --no-deps --dest /tmp/probe-pypi --index-url https://pypi.org/simple zope.component==4.6.2 || true; \
-    pip install -r requirements.txt argparse==1.4.0 zope.component==4.6.2 collective.recipe.plonesite; \
-    GIT_TRACE=1 GIT_CURL_VERBOSE=1 buildout
+    mkdir -p /cache/buildout-downloads /cache/eggs /cache/wheelhouse; \
+    mkdir -p $SENAITE_HOME/buildout-cache/downloads; \
+    mkdir -p $SENAITE_INSTANCE_HOME/eggs; \
+    mkdir -p $WHEELHOUSE; \
+    cp -a /cache/buildout-downloads/. $SENAITE_HOME/buildout-cache/downloads/ || true; \
+    cp -a /cache/eggs/. $SENAITE_INSTANCE_HOME/eggs/ || true; \
+    cp -a /cache/wheelhouse/. $WHEELHOUSE/ || true; \
+    retry_cmd() { for attempt in 1 2 3; do "$@" && return 0; sleep 5; done; return 1; }; \
+    fallback_pip_index=https://pypi.org/simple; \
+    pip_download_with_fallback() { \
+      if ! retry_cmd pip download --dest "$WHEELHOUSE" --index-url "$PIP_INDEX_URL" "$@"; then \
+        retry_cmd pip download --dest "$WHEELHOUSE" --index-url "$fallback_pip_index" "$@"; \
+      fi; \
+    }; \
+    pip_install_with_fallback() { \
+      if ! retry_cmd pip install --find-links "$WHEELHOUSE" --index-url "$PIP_INDEX_URL" "$@"; then \
+        retry_cmd pip install --find-links "$WHEELHOUSE" --index-url "$fallback_pip_index" "$@"; \
+      fi; \
+    }; \
+    pip_download_with_fallback -r requirements.txt argparse==1.4.0 zope.component==4.6.2 collective.recipe.plonesite Plone==$PLONE_VERSION; \
+    pip_install_with_fallback -r requirements.txt argparse==1.4.0 zope.component==4.6.2 collective.recipe.plonesite; \
+    GIT_TRACE=1 GIT_CURL_VERBOSE=1 buildout; \
+    cp -a $SENAITE_HOME/buildout-cache/downloads/. /cache/buildout-downloads/ || true; \
+    cp -a $SENAITE_INSTANCE_HOME/eggs/. /cache/eggs/ || true; \
+    cp -a $WHEELHOUSE/. /cache/wheelhouse/ || true
 
 RUN set -eux; \
     locale_dir="$SENAITE_INSTANCE_HOME/src/senaite.impress/src/senaite/impress/locales/zh_CN/LC_MESSAGES"; \
@@ -125,13 +152,14 @@ RUN set -eux; \
     install -m 0644 /tmp/install-lc-messages/senaite.impress.mo "$locale_dir/senaite.impress.mo"
 
 RUN set -eux; \
+    mkdir -p $SENAITE_HOME/buildout-cache/downloads; \
+    mkdir -p $SENAITE_INSTANCE_HOME/eggs; \
+    mkdir -p $WHEELHOUSE; \
     ln -s $SENAITE_FILESTORAGE/ $SENAITE_INSTANCE_HOME/var/filestorage; \
     ln -s $SENAITE_BLOBSTORAGE/ $SENAITE_INSTANCE_HOME/var/blobstorage; \
     chown -R senaite:senaite $SENAITE_HOME $SENAITE_DATA
 
 RUN set -eux; \
-    sed 's/\r$//' /build_deps.txt | grep -vE '^[[:space:]]*($|#)' | xargs -r apt-get purge -y --auto-remove; \
-    rm -rf $SENAITE_HOME/buildout-cache; \
     rm -rf /tmp/install-lc-messages; \
     rm -rf /var/lib/apt/lists/*
 
