@@ -1,4 +1,4 @@
-medai.footercleanup
+﻿maitux.footercleanup
 ===================
 
 Minimal SENAITE add-on that:
@@ -7,3 +7,4 @@ Minimal SENAITE add-on that:
   by overriding the related footer viewlets
 - Sets the browser tab title to **MaiTux LIMS** on every page
   by overriding the ``plone.htmlhead.title`` viewlet
+

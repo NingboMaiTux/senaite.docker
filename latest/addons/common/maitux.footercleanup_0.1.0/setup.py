@@ -1,21 +1,21 @@
-import os
+﻿import os
 from setuptools import find_packages, setup
 
 
 setup(
-    name="medai.footercleanup",
+    name="maitux.footercleanup",
     version="0.1.0",
-    description="MedAI footer cleanup add-on for SENAITE",
+    description="Maitux footer cleanup add-on for SENAITE",
     long_description=open("README.rst").read() if os.path.exists("README.rst") else "",
-    author="MedAI Team",
-    author_email="dev@medai.com",
-    url="https://github.com/medai/medai.footercleanup",
+    author="Maitux Team",
+    author_email="dev@maitux.com",
+    url="https://github.com/maitux/maitux.footercleanup",
     packages=find_packages("src"),
     package_dir={"": "src"},
-    namespace_packages=["medai"],
+    namespace_packages=["maitux"],
     include_package_data=True,
     package_data={
-        "medai.footercleanup": [
+        "maitux.footercleanup": [
             "*.zcml",
             "browser/*.zcml",
             "browser/templates/*.pt",
@@ -50,3 +50,4 @@ setup(
         "Topic :: Software Development :: Libraries :: Python Modules",
     ],
 )
+

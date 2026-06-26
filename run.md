@@ -25,19 +25,20 @@ Current common addon config example:
 ```ini
 [buildout]
 develop +=
-    /opt/addons/common/medai.footercleanup_0.1.0
+    /opt/addons/common/maitux.footercleanup_0.1.0
 eggs +=
-    medai.footercleanup
+    maitux.footercleanup
 
 [plonesite]
 profiles =
     senaite.lims:default
-    medai.footercleanup:default
+    maitux.footercleanup:default
 ```
 
 If you want detailed build logs:
 
 ```powershell
+$env:DOCKER_BUILDKIT="1"
 docker build --progress=plain -t maitux/senaite:latest .
 ```
 

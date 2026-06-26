@@ -1,8 +1,8 @@
-# medai.footercleanup 安装说明
+﻿# maitux.footercleanup 安装说明
 
 ## 包简介
 
-**MEDAI FOOTER CLEANUP** (`medai.footercleanup 0.1.0`)
+**MAITUX FOOTER CLEANUP** (`maitux.footercleanup 0.1.0`)
 
 - 移除 SENAITE 底部栏的版权文字、外部链接和图标组
 - 浏览器标签标题自动显示为 **MaiTux LIMS**（覆盖 `plone.htmlhead.title` viewlet，每次请求生效）
@@ -26,7 +26,7 @@
 latest/
   addons/
     common/
-      medai.footercleanup_0.1.0/
+      maitux.footercleanup_0.1.0/
 ```
 
 ### 1. 将 addon 放到 `addons/common/`
@@ -34,7 +34,7 @@ latest/
 本包当前路径如下：
 
 ```text
-d:\AWork\senaite.docker\latest\addons\common\medai.footercleanup_0.1.0
+d:\AWork\senaite.docker\latest\addons\common\maitux.footercleanup_0.1.0
 ```
 
 镜像构建时会复制 `addons/common/` 到容器内 `/opt/addons/common`。
@@ -44,14 +44,14 @@ d:\AWork\senaite.docker\latest\addons\common\medai.footercleanup_0.1.0
 ```ini
 [buildout]
 develop +=
-    /opt/addons/common/medai.footercleanup_0.1.0
+    /opt/addons/common/maitux.footercleanup_0.1.0
 eggs +=
-    medai.footercleanup
+    maitux.footercleanup
 
 [plonesite]
 profiles =
     senaite.lims:default
-    medai.footercleanup:default
+    maitux.footercleanup:default
 ```
 
 ### 2. 重新构建镜像
@@ -85,7 +85,7 @@ docker compose up -d
 
 ## 卸载
 
-1. `Site Setup` -> `Add-ons` -> 取消勾选 **MEDAI FOOTER CLEANUP** -> `Deactivate`
+1. `Site Setup` -> `Add-ons` -> 取消勾选 **MAITUX FOOTER CLEANUP** -> `Deactivate`
 2. 如需完全移除，从 `buildout.cfg` 中移除对应 egg 和 develop 配置后重新运行 `bin/buildout`
 
 ---
@@ -93,12 +93,12 @@ docker compose up -d
 ## 文件清单
 
 ```
-medai.footercleanup_0.1.0/
+maitux.footercleanup_0.1.0/
 ├── setup.py
 ├── README.rst
 ├── INSTALL.md              ← 本文件
 └── src/
-    └── medai/
+    └── maitux/
         ├── __init__.py
         └── footercleanup/
             ├── __init__.py
@@ -116,10 +116,11 @@ medai.footercleanup_0.1.0/
                 ├── default/
                 │   ├── browserlayer.xml
                 │   ├── metadata.xml
-                │   ├── medai.footercleanup.txt
+                │   ├── maitux.footercleanup.txt
                 │   └── setuphandlers.py
                 └── uninstall/
                     ├── browserlayer.xml
                     ├── metadata.xml
-                    └── medai.footercleanup_uninstall.txt
+                    └── maitux.footercleanup_uninstall.txt
 ```
+
