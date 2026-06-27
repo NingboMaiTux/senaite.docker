@@ -7,16 +7,40 @@ from datetime import datetime
 
 from Products.CMFCore.utils import getToolByName
 
+try:
+    text_type = unicode
+    binary_type = str
+except NameError:
+    text_type = str
+    binary_type = bytes
+
+
+def _decode_binary(value):
+    try:
+        return value.decode("utf-8")
+    except Exception:
+        return value.decode("latin-1", errors="replace")
+
 
 def to_unicode(value):
     if value is None:
         return None
-    if isinstance(value, bytes):
+    if isinstance(value, text_type):
+        return value
+    if isinstance(value, binary_type):
+        return _decode_binary(value)
+    try:
+        return text_type(value)
+    except Exception:
         try:
-            return value.decode("utf-8")
+            rendered = repr(value)
         except Exception:
-            return value.decode("latin-1", errors="replace")
-    return str(value)
+            rendered = "<unprintable %s>" % getattr(getattr(value, "__class__", None), "__name__", "object")
+        if isinstance(rendered, text_type):
+            return rendered
+        if isinstance(rendered, binary_type):
+            return _decode_binary(rendered)
+        return text_type(rendered)
 
 
 def normalize_for_json(value):
