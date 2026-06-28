@@ -12,6 +12,8 @@ services:
           memory: 1024MB
     volumes:
       - ./data:/data
+      - ./addons/customers:/opt/addons/customers
+      - ./addons/customers/custom-addon.cfg:/home/senaite/senaitelims/custom-addon.cfg
     environment:
       SITE: senaite
       PASSWORD: changeme

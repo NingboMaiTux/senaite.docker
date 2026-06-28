@@ -48,6 +48,7 @@ RUN mkdir -p $SENAITE_INSTANCE_HOME $SENAITE_FILESTORAGE $SENAITE_BLOBSTORAGE
 
 # Copy Buildout
 COPY requirements.txt buildout.cfg common-addons.cfg $SENAITE_INSTANCE_HOME/
+COPY addons/customers/custom-addon.cfg $SENAITE_INSTANCE_HOME/custom-addon.cfg
 
 # Copy the build dependencies and startup scripts
 COPY build_deps.txt run_deps.txt docker-initialize.py docker-entrypoint.sh /
@@ -57,6 +58,7 @@ COPY senaite.impress.po senaite.impress.mo /tmp/install-lc-messages/
 
 # Copy local common addons from the build context
 COPY addons/common /opt/addons/common
+RUN mkdir -p /opt/addons/customers
 
 RUN set -eux; \
     sed -i 's/\r$//' /docker-entrypoint.sh /docker-initialize.py /build_deps.txt /run_deps.txt; \
