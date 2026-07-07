@@ -1,2 +1,0 @@
-﻿maitux.footercleanup default profile marker
-

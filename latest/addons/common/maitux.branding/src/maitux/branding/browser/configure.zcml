@@ -1,4 +1,4 @@
-﻿<configure
+<configure
     xmlns="http://namespaces.zope.org/zope"
     xmlns:browser="http://namespaces.zope.org/browser">
 
@@ -8,7 +8,7 @@
       manager="plone.app.layout.viewlets.interfaces.IPortalFooter"
       class=".viewlets.FooterViewlet"
       permission="zope2.View"
-      layer="maitux.footercleanup.interfaces.IMaituxFooterCleanupLayer"
+      layer="maitux.branding.interfaces.IMaituxBrandingLayer"
       />
 
   <browser:viewlet
@@ -17,7 +17,7 @@
       manager="plone.app.layout.viewlets.interfaces.IPortalFooter"
       class=".viewlets.ColophonViewlet"
       permission="zope2.View"
-      layer="maitux.footercleanup.interfaces.IMaituxFooterCleanupLayer"
+      layer="maitux.branding.interfaces.IMaituxBrandingLayer"
       />
 
   <browser:viewlet
@@ -26,7 +26,7 @@
       manager="plone.app.layout.viewlets.interfaces.IHtmlHead"
       class=".viewlets.TitleViewlet"
       permission="zope2.View"
-      layer="maitux.footercleanup.interfaces.IMaituxFooterCleanupLayer"
+      layer="maitux.branding.interfaces.IMaituxBrandingLayer"
       />
 
 </configure>

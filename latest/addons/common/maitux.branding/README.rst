@@ -1,4 +1,4 @@
-﻿maitux.footercleanup
+maitux.branding
 ===================
 
 Minimal SENAITE add-on that:

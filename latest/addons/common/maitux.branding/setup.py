@@ -1,27 +1,28 @@
-﻿import os
+import os
 from setuptools import find_packages, setup
 
 
 setup(
-    name="maitux.footercleanup",
+    name="maitux.branding",
     version="0.1.0",
-    description="Maitux footer cleanup add-on for SENAITE",
+    description="Maitux branding add-on for SENAITE",
     long_description=open("README.rst").read() if os.path.exists("README.rst") else "",
     author="Maitux Team",
     author_email="dev@maitux.com",
-    url="https://github.com/maitux/maitux.footercleanup",
+    url="https://github.com/maitux/maitux.branding",
     packages=find_packages("src"),
     package_dir={"": "src"},
     namespace_packages=["maitux"],
     include_package_data=True,
     package_data={
-        "maitux.footercleanup": [
+        "maitux.branding": [
             "*.zcml",
             "browser/*.zcml",
             "browser/templates/*.pt",
             "profiles/default/*.xml",
             "profiles/default/*.txt",
             "profiles/default/*.py",
+            "profiles/default/resources/*.png",
             "profiles/uninstall/*.xml",
             "profiles/uninstall/*.txt",
         ]

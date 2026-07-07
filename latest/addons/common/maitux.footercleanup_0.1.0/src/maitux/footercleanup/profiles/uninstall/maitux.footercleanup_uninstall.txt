@@ -1,2 +1,0 @@
-﻿maitux.footercleanup uninstall profile marker
-

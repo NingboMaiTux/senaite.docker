@@ -1,8 +1,8 @@
-﻿# maitux.footercleanup 安装说明
+# maitux.branding 安装说明
 
 ## 包简介
 
-**MAITUX FOOTER CLEANUP** (`maitux.footercleanup 0.1.0`)
+**MAITUX BRANDING** (`maitux.branding 0.1.0`)
 
 - 移除 SENAITE 底部栏的版权文字、外部链接和图标组
 - 浏览器标签标题自动显示为 **MaiTux LIMS**（覆盖 `plone.htmlhead.title` viewlet，每次请求生效）
@@ -26,7 +26,7 @@
 latest/
   addons/
     common/
-      maitux.footercleanup_0.1.0/
+      maitux.branding/
 ```
 
 ### 1. 将 addon 放到 `addons/common/`
@@ -34,7 +34,7 @@ latest/
 本包当前路径如下：
 
 ```text
-d:\AWork\senaite.docker\latest\addons\common\maitux.footercleanup_0.1.0
+d:\AWork\senaite.docker\latest\addons\common\maitux.branding
 ```
 
 镜像构建时会复制 `addons/common/` 到容器内 `/opt/addons/common`。
@@ -44,14 +44,14 @@ d:\AWork\senaite.docker\latest\addons\common\maitux.footercleanup_0.1.0
 ```ini
 [buildout]
 develop +=
-    /opt/addons/common/maitux.footercleanup_0.1.0
+    /opt/addons/common/maitux.branding
 eggs +=
-    maitux.footercleanup
+    maitux.branding
 
 [plonesite]
 profiles =
     senaite.lims:default
-    maitux.footercleanup:default
+    maitux.branding:default
 ```
 
 ### 2. 重新构建镜像
@@ -85,7 +85,7 @@ docker compose up -d
 
 ## 卸载
 
-1. `Site Setup` -> `Add-ons` -> 取消勾选 **MAITUX FOOTER CLEANUP** -> `Deactivate`
+1. `Site Setup` -> `Add-ons` -> 取消勾选 **MAITUX BRANDING** -> `Deactivate`
 2. 如需完全移除，从 `buildout.cfg` 中移除对应 egg 和 develop 配置后重新运行 `bin/buildout`
 
 ---
@@ -93,14 +93,14 @@ docker compose up -d
 ## 文件清单
 
 ```
-maitux.footercleanup_0.1.0/
+maitux.branding/
 ├── setup.py
 ├── README.rst
 ├── INSTALL.md              ← 本文件
 └── src/
     └── maitux/
         ├── __init__.py
-        └── footercleanup/
+        └── branding/
             ├── __init__.py
             ├── configure.zcml
             ├── interfaces.py
@@ -116,11 +116,11 @@ maitux.footercleanup_0.1.0/
                 ├── default/
                 │   ├── browserlayer.xml
                 │   ├── metadata.xml
-                │   ├── maitux.footercleanup.txt
+                │   ├── maitux.branding.txt
                 │   └── setuphandlers.py
                 └── uninstall/
                     ├── browserlayer.xml
                     ├── metadata.xml
-                    └── maitux.footercleanup_uninstall.txt
+                    └── maitux.branding_uninstall.txt
 ```
 

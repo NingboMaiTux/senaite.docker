@@ -1,7 +1,0 @@
-﻿<?xml version="1.0"?>
-<layers>
-  <layer name="maitux.footercleanup.interfaces.IMaituxFooterCleanupLayer"
-         interface="maitux.footercleanup.interfaces.IMaituxFooterCleanupLayer"
-         remove="True" />
-</layers>
-
