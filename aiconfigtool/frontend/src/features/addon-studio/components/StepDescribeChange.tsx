@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
-import { Alert, Button, Card, Input, Segmented, Space, Typography } from 'antd';
+import { useEffect, useState } from 'react';
+import { Alert, App, Button, Card, Input, Segmented, Space, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import { mockChangeSpec } from '@/mocks/data';
+import { apiClient } from '@/core/services/apiClient';
+import { addonStudioApi } from '../services/addonStudioApi';
 import ChangeItemCard from './ChangeItemCard';
 import type { AIProvider } from '@/core/types/domain';
 import type { WorkflowAction, WorkflowState } from '../hooks/useAddonWorkflow';
@@ -9,9 +10,9 @@ import type { WorkflowAction, WorkflowState } from '../hooks/useAddonWorkflow';
 const { Text } = Typography;
 
 const examples = [
-  '为 AnalysisRequest 添加一个名为 maitux_sample_code 的字符串字段，并在 Sample 列表视图中显示该字段',
-  '让 Analyst 角色可以在 Client 下添加 Department',
-  '为 Supplier 添加一个必填的联系电话字段',
+  '为 AnalysisProfile 添加一个名为 maitux_sample_code 的字符串字段',
+  '给 AnalysisProfile 添加一个必填的文本字段 remark',
+  '为 Client 添加一个名为 maitux_note 的多行文本字段',
 ];
 
 interface Props {
@@ -20,7 +21,16 @@ interface Props {
 }
 
 export default function StepDescribeChange({ state, dispatch }: Props) {
+  const { message } = App.useApp();
   const spec = state.changeSpec;
+  const [parsing, setParsing] = useState(false);
+
+  // 从设置页配置加载默认 AI 引擎
+  useEffect(() => {
+    apiClient.get<{ ai: { provider: string } }>('/config/workspace')
+      .then(c => { if (c.ai?.provider) dispatch({ type: 'SET_PROVIDER', provider: c.ai.provider as AIProvider }); })
+      .catch(() => {});
+  }, []);
 
   // 接住「权限工具 → 带到工坊」预填的需求
   useEffect(() => {
@@ -29,12 +39,35 @@ export default function StepDescribeChange({ state, dispatch }: Props) {
       dispatch({ type: 'SET_NL', text: prefill });
       localStorage.removeItem('aiconfigtool.studioPrefill');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleParse = () => {
-    // mock：产出预置 change_spec（真实为调用 AI 引擎解析）
-    dispatch({ type: 'SET_CHANGE_SPEC', spec: mockChangeSpec });
+  const handleParse = async () => {
+    if (!state.naturalLanguageInput.trim()) {
+      message.warning('请输入需求描述');
+      return;
+    }
+    if (!state.siteCode) {
+      message.warning('请先在步骤1选择摸底站点');
+      return;
+    }
+    setParsing(true);
+    try {
+      const result = await addonStudioApi.parseRequirement({
+        siteCode: state.siteCode,
+        inventoryRef: state.inventoryRef || `inv_${state.siteCode}`,
+        text: state.naturalLanguageInput,
+      });
+      dispatch({ type: 'SET_CHANGE_SPEC', spec: result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('CHANGE_SPEC_INVALID')) {
+        message.warning('AI 无法解析，请调整描述。示例：为 X 添加一个名为 Y 的 Z 字段');
+      } else {
+        message.error('需求解析失败：' + (msg || '请确认后端已启动'));
+      }
+    } finally {
+      setParsing(false);
+    }
   };
 
   return (
@@ -71,12 +104,14 @@ export default function StepDescribeChange({ state, dispatch }: Props) {
               { label: 'Cloud API', value: 'cloud' },
             ]}
           />
+          <Text type="secondary" style={{ fontSize: 11 }}>（默认来自设置页，可临时切换）</Text>
           <Button
             type="primary"
             icon={<SearchOutlined />}
             onClick={handleParse}
+            loading={parsing}
           >
-            解析需求
+            {parsing ? '解析中…' : '解析需求'}
           </Button>
         </Space>
 
@@ -89,7 +124,16 @@ export default function StepDescribeChange({ state, dispatch }: Props) {
             />
             <div>
               {spec.changes.map((item, i) => (
-                <ChangeItemCard key={i} item={item} />
+                <ChangeItemCard key={i} item={item}
+                  onEdit={(updated) => {
+                    const changes = spec.changes.map((c, j) => j === i ? updated : c);
+                    dispatch({ type: 'SET_CHANGE_SPEC', spec: { ...spec, changes } });
+                  }}
+                  onDelete={() => {
+                    const changes = spec.changes.filter((_, j) => j !== i);
+                    dispatch({ type: 'SET_CHANGE_SPEC', spec: { ...spec, changes } });
+                  }}
+                />
               ))}
             </div>
           </>

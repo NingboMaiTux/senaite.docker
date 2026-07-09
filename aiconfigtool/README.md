@@ -24,17 +24,18 @@ aiconfigtool/
 │       └── mocks/                # 开发用 Mock 数据
 │
 ├── backend/                      # Python 后端（零第三方运行时依赖）
-│   └── maitux/aiconfigtool/
-│       ├── domain/               # 领域模型层（纯数据 + 基本验证）
-│       ├── services/             # 服务层（业务逻辑编排）
-│       ├── engines/              # 引擎层（核心算法，可替换）
-│       │   ├── ai/               #   AI 引擎（deterministic/ollama/cloud）
-│       │   ├── generator/        #   代码生成引擎（field/listing/permission...）
-│       │   ├── delivery/         #   交付引擎（package_export/direct_install）
-│       │   └── document/         #   文档生成引擎（deploy/readme/checklist）
-│       ├── infrastructure/       # 基础设施层（config/audit/log/runner）
-│       ├── schemas/              # JSON Schema 验证
-│       └── shared/               # 共享工具（errors/result/logger）
+│   ├── web/                      # HTTP 层（server/router/response）
+│   ├── api/                      # 各资源 handler
+│   ├── domain/                   # 领域模型层（纯数据 + 基本验证）
+│   ├── services/                 # 服务层（业务逻辑编排）
+│   ├── engines/                  # 引擎层（核心算法，可替换）
+│   │   ├── ai/                   #   AI 引擎（deterministic/ollama/cloud）
+│   │   ├── generator/            #   代码生成引擎（field/listing/permission...）
+│   │   ├── delivery/             #   交付引擎（package_export/direct_install）
+│   │   └── document/             #   文档生成引擎（deploy/readme/checklist）
+│   ├── infrastructure/           # 基础设施层（config/audit/log/runner）
+│   ├── schemas/                  # JSON Schema 验证
+│   └── shared/                   # 共享工具（errors/result/logger）
 │
 ├── templates/                    # 代码生成与文档模板（非开发人员可改）
 │   ├── addon/                    #   Addon 固定骨架模板（.tmpl）

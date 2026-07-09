@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<import-steps>
+  <import-step
+      id='localtest.samplefield.uninstall'
+      version="1000"
+      title='localtest.samplefield uninstall'
+      handler='localtest.samplefield.setuphandlers.post_uninstall'>
+    <dependency name="plone.app.registry" />
+  </import-step>
+</import-steps>

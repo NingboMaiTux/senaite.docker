@@ -1,94 +1,66 @@
-import { Button, Card, Space, Table, Tag, Typography } from 'antd';
-import { DownloadOutlined, FileTextOutlined } from '@ant-design/icons';
+import { useEffect, useState } from 'react';
+import { App, Button, Card, Popconfirm, Space, Table, Tag, Typography, Empty } from 'antd';
+import { DownloadOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { mockDeliveries } from '@/mocks/data';
-import type { DeliveryRecord } from '@/core/types/domain';
+import { apiClient } from '@/core/services/apiClient';
 
-const { Title, Paragraph } = Typography;
+const { Title, Paragraph, Text } = Typography;
 
-const statusTag: Record<DeliveryRecord['status'], { color: string; text: string }> = {
-  validated: { color: 'blue', text: '已验证' },
-  packaged: { color: 'green', text: '已打包' },
-  failed: { color: 'red', text: '失败' },
-};
+interface DeliveryRecord {
+  id: string;
+  addonName: string;
+  version: string;
+  generatedAt: string;
+  fileCount: number;
+  packageSizeKb: number;
+  companyCode: string;
+  companyName: string;
+  status: string;
+}
 
 export default function DeliveryPage() {
+  const { message } = App.useApp();
+  const [data, setData] = useState<DeliveryRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => {
+    setLoading(true);
+    apiClient.get<DeliveryRecord[]>('/deliveries')
+      .then(setData).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const del = async (id: string) => {
+    try { await apiClient.del('/deliveries/' + id); message.success('已删除'); load(); }
+    catch { message.error('删除失败'); }
+  };
+
   const columns: ColumnsType<DeliveryRecord> = [
+    { title: 'Addon', dataIndex: 'addonName', render: (n, r) => <Space><Text strong>{n}</Text><Tag>v{r.version}</Tag></Space> },
+    { title: '公司', dataIndex: 'companyName', width: 140, render: (n, r) => n || <Tag>{r.companyCode}</Tag> },
+    { title: '生成时间', dataIndex: 'generatedAt', width: 160 },
+    { title: '大小', dataIndex: 'packageSizeKb', width: 80, render: (kb: number) => `${kb} KB` },
+    { title: '状态', dataIndex: 'status', width: 70, render: (s: string) => <Tag color={s === 'packaged' ? 'green' : 'blue'}>{s}</Tag> },
     {
-      title: 'Addon 包',
-      dataIndex: 'addonName',
-      render: (name, r) => (
-        <Space>
-          <Typography.Text strong>{name}</Typography.Text>
-          <Tag>v{r.version}</Tag>
+      title: '操作', key: 'a', width: 150,
+      render: (_, r) => (
+        <Space size={0}>
+          <Button size="small" icon={<DownloadOutlined />} href={`/api/addon-studio/download/${r.id}`}>下载</Button>
+          <Popconfirm title="删除？" onConfirm={() => del(r.id)}>
+            <Button size="small" type="link" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
         </Space>
       ),
-    },
-    { title: '公司', dataIndex: 'companyCode' },
-    { title: '站点', dataIndex: 'siteCode' },
-    {
-      title: '变更类型',
-      dataIndex: 'changeTypes',
-      render: (types: DeliveryRecord['changeTypes']) => (
-        <Space size={4} wrap>
-          {types.map((t) => (
-            <Tag key={t} color="cyan">
-              {t}
-            </Tag>
-          ))}
-        </Space>
-      ),
-    },
-    {
-      title: '大小',
-      dataIndex: 'packageSizeKb',
-      render: (kb: number) => (kb > 0 ? `${kb} KB` : '—'),
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      render: (s: DeliveryRecord['status']) => (
-        <Tag color={statusTag[s].color}>{statusTag[s].text}</Tag>
-      ),
-    },
-    { title: '生成时间', dataIndex: 'createdAt' },
-    {
-      title: '操作',
-      key: 'action',
-      render: (_, r) =>
-        r.status === 'failed' ? (
-          <Button size="small" type="link">
-            查看错误
-          </Button>
-        ) : (
-          <Space>
-            <Button size="small" icon={<DownloadOutlined />}>
-              包
-            </Button>
-            <Button size="small" icon={<FileTextOutlined />}>
-              部署指南
-            </Button>
-          </Space>
-        ),
     },
   ];
 
   return (
     <div>
-      <Title level={4} style={{ marginTop: 0 }}>
-        📦 交付管理
-      </Title>
-      <Paragraph type="secondary">
-        查看历次生成的 Addon 交付包、部署文档和证据包。
-      </Paragraph>
-
+      <Title level={4} style={{ marginTop: 0 }}>📦 交付管理</Title>
+      <Paragraph type="secondary">历次生成的 Addon 交付包。</Paragraph>
       <Card title="交付历史">
-        <Table
-          rowKey="id"
-          columns={columns}
-          dataSource={mockDeliveries}
-          pagination={false}
-        />
+        <Table rowKey="id" columns={columns} dataSource={data} loading={loading} pagination={false}
+          locale={{ emptyText: <Empty description="暂无交付记录" /> }} />
       </Card>
     </div>
   );

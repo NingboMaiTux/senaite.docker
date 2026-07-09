@@ -81,7 +81,7 @@ export default function AppLayout() {
             Senaite Addon AI 配置工具 · v2.0
           </Typography.Text>
           <Space>
-            <Typography.Text type="secondary">当前公司</Typography.Text>
+            <Typography.Text type="secondary">公司/客户</Typography.Text>
             <Select
               value={currentCompanyCode ?? undefined}
               style={{ width: 180 }}

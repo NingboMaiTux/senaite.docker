@@ -27,6 +27,8 @@ export interface WorkflowState {
   // 步骤5：生成
   generationStatus: 'idle' | 'running' | 'success' | 'failed';
   gateResults: GateResult[];
+  packageId: string | null;
+  packageSizeKb: number;
   // 步骤6：测试验证
   testSiteCode: string | null;
   verifyStatus: 'idle' | 'running' | 'passed' | 'failed';
@@ -45,6 +47,8 @@ export const initialWorkflowState: WorkflowState = {
   addonMeta: null,
   generationStatus: 'idle',
   gateResults: [],
+  packageId: null,
+  packageSizeKb: 0,
   testSiteCode: null,
   verifyStatus: 'idle',
 };
@@ -63,6 +67,7 @@ export type WorkflowAction =
   | { type: 'SET_ADDON_META'; meta: AddonMeta }
   | { type: 'SET_GENERATION_STATUS'; status: WorkflowState['generationStatus'] }
   | { type: 'SET_GATE_RESULTS'; results: GateResult[] }
+  | { type: 'SET_GENERATE_RESULT'; packageId: string; sizeKb: number }
   | { type: 'SET_TEST_SITE'; siteCode: string }
   | { type: 'SET_VERIFY_STATUS'; status: WorkflowState['verifyStatus'] }
   | { type: 'RESET' };
@@ -99,6 +104,8 @@ function reducer(state: WorkflowState, action: WorkflowAction): WorkflowState {
       return { ...state, generationStatus: action.status };
     case 'SET_GATE_RESULTS':
       return { ...state, gateResults: action.results };
+    case 'SET_GENERATE_RESULT':
+      return { ...state, packageId: action.packageId, packageSizeKb: action.sizeKb };
     case 'SET_TEST_SITE':
       return { ...state, testSiteCode: action.siteCode };
     case 'SET_VERIFY_STATUS':

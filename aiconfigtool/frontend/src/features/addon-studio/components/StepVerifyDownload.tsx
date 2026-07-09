@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   App,
@@ -13,14 +13,16 @@ import {
   Typography,
 } from 'antd';
 import {
-  CopyOutlined,
   DownloadOutlined,
   ExperimentOutlined,
   FileTextOutlined,
   LinkOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
-import { mockSites } from '@/mocks/data';
+import { apiClient } from '@/core/services/apiClient';
 import { useWorkspace } from '@/core/context/WorkspaceContext';
+import { workspaceApi } from '@/features/workspace/services/workspaceApi';
+import type { Site } from '@/core/types/domain';
 import type { WorkflowAction, WorkflowState } from '../hooks/useAddonWorkflow';
 
 const { Text } = Typography;
@@ -34,30 +36,44 @@ export default function StepVerifyDownload({ state, dispatch }: Props) {
   const { message } = App.useApp();
   const { currentCompanyCode } = useWorkspace();
   const [verifying, setVerifying] = useState(false);
+  const [cleaningUp, setCleaningUp] = useState(false);
+  const [testSites, setTestSites] = useState<Site[]>([]);
+
+  useEffect(() => {
+    if (!currentCompanyCode) return;
+    workspaceApi.getSites(currentCompanyCode).then((list) => {
+      setTestSites(list.filter((s) => s.usage === 'test' || s.usage === 'both'));
+    });
+  }, [currentCompanyCode]);
 
   const meta = state.addonMeta;
   const fullName = meta ? `${meta.namespace}.${meta.functionName}` : 'addon';
   const pkgName = `${fullName}-${meta?.version ?? '1.0.0'}.zip`;
 
-  // 测试站点 = 与摸底站点分开选（只列 test / both）
-  const testSites = mockSites.filter(
-    (s) =>
-      s.companyCode === currentCompanyCode &&
-      (s.usage === 'test' || s.usage === 'both'),
-  );
-
-  const runVerify = () => {
-    if (!state.testSiteCode) {
-      message.warning('请选择测试站点');
-      return;
-    }
+  const runVerify = async () => {
+    if (!state.testSiteCode) { message.warning('请选择测试站点'); return; }
+    if (!state.siteCode || !meta) { message.warning('前置信息不完整'); return; }
     setVerifying(true);
     dispatch({ type: 'SET_VERIFY_STATUS', status: 'running' });
-    setTimeout(() => {
-      setVerifying(false);
-      dispatch({ type: 'SET_VERIFY_STATUS', status: 'passed' });
-      message.success('测试验证通过');
-    }, 1600);
+    try {
+      const r = await apiClient.post<{ verified: boolean; steps: { step: string; ok: boolean; message?: string }[] }>(
+        '/addon-studio/install-verify', {
+          fullName: `${meta.namespace}.${meta.functionName}`,
+          version: meta.version,
+          siteCode: state.siteCode,
+          testSiteCode: state.testSiteCode,
+        });
+      if (r.verified) {
+        dispatch({ type: 'SET_VERIFY_STATUS', status: 'passed' });
+        message.success('安装验证通过！字段已在测试站点生效');
+      } else {
+        dispatch({ type: 'SET_VERIFY_STATUS', status: 'failed' });
+        message.error('验证未通过，请查看详情');
+      }
+    } catch (err) {
+      dispatch({ type: 'SET_VERIFY_STATUS', status: 'failed' });
+      message.error('安装验证失败：' + ((err as Error).message || ''));
+    } finally { setVerifying(false); }
   };
 
   return (
@@ -129,12 +145,13 @@ export default function StepVerifyDownload({ state, dispatch }: Props) {
               <Space size={4}>
                 <LinkOutlined />
                 <Text code>{pkgName}</Text>
-                <Text type="secondary">· 34 KB · 含实施部署指南</Text>
+                {state.packageSizeKb > 0 && <Text type="secondary">· {state.packageSizeKb} KB</Text>}
+                <Text type="secondary">· 含实施部署指南</Text>
               </Space>
               {state.verifyStatus === 'passed' ? (
                 <Tag color="success">已通过测试站点验证</Tag>
               ) : (
-                <Tag color="default">未验证（可选步骤，不影响下载）</Tag>
+                <Tag color="error">未验证——建议先安装验证再交付</Tag>
               )}
             </Space>
           }
@@ -143,24 +160,44 @@ export default function StepVerifyDownload({ state, dispatch }: Props) {
               type="primary"
               key="pkg"
               icon={<DownloadOutlined />}
-              onClick={() => message.success('（演示）下载 Addon 包')}
+              href={state.packageId ? `/api/addon-studio/download/${state.packageId}` : '#'}
+              target="_blank"
+              disabled={!state.packageId}
+              title={state.packageId ? `下载 ${state.packageId}.zip (${state.packageSizeKb}KB)` : ''}
             >
-              下载 Addon 包
+              {state.packageId ? `下载 Addon 包 · ${state.packageSizeKb}KB` : '下载 Addon 包'}
             </Button>,
             <Button
               key="doc"
               icon={<FileTextOutlined />}
-              onClick={() => message.success('（演示）下载部署指南')}
+              href={state.packageId ? `/api/addon-studio/deploy-doc/${state.packageId}` : '#'}
+              target="_blank"
+              disabled={!state.packageId}
             >
-              下载部署指南
+              部署指南
             </Button>,
-            <Button
-              key="cmd"
-              icon={<CopyOutlined />}
-              onClick={() => message.success('（演示）已复制安装命令')}
-            >
-              复制安装命令
-            </Button>,
+            state.verifyStatus === 'passed' && state.testSiteCode && meta && (
+              <Button
+                key="cleanup"
+                danger
+                icon={<DeleteOutlined />}
+                loading={cleaningUp}
+                onClick={async () => {
+                  setCleaningUp(true);
+                  try {
+                    await apiClient.post('/addon-studio/cleanup', {
+                      addonName: `${meta.namespace}.${meta.functionName}`,
+                      siteCode: state.testSiteCode,
+                    });
+                    message.success('Addon 已从测试站点彻底移除');
+                    dispatch({ type: 'SET_VERIFY_STATUS', status: 'idle' });
+                  } catch { message.error('清理失败'); }
+                  finally { setCleaningUp(false); }
+                }}
+              >
+                清理 Addon
+              </Button>
+            ),
           ]}
         />
       </Space>
