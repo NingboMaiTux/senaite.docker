@@ -3,6 +3,7 @@ import {
   App,
   Button,
   Card,
+  Modal,
   Popconfirm,
   Select,
   Space,
@@ -22,7 +23,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { useWorkspace } from '@/core/context/WorkspaceContext';
 import { workspaceApi } from '@/features/workspace/services/workspaceApi';
-import type { InventorySnapshot, Site } from '@/core/types/domain';
+import type { InventoryDetail, InventorySnapshot, Site } from '@/core/types/domain';
 import { type DiffResult } from '@/features/workspace/services/workspaceApi';
 
 const { Title, Paragraph, Text } = Typography;
@@ -70,6 +71,9 @@ export default function InventoryPage() {
   const [diffRunning, setDiffRunning] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [viewDetail, setViewDetail] = useState<InventoryDetail | null>(null);
 
   const runScan = async () => {
     if (!scanSite) { message.warning('请先选择要摸底的站点'); return; }
@@ -109,8 +113,34 @@ export default function InventoryPage() {
     } finally { setDiffRunning(false); }
   };
 
+  const openSnapshotDetail = async (snapshot: InventorySnapshot) => {
+    setViewOpen(true);
+    setViewLoading(true);
+    try {
+      const detail = await workspaceApi.getInventory(snapshot.siteCode, snapshot.id);
+      setViewDetail(detail);
+    } catch (err) {
+      setViewOpen(false);
+      message.error('加载摸底详情失败：' + ((err as Error).message || ''));
+    } finally {
+      setViewLoading(false);
+    }
+  };
+
   const snapshotLabel = (s: InventorySnapshot) =>
     `${s.companyName} · ${s.siteName} · ${s.createdAt}`;
+
+  const typeRows = Object.entries(viewDetail?.summary?.types || {})
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([typeId, meta]) => ({
+      key: typeId,
+      typeId,
+      title: meta.title || '-',
+      framework: meta.framework || 'unknown',
+      addPermission: meta.addPermission || '-',
+      fieldCount: meta.fields?.length || 0,
+      fields: meta.fields || [],
+    }));
 
   const columns: ColumnsType<InventorySnapshot> = [
     {
@@ -152,7 +182,9 @@ export default function InventoryPage() {
       width: 120,
       render: (_, r) => (
         <Space size={0}>
-          <Button size="small" type="link">查看</Button>
+          <Button size="small" type="link" onClick={() => { void openSnapshotDetail(r); }}>
+            查看
+          </Button>
           <Popconfirm title="删除该摸底文件？" onConfirm={async () => {
             try { await workspaceApi.deleteInventory(r.siteCode, r.id); message.success('已删除'); loadSnapshots(); }
             catch { message.error('删除失败'); }
@@ -234,6 +266,63 @@ export default function InventoryPage() {
           locale={{ emptyText: <Empty description="暂无摸底文件" /> }}
         />
       </Card>
+
+      <Modal
+        title={viewDetail ? `查看功能 · ${viewDetail.siteName} · ${viewDetail.createdAt}` : '查看功能'}
+        open={viewOpen}
+        onCancel={() => {
+          setViewOpen(false);
+          setViewDetail(null);
+        }}
+        footer={null}
+        width={1100}
+        destroyOnHidden
+      >
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          {viewDetail && (
+            <Descriptions size="small" column={2}>
+              <Descriptions.Item label="公司">{viewDetail.companyName}</Descriptions.Item>
+              <Descriptions.Item label="站点">{viewDetail.siteName}</Descriptions.Item>
+              <Descriptions.Item label="站点地址">{viewDetail.siteUrl}</Descriptions.Item>
+              <Descriptions.Item label="SENAITE 版本">{viewDetail.senaiteVersion || '-'}</Descriptions.Item>
+              <Descriptions.Item label="类型数">{viewDetail.summary?.typeCount ?? 0}</Descriptions.Item>
+              <Descriptions.Item label="Addon 数">{viewDetail.addonCount}</Descriptions.Item>
+            </Descriptions>
+          )}
+          <Table
+            rowKey="typeId"
+            loading={viewLoading}
+            dataSource={typeRows}
+            size="small"
+            scroll={{ x: 1000, y: 520 }}
+            pagination={{ pageSize: 20, showSizeChanger: false }}
+            columns={[
+              { title: '类型 ID', dataIndex: 'typeId', width: 180, fixed: 'left' },
+              { title: '标题', dataIndex: 'title', width: 180 },
+              { title: '框架', dataIndex: 'framework', width: 110 },
+              { title: '新增权限', dataIndex: 'addPermission', width: 240 },
+              { title: '字段数', dataIndex: 'fieldCount', width: 90 },
+              {
+                title: '字段',
+                dataIndex: 'fields',
+                render: (fields: InventoryDetail['summary']['types'][string]['fields']) => (
+                  <Space size={[4, 4]} wrap>
+                    {fields.length === 0 ? (
+                      <Text type="secondary">无</Text>
+                    ) : (
+                      fields.map((field) => (
+                        <Tag key={field.name} color={field.required ? 'volcano' : 'default'}>
+                          {field.name}:{field.type}
+                        </Tag>
+                      ))
+                    )}
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        </Space>
+      </Modal>
 
       {/* 差异对比 */}
       <Card title="差异对比">

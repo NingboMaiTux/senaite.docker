@@ -10,6 +10,7 @@ export interface ParseReq {
   siteCode: string;
   inventoryRef: string;
   text: string;
+  aiProvider?: 'deterministic' | 'ollama' | 'cloud';
 }
 
 export interface ConflictCheckReq {

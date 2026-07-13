@@ -17,8 +17,8 @@ from typing import Optional
 from shared import errors
 from shared.result import Result
 
-# 字段类型白名单（移植 _supported_field_type_keys_v01）
-_ARCHETYPES_TYPES = {"textline", "textarea"}
+# 字段类型白名单（Archetypes 先支持本工具当前需要的基础类型）
+_ARCHETYPES_TYPES = {"textline", "textarea", "integer", "number", "bool", "date", "datetime"}
 _DEXTERITY_TYPES = {"textline", "textarea", "integer", "number", "bool", "date", "datetime"}
 
 # fieldType（change_spec）→ 归一 key
@@ -38,7 +38,9 @@ _TYPE_ALIASES = {
     "booleanfield": "bool",
     "bool": "bool",
     "boolean": "bool",
+    "datefield": "date",
     "date": "date",
+    "datetimefield": "datetime",
     "datetime": "datetime",
 }
 
@@ -51,6 +53,15 @@ _DEXTERITY_SCHEMA = {
     "bool": "schema.Bool",
     "date": "schema.Date",
     "datetime": "schema.Datetime",
+}
+
+_UNKNOWN_ARCHETYPES_TYPE_IDS = {
+    "AnalysisRequest",
+    "Batch",
+    "Client",
+    "Contact",
+    "ReferenceSample",
+    "Supplier",
 }
 
 
@@ -67,6 +78,39 @@ def _u(text) -> str:
     return "u" + json.dumps(text if text is not None else "", ensure_ascii=False)
 
 
+def _field_help_text(type_title: str, field_title: str, field_name: str) -> str:
+    label = (field_title or field_name or "").strip()
+    target = (type_title or "").strip()
+    if not label:
+        return ""
+    if re.match(r"^[A-Za-z0-9_ .-]+$", label):
+        if target and re.match(r"^[A-Za-z0-9_ .-]+$", target):
+            return "%s for this %s." % (label, target.lower())
+        return "%s." % label
+    if target:
+        return "用于记录%s的%s。" % (target, label)
+    return label
+
+
+def _ascii_safe_text(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    try:
+        return value.encode("ascii", "ignore").decode("ascii").strip()
+    except Exception:
+        return ""
+
+
+def _archetypes_help_text(type_id: str, field_name: str, field_title: str, description: str) -> str:
+    safe_desc = _ascii_safe_text(description)
+    if safe_desc:
+        return safe_desc
+    safe_label = _ascii_safe_text(field_title) or _ascii_safe_text(field_name) or "Field"
+    safe_target = _ascii_safe_text(type_id) or "item"
+    return "%s for this %s." % (safe_label, safe_target.lower())
+
+
 class AddonGenerator:
     def __init__(self, meta: dict, changes: list[dict], summary: dict) -> None:
         self.namespace = meta["namespace"]
@@ -79,10 +123,26 @@ class AddonGenerator:
 
     # ── 入口 ──
     def generate(self) -> Result:
-        add_fields = [c for c in self.changes if c.get("changeType") == "AddField"]
-        if not add_fields:
+        change_types = {c.get("changeType", "") for c in self.changes if c.get("changeType")}
+        unsupported = sorted(change_types - {"AddField", "UpdatePermission"})
+        if unsupported:
             return Result.failure(
-                "没有可生成的 AddField 变更", code=errors.GENERATION_FAILED
+                "当前生成器暂不支持这些变更类型: %s" % ", ".join(unsupported),
+                code=errors.GENERATION_FAILED,
+            )
+
+        add_fields = [c for c in self.changes if c.get("changeType") == "AddField"]
+        permission_changes = [
+            c for c in self.changes if c.get("changeType") == "UpdatePermission"
+        ]
+        if add_fields and permission_changes:
+            return Result.failure(
+                "一个 Addon 不能同时包含字段和权限变更",
+                code=errors.GENERATION_FAILED,
+            )
+        if not add_fields and not permission_changes:
+            return Result.failure(
+                "没有可生成的变更项", code=errors.GENERATION_FAILED
             )
 
         files: dict[str, str] = {}
@@ -90,21 +150,34 @@ class AddonGenerator:
 
         behavior_regs: list[tuple[str, str, str]] = []  # (type_id, provides, title)
         extender_gates: list[tuple[str, str]] = []  # (type_id, field_name)
+        permission_rules: list[dict] = []
         behavior_zcml: list[str] = []
         adapter_zcml: list[str] = []
 
-        for change in add_fields:
-            r = self._emit_one_field(files, change, behavior_zcml, adapter_zcml,
-                                     behavior_regs, extender_gates)
-            if r.is_failure():
-                return r
+        if add_fields:
+            for change in add_fields:
+                r = self._emit_one_field(
+                    files,
+                    change,
+                    behavior_zcml,
+                    adapter_zcml,
+                    behavior_regs,
+                    extender_gates,
+                )
+                if r.is_failure():
+                    return r
+        else:
+            for change in permission_changes:
+                r = self._emit_one_permission(permission_rules, change)
+                if r.is_failure():
+                    return r
 
         # 汇总 behaviors/configure.zcml 与 extender/configure.zcml
         files[self._p("behaviors/configure.zcml")] = self._behaviors_configure(behavior_zcml)
         files[self._p("extender/configure.zcml")] = self._extender_configure(adapter_zcml)
-        # registry.xml（含 behavior_mappings + extender_gates）
+        # registry.xml（含 behavior_mappings / extender_gates / permission_rules）
         files[self._p("profiles/default/registry.xml")] = self._registry_xml(
-            behavior_regs, extender_gates
+            behavior_regs, extender_gates, permission_rules
         )
         return Result.success({"fullName": self.full, "version": self.version, "files": files})
 
@@ -115,20 +188,29 @@ class AddonGenerator:
         field_name = change.get("fieldName")
         field_type = change.get("fieldType", "StringField")
         required = bool(change.get("required"))
-        title = change.get("description") or field_name
+        type_title = (self.types.get(type_id) or {}).get("title") or type_id
+        title = (change.get("fieldTitle") or field_name or "").strip()
+        description = (
+            (change.get("fieldDescription") or "").strip()
+            or _field_help_text(type_title, title, field_name)
+        )
 
         norm = _norm_type(field_type)
-        framework = (self.types.get(type_id) or {}).get("framework") or change.get("framework") or "unknown"
-        if framework == "unknown":
-            # 无法判定框架时，默认按 dexterity（Senaite 2.x 新类型多为 dexterity）
-            framework = "dexterity"
+        framework = self._resolve_framework(type_id, change)
+        if framework == "archetypes":
+            description = _archetypes_help_text(type_id, field_name, title, description)
 
-        field_spec = {"field_type": norm, "title": title, "required": required}
+        field_spec = {
+            "field_type": norm,
+            "title": title,
+            "description": description,
+            "required": required,
+        }
 
         if framework == "archetypes":
             if norm not in _ARCHETYPES_TYPES:
                 return Result.failure(
-                    "Archetypes 类型 %s 暂不支持字段类型 %s（支持 textline/textarea）"
+                    "Archetypes 类型 %s 暂不支持字段类型 %s（支持 textline/textarea/integer/number/bool/date/datetime）"
                     % (type_id, field_type),
                     code=errors.GENERATION_FAILED,
                 )
@@ -144,6 +226,59 @@ class AddonGenerator:
             behavior_regs.append((type_id, provides, "%s %s" % (type_id, field_name)))
         return Result.success(None)
 
+    def _resolve_framework(self, type_id: str, change: dict) -> str:
+        framework = (
+            (self.types.get(type_id) or {}).get("framework")
+            or change.get("framework")
+            or "unknown"
+        )
+        if framework in {"dexterity", "archetypes"}:
+            return framework
+
+        sibling_folder = "%sFolder" % type_id
+        sibling_meta = self.types.get(sibling_folder) or {}
+        sibling_framework = (sibling_meta.get("framework") or "").strip().lower()
+        if sibling_framework in {"dexterity", "archetypes"}:
+            return sibling_framework
+
+        title = ((self.types.get(type_id) or {}).get("title") or "").strip()
+        if type_id in _UNKNOWN_ARCHETYPES_TYPE_IDS:
+            return "archetypes"
+        if type_id == "AnalysisRequest" and title.lower() == "sample":
+            return "archetypes"
+
+        # 仍无法判定时才回退到 dexterity，避免把常见 SENAITE 老对象误生成为 behavior。
+        return "dexterity"
+
+    def _emit_one_permission(self, permission_rules, change) -> Result:
+        role_name = (change.get("roleName") or "").strip()
+        target_type = (change.get("targetType") or "").strip()
+        permission_id = (change.get("permissionId") or "").strip()
+        permission_action = (change.get("permissionAction") or "grant").strip().lower()
+        if permission_action == "create":
+            permission_action = "grant"
+        if not role_name or (not target_type and not permission_id):
+            return Result.failure(
+                "权限变更缺少 roleName，或缺少 targetType/permissionId",
+                code=errors.GENERATION_FAILED,
+            )
+        if permission_action not in {"grant", "revoke"}:
+            return Result.failure(
+                "当前仅支持 grant/revoke 两种权限变更",
+                code=errors.GENERATION_FAILED,
+            )
+        rule = {
+            "roleName": role_name,
+            "permissionAction": permission_action,
+            "description": change.get("description") or "",
+        }
+        if target_type:
+            rule["targetType"] = target_type
+        if permission_id:
+            rule["permissionId"] = permission_id
+        permission_rules.append(rule)
+        return Result.success(None)
+
     # ── Dexterity behavior ──
     def _emit_dexterity(self, files, type_id, field_name, field_spec, behavior_zcml) -> str:
         module = "%s_%s" % (type_id.lower(), field_name.lower())
@@ -152,6 +287,8 @@ class AddonGenerator:
         field_var = re.sub(r"\W", "_", field_name)
 
         desc_expr = ""
+        if field_spec.get("description"):
+            desc_expr = ", description=%s" % _u(field_spec["description"])
         body = (
             "# -*- coding: utf-8 -*-\n"
             "from plone.autoform.interfaces import IFormFieldProvider\n"
@@ -179,9 +316,58 @@ class AddonGenerator:
     def _emit_archetypes(self, files, type_id, field_name, field_spec, adapter_zcml) -> None:
         module = "%s_%s" % (type_id.lower(), field_name.lower())
         class_name = "%s%sExtender" % (_camel(type_id), _camel(field_name))
-        is_text = field_spec["field_type"] == "textarea"
-        ext_field = "ExtensionTextField" if is_text else "ExtensionStringField"
-        widget = "TextAreaWidget" if is_text else "StringWidget"
+        field_type = field_spec["field_type"]
+        field_meta = {
+            "textline": {
+                "field_import": "StringField",
+                "widget_import": "StringWidget",
+                "ext_class": "ExtensionStringField",
+                "widget_class": "StringWidget",
+                "default_expr": "default=u\"\",",
+            },
+            "textarea": {
+                "field_import": "TextField",
+                "widget_import": "TextAreaWidget",
+                "ext_class": "ExtensionTextField",
+                "widget_class": "TextAreaWidget",
+                "default_expr": "default=u\"\",",
+            },
+            "integer": {
+                "field_import": "IntegerField",
+                "widget_import": "IntegerWidget",
+                "ext_class": "ExtensionIntegerField",
+                "widget_class": "IntegerWidget",
+                "default_expr": "",
+            },
+            "number": {
+                "field_import": "FloatField",
+                "widget_import": "DecimalWidget",
+                "ext_class": "ExtensionFloatField",
+                "widget_class": "DecimalWidget",
+                "default_expr": "",
+            },
+            "bool": {
+                "field_import": "BooleanField",
+                "widget_import": "BooleanWidget",
+                "ext_class": "ExtensionBooleanField",
+                "widget_class": "BooleanWidget",
+                "default_expr": "default=False,",
+            },
+            "date": {
+                "field_import": "DateTimeField",
+                "widget_import": "CalendarWidget",
+                "ext_class": "ExtensionDateTimeField",
+                "widget_class": "CalendarWidget",
+                "default_expr": "",
+            },
+            "datetime": {
+                "field_import": "DateTimeField",
+                "widget_import": "CalendarWidget",
+                "ext_class": "ExtensionDateTimeField",
+                "widget_class": "CalendarWidget",
+                "default_expr": "",
+            },
+        }[field_type]
         gate_key = "%s.%s" % (type_id, field_name)
 
         body = (
@@ -191,15 +377,29 @@ class AddonGenerator:
             "from Products.Archetypes.public import StringWidget\n"
             "from Products.Archetypes.public import TextAreaWidget\n"
             "from Products.Archetypes.public import TextField\n"
+            "from Products.Archetypes.public import IntegerField\n"
+            "from Products.Archetypes.public import IntegerWidget\n"
+            "from Products.Archetypes.public import FloatField\n"
+            "from Products.Archetypes.public import DecimalWidget\n"
+            "from Products.Archetypes.public import BooleanField\n"
+            "from Products.Archetypes.public import BooleanWidget\n"
+            "from Products.Archetypes.public import DateTimeField\n"
+            "from Products.Archetypes.public import CalendarWidget\n"
             "from archetypes.schemaextender.field import ExtensionField\n"
             "from archetypes.schemaextender.interfaces import ISchemaExtender\n"
             "from %s.setuphandlers import resolve_extender_site_gate\n"
             "from zope.component import adapts\n"
+            "from zope.i18nmessageid import MessageFactory\n"
             "from zope.interface import implementer\n\n\n"
+            "_ = MessageFactory(%s)\n\n\n"
             "TARGET_SCOPE = u\"site\"\n"
             "GATE_KEY = %s\n\n"
             "class ExtensionStringField(ExtensionField, StringField):\n    pass\n\n\n"
             "class ExtensionTextField(ExtensionField, TextField):\n    pass\n\n\n"
+            "class ExtensionIntegerField(ExtensionField, IntegerField):\n    pass\n\n\n"
+            "class ExtensionFloatField(ExtensionField, FloatField):\n    pass\n\n\n"
+            "class ExtensionBooleanField(ExtensionField, BooleanField):\n    pass\n\n\n"
+            "class ExtensionDateTimeField(ExtensionField, DateTimeField):\n    pass\n\n\n"
             "@implementer(ISchemaExtender)\n"
             "class %s(object):\n"
             "    adapts(IBaseObject)\n\n"
@@ -207,12 +407,12 @@ class AddonGenerator:
             "    fields = (\n"
             "        %s(\n"
             "            %s,\n"
-            "            default=u\"\",\n"
+            "            %s\n"
             "            required=%s,\n"
             "            schemata=\"default\",\n"
             "            widget=%s(\n"
-            "                label=%s,\n"
-            "                description=u\"Generated by %s (SchemaExtender).\",\n"
+            "                label=_(%s),\n"
+            "                description=_(%s),\n"
             "            ),\n"
             "        ),\n"
             "    )\n\n"
@@ -224,16 +424,29 @@ class AddonGenerator:
             "        if not gate.get(\"allowed\"):\n            return []\n"
             "        return list(self.fields)\n"
         ) % (
-            self.full, _u(gate_key), class_name, _u(type_id), ext_field,
-            _u(field_name), "True" if field_spec["required"] else "False",
-            widget, _u(field_spec["title"]), self.full,
+            self.full,
+            _u(self.full),
+            _u(gate_key),
+            class_name,
+            _u(type_id),
+            field_meta["ext_class"],
+            _u(field_name),
+            field_meta["default_expr"],
+            "True" if field_spec["required"] else "False",
+            field_meta["widget_class"],
+            _u(field_spec["title"]),
+            _u(field_spec["description"]),
         )
         files[self._p("extender/%s.py" % module)] = body
 
         factory = "%s.extender.%s.%s" % (self.full, module, class_name)
+        adapter_name = "%s.%s" % (type_id, field_name)
         adapter_zcml.append(
             '  <adapter\n      factory=%s\n      name=%s />\n'
-            % (json.dumps(factory, ensure_ascii=False), json.dumps(module, ensure_ascii=False))
+            % (
+                json.dumps(factory, ensure_ascii=False),
+                json.dumps(adapter_name, ensure_ascii=False),
+            )
         )
 
     # ── 固定骨架 ──
@@ -295,7 +508,14 @@ class AddonGenerator:
             "    url='https://github.com/maitux/%s',\n"
             "    packages=find_packages(\"src\"),\n    package_dir={\"\": \"src\"},\n"
             "    namespace_packages=['%s'],\n    include_package_data=True,\n    zip_safe=False,\n"
-            "    install_requires=[\"setuptools\"],\n"
+            "    install_requires=[\n"
+            "        \"setuptools\",\n"
+            "        \"senaite.core\",\n"
+            "        \"senaite.lims\",\n"
+            "        \"zope.interface\",\n"
+            "        \"zope.component\",\n"
+            "        \"archetypes.schemaextender\",\n"
+            "    ],\n"
             "    entry_points=\"\"\"\n    [z3c.autoinclude.plugin]\n    target = plone\n    \"\"\",\n)\n"
             % (self.full, self.version, json.dumps(self.description, ensure_ascii=False),
                self.full, self.namespace)
@@ -343,7 +563,7 @@ class AddonGenerator:
             % (("\n" + inner + "\n") if inner else "")
         )
 
-    def _registry_xml(self, behavior_regs, extender_gates) -> str:
+    def _registry_xml(self, behavior_regs, extender_gates, permission_rules) -> str:
         mappings: dict[str, list] = {}
         for type_id, provides, _title in behavior_regs:
             mappings.setdefault(type_id, []).append(provides)
@@ -354,6 +574,11 @@ class AddonGenerator:
         gates = {"%s.%s" % (t, f): {"target_scope": "site", "site_id": None}
                  for t, f in extender_gates}
         gates_value = json.dumps(gates, ensure_ascii=False, separators=(",", ":"))
+        permission_value = json.dumps(
+            {"rules": permission_rules},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
 
         def record(name, title, value):
             return (
@@ -370,6 +595,7 @@ class AddonGenerator:
             + record("behavior_mappings", "Behavior mappings (JSON)", behavior_value)
             + record("extender_gates", "SchemaExtender site gates (JSON)", gates_value)
             + record("listing_patches", "Listing patches (JSON)", "{}")
+            + record("permission_rules", "Permission rules (JSON)", permission_value)
             + record("template_assets", "Template assets (JSON)", "{}")
             + "</registry>\n"
         )
@@ -467,6 +693,112 @@ def resolve_extender_site_gate(context, gate_id=None, target_scope='site'):
     }
 
 
+def apply_behavior_mappings(context=None):
+    portal = _get_portal(context)
+    if portal is None:
+        return False
+    portal_types = getattr(portal, 'portal_types', None)
+    if portal_types is None:
+        return False
+    payload = _registry_json('__FULL__.behavior_mappings')
+    mappings = payload.get('mappings') if isinstance(payload, dict) else {}
+    if not isinstance(mappings, dict):
+        return False
+    changed = False
+    for type_id, provides_list in mappings.items():
+        type_id = _safe_text(type_id).strip()
+        if not type_id:
+            continue
+        try:
+            fti = portal_types[type_id]
+        except Exception:
+            logger.warning('Behavior mapping target type not found: %s', type_id)
+            continue
+        current = list(getattr(fti, 'behaviors', None) or [])
+        merged = list(current)
+        for dotted in provides_list if isinstance(provides_list, list) else []:
+            dotted = _safe_text(dotted).strip()
+            if dotted and dotted not in merged:
+                merged.append(dotted)
+        if merged == current:
+            continue
+        try:
+            fti.behaviors = tuple(merged)
+            changed = True
+        except Exception:
+            logger.exception('Failed to update behaviors for %s', type_id)
+    return changed
+
+
+def _selected_roles_for_permission(portal, permission_name):
+    roles = []
+    try:
+        roles_info = portal.rolesOfPermission(permission_name) or []
+    except Exception:
+        roles_info = []
+    for entry in roles_info:
+        role_name = None
+        selected = True
+        if isinstance(entry, dict):
+            role_name = entry.get('name')
+            selected = bool(entry.get('selected'))
+        else:
+            role_name = entry
+        role_name = _safe_text(role_name).strip()
+        if role_name and selected:
+            roles.append(role_name)
+    return sorted(set(roles))
+
+
+def apply_permission_rules(context=None):
+    portal = _get_portal(context)
+    if portal is None:
+        return False
+    rules = _registry_json('__FULL__.permission_rules').get('rules') or []
+    changed = False
+    portal_types = getattr(portal, 'portal_types', None)
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        permission_action = _safe_text(rule.get('permissionAction') or 'grant').strip().lower()
+        if permission_action == 'create':
+            permission_action = 'grant'
+        if permission_action not in ('grant', 'revoke'):
+            continue
+        role_name = _safe_text(rule.get('roleName')).strip()
+        target_type = _safe_text(rule.get('targetType')).strip()
+        permission_name = _safe_text(rule.get('permissionId')).strip()
+        if not role_name or not target_type or portal_types is None:
+            if not role_name or not permission_name:
+                continue
+        if not permission_name:
+            try:
+                fti = portal_types[target_type]
+            except Exception:
+                logger.warning('Permission rule target type not found: %s', target_type)
+                continue
+            permission_name = _safe_text(getattr(fti, 'add_permission', None)).strip()
+        if not permission_name:
+            logger.warning('Target type %s has no add_permission', target_type)
+            continue
+        roles = _selected_roles_for_permission(portal, permission_name)
+        if permission_action == 'grant':
+            if role_name in roles:
+                continue
+            roles.append(role_name)
+        else:
+            if role_name not in roles:
+                continue
+            roles = [name for name in roles if name != role_name]
+        try:
+            portal.manage_permission(permission_name, roles=sorted(set(roles)), acquire=1)
+            changed = True
+        except Exception:
+            logger.exception('Failed to %s %s on %s', permission_action, role_name, permission_name)
+            continue
+    return changed
+
+
 def import_various(context):
     if context is not None:
         marker = getattr(context, 'readDataFile', lambda *args, **kwargs: None)('__FULL__.txt')
@@ -475,13 +807,21 @@ def import_various(context):
     try:
         from __FULL__.browser.viewlets import apply_listing_patches
         portal = context.getSite() if context is not None and hasattr(context, 'getSite') else getSite()
+        apply_behavior_mappings(portal)
         apply_listing_patches(portal)
+        apply_permission_rules(portal)
     except Exception:
-        logger.exception('Failed to apply listing patches during import')
+        logger.exception('Failed to apply generated patches during import')
 
 
 def post_install(portal_setup):
     logger.info('__FULL__ post-install')
+    try:
+        portal = portal_setup.getSite() if portal_setup is not None and hasattr(portal_setup, 'getSite') else getSite()
+        apply_behavior_mappings(portal)
+        apply_permission_rules(portal)
+    except Exception:
+        logger.exception('Failed to apply generated setup during post-install')
 
 
 def post_uninstall(portal_setup):

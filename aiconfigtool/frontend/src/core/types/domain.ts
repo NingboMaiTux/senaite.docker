@@ -43,6 +43,29 @@ export interface InventorySnapshot {
   staleness: 'fresh' | 'stale';
 }
 
+export interface InventoryFieldSummary {
+  name: string;
+  type: string;
+  required: boolean;
+}
+
+export interface InventoryTypeSummary {
+  title: string;
+  framework: string;
+  addPermission: string;
+  fields: InventoryFieldSummary[];
+  behaviors: string[];
+}
+
+export interface InventorySummary {
+  types: Record<string, InventoryTypeSummary>;
+  typeCount: number;
+}
+
+export interface InventoryDetail extends InventorySnapshot {
+  summary: InventorySummary;
+}
+
 // ── Change Spec ──
 
 export type ChangeType =
@@ -60,12 +83,17 @@ export interface ChangeItem {
   changeType: ChangeType;
   description: string;
   typeId?: string;
+  typeTitle?: string;
   fieldName?: string;
+  fieldTitle?: string;
+  fieldDescription?: string;
   fieldType?: string;
   required?: boolean;
   framework?: Framework;
   addColumns?: string[];
   removeColumns?: string[];
+  targetType?: string;
+  targetTitle?: string;
   [key: string]: unknown;
 }
 

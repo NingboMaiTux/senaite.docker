@@ -1,4 +1,4 @@
-import { useReducer } from 'react';
+import { useEffect, useReducer } from 'react';
 import type {
   AddonMeta,
   ChangeSpec,
@@ -117,7 +117,23 @@ function reducer(state: WorkflowState, action: WorkflowAction): WorkflowState {
   }
 }
 
+const STORAGE_KEY = 'aiconfigtool.workflow';
+
+function loadState(): WorkflowState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return { ...initialWorkflowState, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return initialWorkflowState;
+}
+
 export function useAddonWorkflow() {
-  const [state, dispatch] = useReducer(reducer, initialWorkflowState);
+  const [state, dispatch] = useReducer(reducer, null, loadState);
+
+  // 每次 state 变化自动缓存
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, [state]);
+
   return { state, dispatch };
 }

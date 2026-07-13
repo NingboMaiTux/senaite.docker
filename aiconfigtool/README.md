@@ -7,6 +7,23 @@
 
 ---
 
+## 启动
+
+```bash
+# 后端（零依赖，Python 3.12）
+cd aiconfigtool/backend
+py -m web.server --host 127.0.0.1 --port 8787
+
+# 前端（新终端）
+cd aiconfigtool/frontend
+npm install
+npm run dev
+```
+
+打开 http://localhost:5173，前端自动代理 `/api` 到后端 8787。
+
+---
+
 ## 目录结构
 
 ```

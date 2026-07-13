@@ -111,6 +111,7 @@ class InventoryRunner:
             types[type_id] = {
                 "title": ent.get("title", ""),
                 "framework": ent.get("framework", "unknown"),
+                "addPermission": ent.get("add_permission") or "",
                 "fields": [
                     {
                         "name": f.get("name"),

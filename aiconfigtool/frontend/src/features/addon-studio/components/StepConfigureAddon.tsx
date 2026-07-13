@@ -10,23 +10,47 @@ import {
 } from 'antd';
 import { useWorkspace } from '@/core/context/WorkspaceContext';
 import type { NamespaceMode } from '@/core/types/domain';
-import type { WorkflowAction } from '../hooks/useAddonWorkflow';
+import type { WorkflowAction, WorkflowState } from '../hooks/useAddonWorkflow';
 
 const { Text } = Typography;
 
 interface Props {
+  state: WorkflowState;
   dispatch: React.Dispatch<WorkflowAction>;
 }
 
-export default function StepConfigureAddon({ dispatch }: Props) {
+function getTodayToken() {
+  const now = new Date();
+  const yyyy = String(now.getFullYear());
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}${mm}${dd}`;
+}
+
+function buildDefaultFunctionName(state: WorkflowState) {
+  const firstChange = state.changeSpec?.changes?.[0];
+  const prefix = firstChange?.changeType === 'UpdatePermission' ? 'permission' : 'field';
+  return `${prefix}_${getTodayToken()}`;
+}
+
+export default function StepConfigureAddon({ state, dispatch }: Props) {
   const { currentCompany } = useWorkspace();
   const companyNs = currentCompany?.shortName ?? 'client';
+  const defaultFunctionName = useMemo(() => buildDefaultFunctionName(state), [state]);
+  const existingMeta = state.addonMeta;
 
-  const [mode, setMode] = useState<NamespaceMode>('custom');
-  const [functionName, setFunctionName] = useState('samplefield');
-  const [version, setVersion] = useState('1.0.0');
+  const [mode, setMode] = useState<NamespaceMode>(existingMeta?.namespaceMode ?? 'custom');
+  const [functionName, setFunctionName] = useState(
+    existingMeta?.functionName && existingMeta.functionName !== 'samplefield'
+      ? existingMeta.functionName
+      : defaultFunctionName,
+  );
+  const [version, setVersion] = useState(existingMeta?.version ?? '1.0.0');
   const [description, setDescription] = useState(
-    `为 ${currentCompany?.name ?? ''} 生成的 Senaite Addon`,
+    existingMeta?.description ?? `为 ${currentCompany?.name ?? ''} 生成的 Senaite Addon`,
+  );
+  const [nameCustomized, setNameCustomized] = useState(
+    Boolean(existingMeta?.functionName && existingMeta.functionName !== 'samplefield'),
   );
 
   const namespace = mode === 'general' ? 'maitux' : companyNs;
@@ -34,6 +58,12 @@ export default function StepConfigureAddon({ dispatch }: Props) {
     () => `${namespace}.${functionName}`,
     [namespace, functionName],
   );
+
+  useEffect(() => {
+    if (!nameCustomized) {
+      setFunctionName(defaultFunctionName);
+    }
+  }, [defaultFunctionName, nameCustomized]);
 
   useEffect(() => {
     dispatch({
@@ -81,7 +111,10 @@ export default function StepConfigureAddon({ dispatch }: Props) {
             <Input
               style={{ width: '60%' }}
               value={functionName}
-              onChange={(e) => setFunctionName(e.target.value)}
+              onChange={(e) => {
+                setNameCustomized(true);
+                setFunctionName(e.target.value);
+              }}
             />
           </Space.Compact>
           <Text type="secondary" style={{ fontSize: 12 }}>

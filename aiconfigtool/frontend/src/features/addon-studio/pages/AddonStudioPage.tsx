@@ -1,4 +1,4 @@
-import { App, Button, Space, Steps, Typography } from 'antd';
+import { App, Button, Steps, Typography } from 'antd';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { useAddonWorkflow } from '../hooks/useAddonWorkflow';
 import StepSelectSite from '../components/StepSelectSite';
@@ -28,7 +28,7 @@ export default function AddonStudioPage() {
     <StepSelectSite key="0" state={state} dispatch={dispatch} />,
     <StepDescribeChange key="1" state={state} dispatch={dispatch} />,
     <StepConflictCheck key="2" state={state} dispatch={dispatch} />,
-    <StepConfigureAddon key="3" dispatch={dispatch} />,
+    <StepConfigureAddon key="3" state={state} dispatch={dispatch} />,
     <StepGenerate key="4" state={state} dispatch={dispatch} />,
     <StepVerifyDownload key="5" state={state} dispatch={dispatch} />,
   ][step];
@@ -87,24 +87,33 @@ export default function AddonStudioPage() {
 
       <div style={{ marginBottom: 24 }}>{stepNode}</div>
 
-      <Space style={{ justifyContent: 'space-between', width: '100%' }}>
-        <Button
-          icon={<LeftOutlined />}
-          disabled={step === 0}
-          onClick={() => dispatch({ type: 'PREV' })}
-        >
+      <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+        <Button icon={<LeftOutlined />} disabled={step === 0} onClick={() => dispatch({ type: 'PREV' })}>
           上一步
+        </Button>
+        <Button
+          onClick={() => {
+            dispatch({ type: 'RESET' });
+            localStorage.removeItem('aiconfigtool.workflow');
+            message.success('已重置');
+          }}
+        >
+          重新开始
         </Button>
         {step < 5 ? (
           <Button type="primary" onClick={handleNext}>
             下一步 <RightOutlined />
           </Button>
         ) : (
-          <Button onClick={() => dispatch({ type: 'RESET' })}>
+          <Button type="primary" onClick={() => {
+            dispatch({ type: 'RESET' });
+            localStorage.removeItem('aiconfigtool.workflow');
+            message.success('已完成，可开始新任务');
+          }}>
             完成，开始新任务
           </Button>
         )}
-      </Space>
+      </div>
     </div>
   );
 }

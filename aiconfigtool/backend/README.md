@@ -1,6 +1,6 @@
 # AiConfigTool 后端
 
-零第三方运行时依赖（Python 标准库 + jsonschema），HTTP 用 stdlib `http.server` + 自定义路由。
+零第三方运行时依赖（纯 Python 标准库），HTTP 用 stdlib `http.server` + 自定义路由。
 
 ## 运行
 

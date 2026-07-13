@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from engines.ai.deterministic import DeterministicEngine
+from engines.ai.llm import LLMRequirementEngine
 from engines.delivery.package_export import DeliveryEngine
 from engines.generator.addon_generator import AddonGenerator
 from infrastructure.config_repository import ConfigRepository
@@ -35,12 +36,28 @@ def parse_requirement(body, **_):
     site_code = body.get("siteCode")
     inventory_ref = body.get("inventoryRef")
     text = body.get("text") or ""
+    ai_provider = body.get("aiProvider")
     if not site_code or not inventory_ref:
         return Result.failure("缺少 siteCode 或 inventoryRef", code=errors.VALIDATION_ERROR)
     summary, err = _load_summary(site_code, inventory_ref)
     if err:
         return err
-    return _deterministic.parse_to_change_spec(text, site_code, inventory_ref, summary)
+
+    ai_engine = LLMRequirementEngine(provider=ai_provider)
+    if ai_engine.provider and ai_engine.provider != "deterministic":
+        ai_result = ai_engine.parse_to_change_spec(text, site_code, inventory_ref, summary)
+        if ai_result.is_success():
+            return ai_result
+
+    fallback = _deterministic.parse_to_change_spec(text, site_code, inventory_ref, summary)
+    if fallback.is_success() and ai_engine.provider and ai_engine.provider != "deterministic":
+        value = dict(fallback.value or {})
+        value["fallback"] = True
+        value["fallbackReason"] = (
+            ai_result.error.message if ai_result.is_failure() and ai_result.error else ""
+        )
+        return Result.success(value)
+    return fallback
 
 
 def conflict_check(body, **_):

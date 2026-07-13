@@ -75,7 +75,7 @@ class InstallService:
             return Result.failure("custom-addon.cfg 更新验证失败", code=errors.GENERATION_FAILED, details={"steps": steps})
 
         # ── Step 3: buildout + 结果验证 ──
-        bo_ok, bo_msg = self._run_buildout(container, full_name)
+        bo_ok, bo_msg = self._run_buildout(container, full_name, expect_egg_link=True)
         steps.append({"step": "buildout", "ok": bo_ok, "message": bo_msg})
         if not bo_ok:
             return Result.failure("buildout 失败", code=errors.GENERATION_FAILED, details={"steps": steps})
@@ -144,7 +144,8 @@ class InstallService:
             h.write(text)
 
     # ── buildout ──
-    def _run_buildout(self, container: str, addon_name: str) -> tuple[bool, str]:
+    def _run_buildout(self, container: str, addon_name: str, expect_egg_link: bool = True) -> tuple[bool, str]:
+        expected_state = "FOUND" if expect_egg_link else "NOT_FOUND"
         for attempt in range(1, 4):
             try:
                 result = subprocess.run(
@@ -159,8 +160,11 @@ class InstallService:
                      "ls /home/senaite/senaitelims/develop-eggs/%s.egg-link 2>/dev/null && echo FOUND || echo NOT_FOUND" % addon_name],
                     capture_output=True, text=True, timeout=10,
                 )
-                if result.returncode == 0 and "FOUND" in check_egg.stdout:
-                    return True, "buildout 成功（第 %d 次），egg-link 已创建" % attempt
+                egg_state = check_egg.stdout.strip()
+                if result.returncode == 0 and expected_state in egg_state:
+                    if expect_egg_link:
+                        return True, "buildout 成功（第 %d 次），egg-link 已创建" % attempt
+                    return True, "buildout 成功（第 %d 次），egg-link 已移除" % attempt
                 if "network" in output.lower() or "download" in output.lower() or "timeout" in output.lower():
                     if attempt < 3:
                         time.sleep(15 * attempt)
@@ -168,13 +172,45 @@ class InstallService:
                 if attempt < 3:
                     time.sleep(10 * attempt)
                     continue
-                return False, "buildout ret=%d, egg-link=%s" % (result.returncode, check_egg.stdout.strip())
+                return False, "buildout ret=%d, egg-link=%s, expected=%s" % (
+                    result.returncode,
+                    egg_state,
+                    expected_state,
+                )
             except Exception as e:
                 if attempt < 3:
                     time.sleep(10 * attempt)
                     continue
                 return False, "异常: %s" % str(e)[:150]
         return False, "重试 3 次仍失败"
+
+    def _remove_container_egg_link(self, container: str, addon_name: str) -> tuple[bool, str]:
+        egg_link = "/home/senaite/senaitelims/develop-eggs/%s.egg-link" % addon_name
+        try:
+            result = subprocess.run(
+                ["docker", "exec", "-i", container, "bash", "-lc",
+                 "rm -f %s && (test -e %s && echo STILL_FOUND || echo REMOVED)" % (egg_link, egg_link)],
+                capture_output=True, text=True, timeout=15,
+            )
+            status = result.stdout.strip() or result.stderr.strip()
+            if result.returncode == 0 and "REMOVED" in status:
+                return True, "egg-link 已删除或本就不存在"
+            return False, status or "egg-link 清理状态未知"
+        except Exception as e:
+            return False, "异常: %s" % str(e)[:150]
+
+    def _cleanup_site_inventories(self, site_code: str) -> list[str]:
+        removed = []
+        for item in self._repo.list_inventories(site_code):
+            inv_id = item.get("id")
+            if inv_id and self._repo.delete_inventory(site_code, inv_id):
+                removed.append(inv_id)
+        if removed:
+            site = self._repo.get_site(site_code) or {}
+            if site:
+                site["lastInventoryAt"] = ""
+                self._repo.save_site(site_code, site)
+        return removed
 
     # ── restart ──
     def _restart_zope(self, container: str, url: str, user: str, pw: str) -> bool:
@@ -229,7 +265,7 @@ class InstallService:
 
     # ── 清理 ──
     def cleanup(self, addon_name: str, site_code: str) -> Result:
-        """彻底清理：Plone 卸载 → 删源码 → 删 cfg → buildout → docker restart。"""
+        """彻底清理：Plone 卸载 → 删源码/egg-link/cfg → buildout → docker restart → 清缓存。"""
         site = self._repo.get_site(site_code)
         if not site:
             return Result.failure("站点不存在", code=errors.NOT_FOUND)
@@ -284,16 +320,44 @@ class InstallService:
         except Exception as e:
             steps.append({"step": "update_cfg", "ok": False, "reason": str(e)[:80]})
 
-        # 4. buildout（现在不需要这个 addon 了）
-        bo_ok, bo_msg = self._run_buildout(container, addon_name)
-        # 清理模式下 buildout 可能因为 addon 不存在而 "失败"（egg-link 找不到是预期）
+        # 4. 删 develop egg-link，避免 buildout 前后都残留旧引用
+        egg_ok, egg_msg = self._remove_container_egg_link(container, addon_name)
+        steps.append({"step": "remove_egg_link", "ok": egg_ok, "message": egg_msg})
+
+        # 5. buildout（清理模式要求 egg-link 最终不存在）
+        bo_ok, bo_msg = self._run_buildout(container, addon_name, expect_egg_link=False)
         steps.append({"step": "buildout", "ok": bo_ok, "message": bo_msg})
 
-        # 5. docker restart
+        # 6. docker restart
         rst_ok = self._restart_zope(container, url, user, pw)
         steps.append({"step": "restart", "ok": rst_ok})
 
-        return Result.success({"cleaned": True, "steps": steps})
+        # 7. 删该测试站点的全部摸底快照，避免后续继续使用带旧字段的缓存
+        removed_inventories = self._cleanup_site_inventories(site_code)
+        steps.append({
+            "step": "remove_inventories",
+            "ok": True,
+            "count": len(removed_inventories),
+            "items": removed_inventories[:10],
+        })
+
+        critical_failed = any(
+            not step.get("ok")
+            for step in steps
+            if step.get("step") in {"update_cfg", "remove_egg_link", "buildout", "restart"}
+        )
+        if critical_failed:
+            return Result.failure(
+                "Addon 清理未完成，请根据步骤详情继续处理",
+                code=errors.GENERATION_FAILED,
+                details={"steps": steps},
+            )
+
+        return Result.success({
+            "cleaned": True,
+            "removedInventories": removed_inventories,
+            "steps": steps,
+        })
     def _detect_container(self, url: str) -> str | None:
         from urllib.parse import urlparse
         try:

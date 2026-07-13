@@ -26,11 +26,30 @@ SUPPORTED_FIELD_TYPES = {
     "IntegerField",
     "FloatField",
     "BooleanField",
+    "DateField",
+    "DateTimeField",
+    "String",
     "TextLine",
     "Text",
+    "Integer",
     "Int",
     "Float",
+    "Number",
+    "Boolean",
     "Bool",
+    "Date",
+    "Datetime",
+    "string",
+    "textline",
+    "text",
+    "integer",
+    "int",
+    "float",
+    "number",
+    "boolean",
+    "bool",
+    "date",
+    "datetime",
 }
 
 # 命名空间前缀软提示（与设计一致：已从阻断放宽为警告）
@@ -95,9 +114,35 @@ class ValidationService:
                 item["framework"] = framework
             return item
 
-        # 目前 P0 只做 AddField；其他类型放行（后续补）
+        if change_type == "UpdatePermission":
+            role_name = change.get("roleName", "")
+            target_type = change.get("targetType", "")
+            permission_id = change.get("permissionId", "")
+            permission_action = (change.get("permissionAction") or "grant").strip().lower()
+            if permission_action == "create":
+                permission_action = "grant"
+            if permission_action not in {"grant", "revoke"}:
+                return conflict("当前仅支持 grant/revoke 两种权限动作")
+            if not role_name:
+                return conflict("权限变更缺少角色名")
+            if not target_type and not permission_id:
+                return conflict("权限变更缺少 targetType 或 permissionId")
+            if permission_id and not target_type:
+                verb = "授予" if permission_action == "grant" else "移除"
+                return ok("角色 %s 可直接%s权限 %s" % (role_name, verb, permission_id))
+            entity = types.get(target_type)
+            if entity is None:
+                return conflict("目标类型 %s 不存在于摸底快照" % target_type)
+            add_permission = entity.get("addPermission") or ""
+            verb = "授予" if permission_action == "grant" else "移除"
+            note = "，将基于运行时 FTI 动态处理"
+            if add_permission:
+                note = "，目标权限为 %s" % add_permission
+            return ok("角色 %s 可对 %s %s权限%s" % (role_name, target_type, verb, note))
+
+        # 目前 P0 重点实现 AddField / UpdatePermission；其他类型先放行
         if change_type != "AddField":
-            return ok("暂未对该变更类型做冲突校验（P0 聚焦 AddField）")
+            return ok("暂未对该变更类型做细粒度冲突校验")
 
         # 1. 类型存在？
         entity = types.get(type_id)

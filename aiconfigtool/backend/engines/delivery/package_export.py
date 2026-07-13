@@ -135,8 +135,16 @@ class DeliveryEngine:
             and not k.endswith("__init__.py")
             for k in files
         )
+        has_permission_rules = False
+        for path, content in files.items():
+            if not path.endswith("profiles/default/registry.xml"):
+                continue
+            if "permission_rules" in content and '"rules":[{' in content.replace(" ", ""):
+                has_permission_rules = True
+                break
         if not has_impl:
-            missing.append("字段实现文件（behavior/extender .py）")
+            if not has_permission_rules:
+                missing.append("字段实现文件（behavior/extender .py）或权限规则")
         return {
             "gate": "Gate2",
             "passed": len(missing) == 0,
@@ -219,6 +227,10 @@ class DeliveryEngine:
         for c in change_spec.get("changes", []):
             if c.get("changeType") == "AddField":
                 lines.append("- [ ] 在 **%s** 的编辑页面能看到新增字段 `%s`" % (c.get("typeId"), c.get("fieldName")))
+            elif c.get("changeType") == "UpdatePermission":
+                verb = "具备" if (c.get("permissionAction") or "grant") in ("grant", "create") else "不再具备"
+                target = c.get("targetType") or c.get("permissionId") or ""
+                lines.append("- [ ] 角色 **%s** 已%s **%s** 的相关权限" % (c.get("roleName"), verb, target))
         lines += ["- [ ] Addon 在 Add-ons 列表中显示为已安装", "- [ ] 现有功能不受影响", ""]
         return "\n".join(lines)
 

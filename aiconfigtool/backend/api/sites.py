@@ -61,6 +61,17 @@ def list_site_inventories(params, **_):
     return Result.success(_repo.list_inventories(params["code"]))
 
 
+def get_inventory(params, **_):
+    code = params["code"]
+    inv_id = params["id"]
+    if not _repo.get_site(code):
+        return Result.failure("站点不存在: %s" % code, code=errors.NOT_FOUND)
+    snapshot = _repo.get_inventory(code, inv_id)
+    if snapshot is None:
+        return Result.failure("摸底文件不存在: %s" % inv_id, code=errors.NOT_FOUND)
+    return Result.success(snapshot)
+
+
 def update_site(params, body, **_):
     code = params["code"]
     existing = _repo.get_site(code)
@@ -99,4 +110,5 @@ def register(router) -> None:
     router.delete("/api/sites/{code}", delete_site)
     router.post("/api/sites/{code}/test-connection", test_connection)
     router.get("/api/sites/{code}/inventories", list_site_inventories)
+    router.get("/api/sites/{code}/inventories/{id}", get_inventory)
     router.delete("/api/sites/{code}/inventories/{id}", delete_inventory)

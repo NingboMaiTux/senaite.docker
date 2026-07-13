@@ -1,7 +1,7 @@
 // workspace 数据访问：全部走真实后端。
 
 import { apiClient } from '@/core/services/apiClient';
-import type { Company, Site, InventorySnapshot } from '@/core/types/domain';
+import type { Company, Site, InventoryDetail, InventorySnapshot } from '@/core/types/domain';
 
 export const workspaceApi = {
   getCompanies: () =>
@@ -36,6 +36,9 @@ export const workspaceApi = {
     const path = siteCode ? `/inventories?siteCode=${siteCode}` : '/inventories';
     return apiClient.get<InventorySnapshot[]>(path);
   },
+
+  getInventory: (siteCode: string, inventoryId: string) =>
+    apiClient.get<InventoryDetail>(`/sites/${siteCode}/inventories/${inventoryId}`),
 
   runInventory: (siteCode: string) =>
     apiClient.post<InventorySnapshot>('/inventory/run', { siteCode }),
