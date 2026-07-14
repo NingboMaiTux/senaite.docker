@@ -1,0 +1,26 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup">
+
+  <include package=".browser" />
+
+  <!-- GS install profile -->
+  <genericsetup:registerProfile
+      name="default"
+      title="MedAI Dashboard"
+      directory="profiles/default"
+      description="Dashboard enhancements: Analyst cards, Analyses To be Verified link"
+      post_handler="medai.dashboard.setuphandlers.post_install"
+      provides="Products.GenericSetup.interfaces.EXTENSION" />
+
+  <!-- GS uninstall profile -->
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="MedAI Dashboard (uninstall)"
+      directory="profiles/uninstall"
+      description="Uninstalls MedAI Dashboard"
+      post_handler="medai.dashboard.setuphandlers.post_uninstall"
+      provides="Products.GenericSetup.interfaces.EXTENSION" />
+
+</configure>

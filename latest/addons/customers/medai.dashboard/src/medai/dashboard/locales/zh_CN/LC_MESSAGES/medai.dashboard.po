@@ -1,0 +1,20 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: medai.dashboard\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language-Team: Chinese (Simplified)\n"
+
+#. Analyst section heading on dashboard (shown to Analyst role users)
+msgid "Analyst"
+msgstr "分析统计"
+
+#. Analyst cards: Results Pending (analysis-level)
+msgid "Results Pending (Analysis)"
+msgstr "待处理结果"
+
+#. Analyst cards: To be Verified (analysis-level)
+msgid "To be Verified (Analysis)"
+msgstr "待审核"

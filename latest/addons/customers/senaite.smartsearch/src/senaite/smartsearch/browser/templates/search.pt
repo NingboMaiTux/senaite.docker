@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html metal:use-macro="context/main_template/macros/master"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal">
+<body>
+<metal:content fill-slot="content">
+<tal:main tal:define="here_url context/absolute_url">
+<div style="max-width:920px; margin:0 auto; padding:12px 4px 40px; font-family:Inter,-apple-system,sans-serif;">
+
+  <h1 style="font-size:22px; margin-bottom:4px; color:#16202E;">🔎 智慧搜索</h1>
+  <p style="font-size:12.5px; color:#5B6B82; margin-bottom:16px;">
+    搜索样品 / 批次 / 客户 / 联系人 / 仪器 / 检测项目 / 检测结果 / 方法 / 工作单……
+    结果已根据你当前账号的权限自动过滤，只会显示你有权查看的记录。
+  </p>
+
+  <input type="text" id="ss-input"
+         placeholder="输入关键词开始搜索…"
+         style="width:100%; padding:11px 16px; font-size:14.5px; border:1px solid rgba(22,32,46,.15); border-radius:9px; margin-bottom:16px; outline:none;"/>
+
+  <div id="ss-count" style="font-size:12.5px; color:#5B6B82; margin-bottom:10px;"></div>
+  <div id="ss-results"></div>
+
+  <script tal:content="string:const SS_BASE = '${here_url}';"></script>
+  <script>
+  //<![CDATA[
+  (function(){
+    var params = new URLSearchParams(window.location.search);
+    var initialQ = params.get('q') || '';
+    var input = document.getElementById('ss-input');
+    var countEl = document.getElementById('ss-count');
+    var resultsEl = document.getElementById('ss-results');
+    input.value = initialQ;
+    input.focus();
+
+    var TYPE_COLOR = {
+      '样品':'#16356E','批次':'#0E8A79','客户':'#B8790C','联系人':'#8A6D3B',
+      '仪器':'#D3212D','检测项目':'#2E8B57','检测结果':'#5B6B82','方法':'#5B6B82',
+      '工作单':'#16356E','供应商':'#B8790C','产品':'#5B6B82','实验室联系人':'#8A6D3B','部门':'#5B6B82'
+    };
+
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, function(c){
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+      });
+    }
+
+    function search(q){
+      if(q.trim().length < 2){ resultsEl.innerHTML=''; countEl.textContent=''; return; }
+      countEl.textContent = '正在搜索…';
+      fetch(SS_BASE + '/@@smartsearch-api?q=' + encodeURIComponent(q))
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+          var items = data.results || [];
+          countEl.textContent = '找到 ' + items.length + ' 条结果（已按权限过滤）';
+          if(!items.length){ resultsEl.innerHTML = '<div style="color:#5B6B82; font-size:13px;">没有找到相关记录，换个关键词试试。</div>'; return; }
+          resultsEl.innerHTML = items.map(function(it){
+            var color = TYPE_COLOR[it.type_label] || '#5B6B82';
+            return '<a href="' + it.url + '" style="display:flex; justify-content:space-between; align-items:center; padding:12px 14px; margin-bottom:8px; background:#fff; border:1px solid rgba(22,32,46,.10); border-radius:9px; text-decoration:none; color:#16202E;">' +
+              '<span><span style="display:inline-block; font-size:10.5px; font-weight:700; color:' + color + '; background:' + color + '1A; padding:2px 8px; border-radius:10px; margin-right:10px;">' + escapeHtml(it.type_label) + '</span>' +
+              '<span style="font-size:14px; font-weight:500;">' + escapeHtml(it.title) + '</span></span>' +
+              (it.state ? '<span style="font-size:12px; color:#5B6B82;">' + escapeHtml(it.state) + '</span>' : '') +
+              '</a>';
+          }).join('');
+        })
+        .catch(function(){
+          countEl.textContent = '';
+          resultsEl.innerHTML = '<div style="color:#D3212D; font-size:13px;">搜索出错，请稍后再试。</div>';
+        });
+    }
+
+    var timer = null;
+    input.addEventListener('input', function(){
+      clearTimeout(timer);
+      timer = setTimeout(function(){ search(input.value); }, 250);
+    });
+
+    if(initialQ) search(initialQ);
+  })();
+  //]]>
+  </script>
+</div>
+</tal:main>
+</metal:content>
+</body>
+</html>

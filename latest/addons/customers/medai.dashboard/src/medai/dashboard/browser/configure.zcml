@@ -1,0 +1,15 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser">
+
+  <!-- Override senaite.core dashboard.js with Analyst-cards version.
+       layer="..IMedAIDashboardLayer" ensures site-level isolation:
+       only sites with the medai.dashboard profile installed get
+       the overridden JS. -->
+  <browser:resource
+      name="senaite.core.dashboard.js"
+      file="static/js/dashboard.js"
+      layer="..interfaces.IMedAIDashboardLayer"
+      />
+
+</configure>

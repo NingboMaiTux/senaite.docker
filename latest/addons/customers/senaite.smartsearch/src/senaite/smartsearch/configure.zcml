@@ -1,0 +1,24 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    i18n_domain="senaite.smartsearch">
+
+  <include package=".browser"/>
+
+  <genericsetup:registerProfile
+      name="default"
+      title="SENAITE 智慧搜索"
+      directory="profiles/default"
+      description="在权限范围内一键搜索全部 SENAITE LIMS 数据"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="SENAITE 智慧搜索 (uninstall)"
+      directory="profiles/uninstall"
+      description="卸载 senaite.smartsearch：移除浏览器层、导航标签、搜索框 viewlet"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+</configure>

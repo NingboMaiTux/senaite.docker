@@ -1,0 +1,33 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    i18n_domain="senaite.smartsearch">
+
+  <browser:page
+      name="smartsearch"
+      for="*"
+      layer="..interfaces.ISmartSearchLayer"
+      class=".views.SmartSearchPageView"
+      template="templates/search.pt"
+      permission="zope2.View"
+      />
+
+  <browser:page
+      name="smartsearch-api"
+      for="*"
+      layer="..interfaces.ISmartSearchLayer"
+      class=".views.SmartSearchAPI"
+      permission="zope2.View"
+      />
+
+  <browser:viewlet
+      name="senaite.smartsearch.searchbox"
+      manager="plone.app.layout.viewlets.interfaces.IPortalHeader"
+      for="*"
+      layer="..interfaces.ISmartSearchLayer"
+      class=".viewlets.SearchBoxViewlet"
+      template="templates/searchbox.pt"
+      permission="zope2.View"
+      />
+
+</configure>
