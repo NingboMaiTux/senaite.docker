@@ -1,0 +1,15 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    i18n_domain="senaite.core">
+
+    <!-- Sample Catalog Indexer: department_uids (AR -> Sample Cat) -->
+    <adapter
+        factory=".indexer.department_uids"
+        name="department_uids"/>
+
+    <!-- Analysis Catalog Indexer: getDepartmentUID (Analysis -> Analysis Cat) -->
+    <adapter
+        factory=".indexer.getDepartmentUID"
+        name="getDepartmentUID"/>
+
+</configure>

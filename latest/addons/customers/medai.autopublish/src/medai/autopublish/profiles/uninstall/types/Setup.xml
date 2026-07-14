@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<object name="Setup" meta_type="Dexterity FTI">
+  <!-- Remove Report Drafting Setup behavior on uninstall -->
+  <property name="behaviors" purge="False">
+    <element value="medai.autopublish.behaviors.report_drafting_setup.IReportDraftingSetup"
+             remove="True" />
+  </property>
+</object>

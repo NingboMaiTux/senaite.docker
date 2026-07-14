@@ -1,0 +1,15 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: medai.autopublish\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: setuphandlers.py
+msgid "Samples to Verify"
+msgstr "待审核"
+
+#: setuphandlers.py
+msgid "Samples to Approve"
+msgstr "待批准"

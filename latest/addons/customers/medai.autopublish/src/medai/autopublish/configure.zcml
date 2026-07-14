@@ -1,0 +1,76 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    xmlns:five="http://namespaces.zope.org/five"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    xmlns:i18n="http://namespaces.zope.org/i18n"
+    i18n_domain="medai.autopublish">
+
+  <include package="Products.Five" />
+  <include package="Products.GenericSetup" file="meta.zcml" />
+  <five:registerPackage package="." />
+  <i18n:registerTranslations directory="locales" />
+
+  <!-- Generic Setup profile -->
+  <genericsetup:registerProfile
+      name="default"
+      title="MedAI Auto Publish"
+      directory="profiles/default"
+      description="Adds auto-publish after verify feature for Sample Types"
+      provides="Products.GenericSetup.interfaces.EXTENSION" />
+
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="MedAI Auto Publish (uninstall)"
+      directory="profiles/uninstall"
+      description="Removes MedAI Auto Publish"
+      provides="Products.GenericSetup.interfaces.EXTENSION" />
+
+  <!-- Behaviors -->
+  <include package=".behaviors" />
+
+  <!-- GS import handler: post_install / post_uninstall -->
+  <genericsetup:importStep
+      name="medai.autopublish_various"
+      title="MedAI Auto Publish: Setup"
+      description="MedAI Auto Publish installation / removal"
+      handler=".setuphandlers.import_step_handler" />
+
+  <!-- Subscribers -->
+  <include package=".subscribers" />
+
+  <!-- Catalog indexers -->
+  <include package=".catalog" />
+
+  <!-- Analyses listing department filter (IListingViewAdapter subscriber) -->
+  <subscriber
+      for="senaite.app.listing.interfaces.IListingView
+           bika.lims.interfaces.IAnalysisRequest"
+      provides="senaite.app.listing.interfaces.IListingViewAdapter"
+      factory=".browser.analyses_filter.AnalysesDepartmentFilterAdapter"
+      />
+
+  <!-- One-time post_install check/fix view for 8084 -->
+  <browser:page
+      for="*"
+      name="fix-medai-setup"
+     class=".browser.setup_check.FixMedaiSetupView"
+     permission="zope2.View"
+     />
+
+  <browser:page
+     for="*"
+     name="debug-interimfields"
+     class=".browser.setup_check.DebugInterimFieldsView"
+     permission="zope2.View"
+     />
+
+  <browser:viewlet
+      name="medai.autopublish.sidebar.icons"
+      for="*"
+      manager="plone.app.layout.viewlets.interfaces.IHtmlHead"
+      class=".browser.sidebar_icons.SidebarIconsViewlet"
+      permission="zope2.View"
+      />
+
+</configure>

@@ -1,0 +1,26 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser">
+
+  <!-- Subscriber: auto-publish verified samples when SampleType enables it -->
+  <subscriber
+      for="bika.lims.interfaces.IAnalysisRequest
+           Products.DCWorkflow.interfaces.IAfterTransitionEvent"
+      handler=".auto_publish.after_verify"
+      />
+
+  <!-- Subscriber: auto-transition verified -> report_drafting when ARReport is created -->
+  <subscriber
+      for="*
+           zope.lifecycleevent.interfaces.IObjectAddedEvent"
+      handler="..workflows.report_drafting.on_arreport_created"
+      />
+
+  <!-- Subscriber: restore sidebar folders after Setup save -->
+  <subscriber
+      for="*
+           zope.lifecycleevent.interfaces.IObjectModifiedEvent"
+      handler=".setup_sidebar.on_setup_modified"
+      />
+
+</configure>

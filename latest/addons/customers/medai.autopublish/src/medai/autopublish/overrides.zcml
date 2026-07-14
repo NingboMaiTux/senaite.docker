@@ -1,0 +1,95 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser">
+
+  <!-- Override the core publish/prepublish/republish adapters to support
+       skip-COA logic. Must be in overrides.zcml since we're replacing
+       existing named adapters from bika.lims. -->
+
+  <!-- Override Samples list view to show getAnalysesNum column by default
+       and include report_drafting state in the Active tab -->
+  <browser:page
+      for="senaite.core.interfaces.ISamples"
+      name="view"
+      class=".browser.samples.SamplesViewWithAnalysesNum"
+      permission="cmf.ListFolderContents"
+      layer="senaite.core.interfaces.ISenaiteCore"
+  />
+
+  <adapter
+      name="workflow_action_publish"
+      for="*
+           zope.publisher.interfaces.browser.IBrowserRequest"
+      factory=".subscribers.publish_adapter.PublishWithCOACheckAdapter"
+      provides="bika.lims.interfaces.IWorkflowActionAdapter"
+      permission="zope.Public" />
+
+  <adapter
+      name="workflow_action_prepublish"
+      for="*
+           zope.publisher.interfaces.browser.IBrowserRequest"
+      factory=".subscribers.publish_adapter.PublishWithCOACheckAdapter"
+      provides="bika.lims.interfaces.IWorkflowActionAdapter"
+      permission="zope.Public" />
+
+  <adapter
+      name="workflow_action_republish"
+      for="*
+           zope.publisher.interfaces.browser.IBrowserRequest"
+      factory=".subscribers.publish_adapter.PublishWithCOACheckAdapter"
+      provides="bika.lims.interfaces.IWorkflowActionAdapter"
+      permission="zope.Public" />
+
+  <!-- Override publish_samples to support report_drafting -> publish_final -->
+  <adapter
+      name="workflow_action_publish_samples"
+      for="*
+           zope.publisher.interfaces.browser.IBrowserRequest"
+      factory=".subscribers.publish_adapter.PublishSamplesReportDraftingAdapter"
+      provides="bika.lims.interfaces.IWorkflowActionAdapter"
+      permission="zope.Public" />
+
+  <!-- Samples 审核入口分拆：专用列表视图（for ISamples context） -->
+  <browser:page
+      for="senaite.core.interfaces.ISamples"
+      name="samples-to-verify"
+      class=".browser.samples.SamplesToVerifyView"
+      permission="cmf.ListFolderContents"
+      layer="senaite.core.interfaces.ISenaiteCore"
+  />
+
+  <browser:page
+      for="senaite.core.interfaces.ISamples"
+      name="samples-to-approve"
+      class=".browser.samples.SamplesToApproveView"
+      permission="cmf.ListFolderContents"
+      layer="senaite.core.interfaces.ISenaiteCore"
+  />
+
+  <!-- 根路径重定向视图：Portal Folder 的 default page -->
+  <browser:page
+      for="*"
+      name="redirect-samples-to-verify"
+      class=".browser.samples.RedirectToSamplesToVerify"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"
+  />
+
+  <browser:page
+      for="*"
+      name="redirect-samples-to-approve"
+      class=".browser.samples.RedirectToSamplesToApprove"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"
+  />
+
+  <!-- 一次性权限修复视图 -->
+  <browser:page
+      for="*"
+      name="fix-folder-permissions"
+      class=".browser.samples.FixFolderPermissionsView"
+      permission="cmf.ManagePortal"
+      layer="senaite.core.interfaces.ISenaiteCore"
+  />
+
+</configure>

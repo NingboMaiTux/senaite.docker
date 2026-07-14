@@ -1,0 +1,12 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    i18n_domain="medai.reportsportal">
+
+  <!-- Restore analysis_reports in sidebar_folders after Setup save -->
+  <subscriber
+      for="*
+           zope.lifecycleevent.interfaces.IObjectModifiedEvent"
+      handler=".setup_sidebar.on_setup_modified"
+      />
+
+</configure>

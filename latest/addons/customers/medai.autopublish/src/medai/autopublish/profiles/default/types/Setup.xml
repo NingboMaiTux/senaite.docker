@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<object name="Setup" meta_type="Dexterity FTI">
+  <!-- Add MedAI Report Drafting Setup behavior without removing existing behaviors -->
+  <property name="behaviors" purge="False">
+    <element value="medai.autopublish.behaviors.report_drafting_setup.IReportDraftingSetup"/>
+  </property>
+</object>

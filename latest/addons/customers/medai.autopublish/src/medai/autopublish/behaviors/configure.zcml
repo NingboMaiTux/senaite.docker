@@ -1,0 +1,20 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:plone="http://namespaces.plone.org/plone">
+
+  <plone:behavior
+      title="MedAI Auto Publish"
+      provides="medai.autopublish.behaviors.auto_publish.IAutoPublishBehavior"
+      />
+
+  <plone:behavior
+      title="MedAI Report Drafting Setup"
+      provides="medai.autopublish.behaviors.report_drafting_setup.IReportDraftingSetup"
+      />
+
+  <plone:behavior
+      title="MedAI Department Filter Setup"
+      provides="medai.autopublish.behaviors.department_filter.IDepartmentFilterSetup"
+      />
+
+</configure>

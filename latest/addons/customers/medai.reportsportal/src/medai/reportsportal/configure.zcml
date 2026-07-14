@@ -1,0 +1,42 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    xmlns:i18n="http://namespaces.zope.org/i18n"
+    i18n_domain="medai.reportsportal">
+
+  <i18n:registerTranslations directory="locales" />
+
+  <include package="Products.Five" />
+  <include package="Products.GenericSetup" file="meta.zcml" />
+
+  <!-- Subscribers -->
+  <include package=".subscribers" />
+
+  <!-- Browser view: global reports listing with Invalidate -->
+  <browser:page
+      for="*"
+      name="global_reports_listing"
+      class=".views.GlobalReportsListingView"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"
+      />
+
+  <!-- GS profiles: install / uninstall with post_handler -->
+  <genericsetup:registerProfile
+      name="default"
+      title="MedAI Reports Portal"
+      directory="profiles/default"
+      description="Global Analysis Reports listing with Invalidate support"
+      post_handler="medai.reportsportal.setuphandlers.post_install"
+      provides="Products.GenericSetup.interfaces.EXTENSION" />
+
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="MedAI Reports Portal (uninstall)"
+      directory="profiles/uninstall"
+      description="Uninstalls MedAI Reports Portal"
+      post_handler="medai.reportsportal.setuphandlers.post_uninstall"
+      provides="Products.GenericSetup.interfaces.EXTENSION" />
+
+</configure>
