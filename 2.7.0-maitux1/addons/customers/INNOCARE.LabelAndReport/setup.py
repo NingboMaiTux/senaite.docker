@@ -31,10 +31,8 @@ setup(
             "browser/*.zcml",
             "browser/*.pt",
             "browser/stickers/*.zcml",
-            "browser/stickers/templates/stockbatch/*.pt",
-            "browser/stickers/templates/stockbatch/*.css",
-            "browser/stickers/templates/sample/*.pt",
-            "browser/stickers/templates/sample/*.css",
+            "browser/stickers/templates/*.pt",
+            "browser/stickers/templates/*.css",
         ],
         "INNOCARE.reportdesign": [
             "*.zcml",

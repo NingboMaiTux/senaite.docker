@@ -37,7 +37,7 @@ ITEM_TITLE_MSG = _hc(u"Sample Properties", default=u"Sample Properties")
 DEFAULT_LAYOUT = "hazardcategories-controlpanel"
 SIDEBAR_DEPTH = 2
 PROFILE_ID = "profile-%s:default" % PROJECTNAME
-CONFIGLET_ID = "maitux-hazardcategories"
+LEGACY_CONFIGLET_ID = "maitux-hazardcategories"
 
 
 @implementer(INonInstallable)
@@ -45,6 +45,19 @@ class HiddenProfiles(object):
 
     def getNonInstallableProfiles(self):
         return ["maitux.hazardcategories:uninstall"]
+
+
+def unregister_legacy_configlet(portal):
+    tool = getToolByName(portal, "portal_controlpanel", None)
+    if tool is None:
+        logger.warn("portal_controlpanel is missing, skip legacy cleanup")
+        return
+    try:
+        tool.unregisterConfiglet(LEGACY_CONFIGLET_ID)
+        logger.info("Removed legacy control panel entry '%s'", LEGACY_CONFIGLET_ID)
+    except Exception:
+        logger.info("Legacy control panel entry '%s' not registered",
+                    LEGACY_CONFIGLET_ID)
 
 
 def post_install(context):
@@ -363,7 +376,8 @@ def setup_sidebar():
 
 def uninstall(context):
     logger.info("maitux.hazardcategories uninstall [BEGIN]")
-    unregister_legacy_configlet(api.get_portal())
+    portal = api.get_portal()
+    unregister_legacy_configlet(portal)
 
     setup_tool = api.get_senaite_setup()
     if setup_tool is None:

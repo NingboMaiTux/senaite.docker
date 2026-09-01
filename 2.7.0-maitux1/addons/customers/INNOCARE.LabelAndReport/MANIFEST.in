@@ -1,3 +1,4 @@
+include README.md
 recursive-include src/INNOCARE/LabelAndReport/profiles *.xml *.txt
 recursive-include src/INNOCARE/labeldesign/browser *.pt
 recursive-include src/INNOCARE/labeldesign/browser/stickers/templates *.pt *.css
