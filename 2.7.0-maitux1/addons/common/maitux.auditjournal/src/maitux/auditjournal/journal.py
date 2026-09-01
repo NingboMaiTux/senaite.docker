@@ -71,6 +71,14 @@ def _fallback_write(dsn, rows):
       （实施方案 §6.3 的第二个选项 / SPEC 未决问题 1 的倾向）。
       文件权限仍按 0600 建，双保险。
 
+    ★ **别把 0600 当成真正的防线**（2026-09-01 实测）：`/data` 在本机是
+      Windows 主机的 bind mount，**权限能设、却不跨容器重启存活** ——
+      重启后一律变回 0660。实测：本次运行内新建 0600 文件确实是 0600、
+      `chmod 600` 也立刻生效，一重启就全成 0660。
+      （生产若用真正的 Linux 卷，0600 应当保得住，但那要在生产上另行验证，
+      不能拿本机结论外推。）
+      **所以真正管用的是"只写脱敏 DSN"这一条**，权限只是叠加的一层。
+
     写失败只 logger.error，**绝不往上抛** —— 它在业务保存之后，抛了也没人能处理。
     """
     try:
@@ -137,11 +145,17 @@ def _rows():
     return rows
 
 
-def _build_row(obj, snapshot):
+def _build_row(obj, snapshot, version=None):
     """快照元数据 -> 表列（技术设计 §4）。取字段全程防御：
 
     take_snapshot 自己不查 supports_snapshots（§5.1），所以调用方可能是
     api.create() / emailview 这类没做过检查的路径，对象不一定"可审计"。
+
+    :param version: 该快照自己的版本号。**实时记录不要传** —— 留空则取
+        `get_version(obj)`，那是刚 append 完的当前版本，正是本条的号（§5.2）。
+        **回填（S5）必须传**：它遍历的是历史快照，每条有各自的序号，
+        全用对象当前版本会让所有行挤在同一个 snapshot_ver 上，
+        被唯一索引 (site_path, uid, snapshot_ver) 吃掉只剩一条。
     """
     from bika.lims import api
     from bika.lims.api import snapshot as snapshot_api
@@ -162,7 +176,8 @@ def _build_row(obj, snapshot):
         "obj_path": _u(api.get_path(obj)),
         "review_state": _u(meta.get("review_state")) or None,
         # ★ 必须在 storage.append() 之后取，拿到的才是本条的版本号（§5.2）
-        "snapshot_ver": snapshot_api.get_version(obj),
+        "snapshot_ver": (snapshot_api.get_version(obj)
+                         if version is None else version),
         "remote_address": _clean_ip(meta.get("remote_address")),
         "roles": [_u(r) for r in (meta.get("roles") or [])],
     }

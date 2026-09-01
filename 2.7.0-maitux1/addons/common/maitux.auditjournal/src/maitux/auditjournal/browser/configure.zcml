@@ -18,4 +18,29 @@
       layer="zope.publisher.interfaces.browser.IDefaultBrowserLayer"
       />
 
+  <!--
+    S5 回填入口。★ 权限与"看"分开：回填是写操作，只给 Manager。
+    ★ 缺省 dry_run —— 真写库要显式 ?dry_run=0，免得手滑访问就写库。
+  -->
+  <browser:page
+      name="audit-journal-backfill"
+      for="Products.CMFPlone.interfaces.IPloneSiteRoot"
+      class=".backfill_view.BackfillView"
+      permission="maitux.auditjournal.BackfillAuditJournal"
+      layer="zope.publisher.interfaces.browser.IDefaultBrowserLayer"
+      />
+
+  <!--
+    S6 兜底补录。★ 权限**复用**回填那个，不另立新权限 ——
+    补录和回填是同一类动作（往审计表写历史行），拆开只会多一次 profile 升级。
+    ★ 同样默认 dry_run。
+  -->
+  <browser:page
+      name="audit-journal-replay"
+      for="Products.CMFPlone.interfaces.IPloneSiteRoot"
+      class=".replay_view.ReplayView"
+      permission="maitux.auditjournal.BackfillAuditJournal"
+      layer="zope.publisher.interfaces.browser.IDefaultBrowserLayer"
+      />
+
 </configure>

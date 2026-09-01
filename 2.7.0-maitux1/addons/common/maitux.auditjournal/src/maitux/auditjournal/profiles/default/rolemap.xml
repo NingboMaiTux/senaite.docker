@@ -5,5 +5,9 @@
       <role name="Manager"/>
       <role name="LabManager"/>
     </permission>
+    <!-- 回填会写库，只给 Manager，不给 LabManager -->
+    <permission name="MAITUX: Backfill Audit Journal" acquire="False">
+      <role name="Manager"/>
+    </permission>
   </permissions>
 </rolemap>
