@@ -15,4 +15,13 @@
       title="MAITUX: View Audit Journal"
       />
 
+  <!--
+    回填是**写操作**，且一次可能写几万行，所以与"看"分开成两个权限：
+    看流水给 LabManager，跑回填只给 Manager（rolemap.xml 里定）。
+  -->
+  <permission
+      id="maitux.auditjournal.BackfillAuditJournal"
+      title="MAITUX: Backfill Audit Journal"
+      />
+
 </configure>

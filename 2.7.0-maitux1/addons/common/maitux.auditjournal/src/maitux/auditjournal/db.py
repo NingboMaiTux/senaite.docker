@@ -363,6 +363,11 @@ _INSERT_SQL = (
 ) % ", ".join(_COLUMNS)
 
 
+#: execute_values 的分页大小。自己切页而不是交给它，是为了能逐页累加
+#: rowcount —— 交给它的话 cur.rowcount 只剩最后一页的数（见 insert_rows）。
+_INSERT_PAGE_SIZE = 200
+
+
 def insert_rows(dsn, rows):
     """批量 upsert。rows 是 dict 列表，键 = 表列名。
 
@@ -385,8 +390,24 @@ def insert_rows(dsn, rows):
         try:
             conn = get_connection(dsn, force_new=(attempt == 2))
             cur = conn.cursor()
-            execute_values(cur, _INSERT_SQL, values, page_size=200)
-            inserted = cur.rowcount
+            # ★★ 不能写成 `execute_values(cur, sql, values, page_size=200)`
+            #    然后取 `cur.rowcount`。★★
+            #
+            #    execute_values 在行数 > page_size 时会**拆成多条 INSERT 分别
+            #    执行**，而 cur.rowcount 只反映**最后一条**。
+            #    2026-09-01 S5 回填实测：1294 行实际全部入库，却报"写入 457、
+            #    跳过 837"。**数据是对的、计数是错的** —— 这比数据错更阴，
+            #    因为验收判据正是靠这些数字判成败的
+            #    （S5 判据④"重跑 → written=0, skipped=全部"照样会"通过"，
+            #    但通过的理由是假的）。
+            #
+            #    所以自己按页切，逐页累加 rowcount。
+            inserted = 0
+            for start in range(0, len(values), _INSERT_PAGE_SIZE):
+                page = values[start:start + _INSERT_PAGE_SIZE]
+                execute_values(cur, _INSERT_SQL, page,
+                               page_size=len(page))
+                inserted += cur.rowcount
             conn.commit()
             return True, inserted
         except Exception:

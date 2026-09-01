@@ -48,4 +48,14 @@
       profile="maitux.auditjournal:default"
       />
 
+  <genericsetup:upgradeStep
+      title="maitux.auditjournal: profile v5 -> v6 (backfill permission)"
+      description="S5 adds a Manager-only permission for the backfill view."
+      source="5"
+      destination="6"
+      handler="maitux.auditjournal.upgrades.v6.upgrade"
+      sortkey="5"
+      profile="maitux.auditjournal:default"
+      />
+
 </configure>
