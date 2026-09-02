@@ -490,6 +490,21 @@ class ARSchemaExtender(object):
                 label=_(u"Sample Properties", default=u"Sample Properties"),
                 description=u"",
                 catalog=SETUP_CATALOG,
+                # ★ base_query 必须显式给一个本实例独占的 dict，别用类级默认值。
+                # senaite.core 的 ReferenceWidget._properties["base_query"] 是
+                # 一个**类级共享的可变 dict**（Archetypes 的 _process_args 只做
+                # self.__dict__.update(self._properties) 浅拷贝），而
+                # referencewidget.py 的 get_query() 拿到它以后直接
+                # base_query.update(query) **原地改**。
+                # 于是本字段的 query 一旦渲染过一次非拷贝的原始 widget（打开任意
+                # 样品的 view / base_edit 就会），下面的 usage_scope 就会永久污染
+                # 整个 Zope 进程里所有 ReferenceWidget 的 base_query。
+                # 后果：usage_scope 是本 addon 自己往 senaite_catalog_setup 加的
+                # KeywordIndex（见 setuphandlers.ensure_setup_catalog_usage_scope_index），
+                # SampleType / SampleTemplate / Client 等类型没有这个属性、不进
+                # 索引，被污染后样品登记页的引用控件一个都搜不出来。
+                # 传 base_query={} 后 kwargs 覆盖类级默认值，update 只改本实例。
+                base_query={},
                 query={
                     "portal_type": "HazardCategory",
                     "usage_scope": [u"both", u"ar", u"ar_only"],
