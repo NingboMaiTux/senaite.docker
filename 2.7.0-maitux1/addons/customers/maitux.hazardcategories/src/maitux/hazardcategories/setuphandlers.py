@@ -54,6 +54,13 @@ class HiddenProfiles(object):
 
 
 def unregister_legacy_configlet(portal):
+    """Drop the obsolete control panel entry for static dictionary data.
+
+    maitux.hazardcategories is maintained through its folder/listing view and
+    sidebar entry, not through Plone's add-on configlet area. Existing sites
+    may still have the old configlet from previous profiles, so installation
+    must actively unregister it.
+    """
     tool = getToolByName(portal, "portal_controlpanel", None)
     if tool is None:
         logger.warn("portal_controlpanel is missing, skip legacy cleanup")
@@ -84,24 +91,6 @@ def run_install_steps(portal):
     setup_permissions(folder)
     migrate_hazard_titles(portal)
     setup_sidebar()
-
-
-def unregister_legacy_configlet(portal):
-    """Drop the obsolete control panel entry for static dictionary data.
-
-    maitux.hazardcategories is maintained through its folder/listing view and
-    sidebar entry, not through Plone's add-on configlet area. Existing sites
-    may still have the old configlet from previous profiles, so installation
-    must actively unregister it.
-    """
-    tool = getToolByName(portal, "portal_controlpanel", None)
-    if tool is None:
-        return
-    try:
-        tool.unregisterConfiglet(CONFIGLET_ID)
-        logger.info("Removed obsolete control panel entry '%s'", CONFIGLET_ID)
-    except Exception:
-        pass
 
 
 def _split_categories_rows(text):
