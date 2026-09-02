@@ -21,6 +21,7 @@ SAMPLE_PORTAL_TYPES = (
     "AnalysisRequest",
 )
 
+ANALYSIS_WORKFLOW_ID = "senaite_analysis_workflow"
 WORKSHEET_WORKFLOW_ID = "senaite_worksheet_workflow"
 REACTIVATE_REASON_FIELD = u"重新激活原因"
 
@@ -138,8 +139,47 @@ def reactivate_analysis(analysis, reason, reactivate_parent_sample=True):
 
 
 def reactivate_analysis_object(analysis, reason):
-    """分析项统一通过单一 Reactivate 回退到 assigned。"""
+    """分析项走单一 Reactivate 落到 unassigned，仍挂着工作表的再同步回 assigned。
+
+    落点必须分流：工作表的"添加分析"列表只取 review_state=unassigned，所以
+    没有工作表却停在 assigned 的分析项既不在任何工作表上、又进不了任何工作表
+    的候选列表 —— 是个谁也够不着的孤儿。被拒绝/被取消的分析项尤其如此，
+    core 的 after_reject / after_cancel 都会先把它们摘出工作表。
+
+    为什么不是"先落 unassigned 再 doActionFor(assign) 补回去"：guard_assign
+    第一句就是 `if not is_worksheet_context(): return False`，从样品页发起时
+    永远为假，而且**静默失败** —— 分析项会不声不响地留在 unassigned。
+    """
+    # 落点由移动之前的事实决定，所以先把工作表抓住再做 transition。
+    worksheet = get_analysis_worksheet(analysis)
+
     transition_object(analysis, "reactivate", reason)
+
+    if worksheet is None:
+        # 不在工作表上：unassigned 就是终点，也正是能被工作表重新收录的状态。
+        return
+
+    sync_analysis_to_assigned(analysis, worksheet)
+
+
+def sync_analysis_to_assigned(analysis, worksheet):
+    """把仍挂在工作表上的分析项从 unassigned 同步回 assigned。
+
+    这里不再写审计快照：reactivate transition 本身已经带着原因记进了该分析项的
+    workflow history，本步只是把状态摆回与"它还在工作表上"这一事实相符的位置。
+    这与 sync_worksheet_to_open 不同 —— 那边整条路径上没有任何 transition
+    承载原因，所以必须自己补一条快照。
+
+    action 取一个可识别的名字，让 workflow history 里能看出这一步是谁干的。
+    """
+    changeWorkflowState(
+        analysis,
+        ANALYSIS_WORKFLOW_ID,
+        "assigned",
+        trigger_events=False,
+        action="reactivate_assign_sync",
+    )
+    return worksheet
 
 
 def rollback_worksheet(worksheet, reason):
