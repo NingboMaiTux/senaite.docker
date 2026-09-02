@@ -1,0 +1,19 @@
+<configure xmlns="http://namespaces.zope.org/zope"
+           i18n_domain="maitux.workflow">
+
+  <!-- Reactivate 的工作流守卫。
+
+  必须带 name：IGuardAdapter 是 for="*" 的单适配器注册，匿名注册会与其他
+  addon（如 maitux.reviewerassignment）的同类适配器发生 ZCML 冲突。
+  guard_handler 用 getAdapters() 遍历**所有**具名适配器，不会漏掉带名字的这个。
+
+  注意 for="*" 且查找签名只有 (instance,) —— 没有 request，所以这里加 layer=
+  是无效的，站点级收口只能在适配器内部做（见 siteinstall）。
+  -->
+  <adapter
+      name="maitux_workflow_reactivate"
+      factory=".reactivate.ReactivateGuardAdapter"
+      for="*"
+      provides="bika.lims.interfaces.IGuardAdapter" />
+
+</configure>

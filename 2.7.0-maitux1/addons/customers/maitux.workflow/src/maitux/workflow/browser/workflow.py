@@ -12,6 +12,7 @@ from bika.lims.browser.workflow import RequestContextAware
 from bika.lims.interfaces import IWorkflowActionUIDsAdapter
 from zope.interface import implements
 
+from maitux.workflow.services.reactivate import get_reactivate_warnings
 from maitux.workflow.services.reactivate import reactivate_objects
 
 
@@ -91,6 +92,15 @@ class ReactivateWorkflowView(BrowserView):
                 "portal_type": getattr(obj, "portal_type", ""),
             })
         return items
+
+    def get_warnings(self):
+        """确认页上的善意提醒 —— 只告知，不阻断，也不改变任何对象。
+
+        计算依赖是单向的：core 的 reject 只向下游级联（`cascade_to_dependents`），
+        不动上游。所以激活时也照这个方向对称处理 —— 不替用户决定上下游的去留，
+        只把"你可能没意识到的那部分"摆出来。
+        """
+        return get_reactivate_warnings(self.get_objects())
 
     def get_reason(self):
         return self.request.form.get("reason", u"")
