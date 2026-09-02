@@ -28,6 +28,37 @@
             </ul>
           </fieldset>
 
+          <tal:warnings define="warnings view/get_warnings">
+            <div class="alert alert-warning"
+                 tal:condition="warnings">
+              <strong>请留意：以下关联项不会被一起处理</strong>
+              <ul>
+                <li tal:repeat="warning warnings">
+                  <tal:dependents condition="python:warning['kind'] == 'dependents'">
+                    <strong tal:content="warning/analysis">上游</strong>
+                    被拒绝时，下列引用了它的测试也一并被拒绝了：
+                    <span tal:content="python:u'、'.join(warning['items'])">下游</span>。
+                    <em>本次激活不会连带激活它们</em>，如需一并恢复请单独处理。
+                  </tal:dependents>
+                  <tal:skipped condition="python:warning['kind'] == 'skipped'">
+                    样品
+                    <strong tal:content="warning/analysis">样品编号</strong>
+                    下列测试<em>不会</em>随整单激活一起回来：
+                    <span tal:content="python:u'、'.join(warning['items'])">测试</span>。
+                    它们是被单独拒绝或已作为历史副本留存的，报告就是按不含它们的
+                    形态发出的。如需恢复某一条，请单独勾选它再点 Reactivate。
+                  </tal:skipped>
+                  <tal:dependencies condition="python:warning['kind'] == 'dependencies'">
+                    <strong tal:content="warning/analysis">下游</strong>
+                    的计算依赖
+                    <span tal:content="python:u'、'.join(warning['items'])">上游</span>
+                    目前仍处于拒绝状态，<em>本项激活后可能仍无法算出结果</em>。
+                  </tal:dependencies>
+                </li>
+              </ul>
+            </div>
+          </tal:warnings>
+
           <fieldset>
             <legend>激活原因</legend>
             <textarea name="reason"

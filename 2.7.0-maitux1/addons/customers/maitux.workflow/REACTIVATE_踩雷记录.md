@@ -189,6 +189,146 @@
 - 新建样品不会自动修复这个问题
 - 只要站点数据库里的 workflow 还是坏的，新对象也会继续使用错误的 workflow 配置
 
+## 第二轮（2026-09-02，范围收敛与落点修正）踩过的坑
+
+### 10. `update_workflow` 只增不删 —— 把状态从清单里去掉是没用的
+
+现象：
+
+- 从 `update_workflow(states=...)` 里删掉某个状态之后，已安装站点上那个
+  transition **还在**
+
+根因：
+
+- `senaite.core.api.workflow.update_workflow` 只创建和更新传入的条目，
+  **漏写的状态原样保留**
+
+处理方式：
+
+- 另写 `ensure_state_reactivate_removed()`：把该状态的出口**强制复原**成原生清单，
+  并把本包加的权限从 `permission_roles` 里删掉
+- 撤权限要**删键**，不要 `setPermission(perm, 0, ())` ——
+  删键之后 `getPermissionInfo()` 回到 `acquired=1`（本工作流不管这条权限），
+  才是装上去之前的样子；显式置空等于声称"本状态管理这条权限并拒绝所有人"
+- **两者在"按钮消失"上完全看不出区别**，只有 ZMI 权限页的 `acquire`
+  复选框能区分（删键 → 勾选；置空 → 未勾选）
+
+### 11. 落点写死 `assigned` 会造出"谁也够不着"的孤儿
+
+现象：
+
+- 激活一条不在工作表上的测试，它落在 `assigned`
+- 该测试既不在任何工作表上，又**进不了任何工作表的「添加分析」列表**
+
+根因：
+
+- 工作表的「添加分析」只取 `review_state = unassigned`
+- 而 `after_reject` / `after_cancel` **都会先把测试移出工作表** ——
+  所以被拒绝/被取消的测试**必然**撞上这个坑
+
+处理方式：
+
+- transition 统一落 `unassigned`，仍挂在工作表上的由服务层同步回 `assigned`
+- ⚠️ **不要用"先落 unassigned 再 `doActionFor(assign)` 补回去"**：
+  `guard_assign` 第一句是 `is_worksheet_context()`，从样品页发起时永远为假，
+  **而且是静默失败**
+
+### 12. `IRejected` 不是装饰性标记，它控制着"要不要参与重算"
+
+现象：
+
+- 激活一条被拒绝的测试之后，状态活了，但录入上游结果时它不会被重新计算
+
+根因：
+
+- `get_dependents()` 默认 `with_retests=False`，会把带 `IRejected` 的项**滤掉**
+- 而结果录入触发的 `recalculate_results` 用的就是默认参数
+
+处理方式：
+
+- 激活时必须 `noLongerProvides(analysis, IRejected)`
+- 反过来：只激活上游、不动下游时**不得**去清下游的标记 ——
+  那正是让下游安全留在重算集合外的机制
+- 写"找出仍处于拒绝状态的上下游"这类代码时，**必须显式传 `with_retests=True`**，
+  否则永远返回空、且看起来一切正常
+
+### 13. 父样品回退：顺序反了等于没做
+
+现象：
+
+- 把父样品的回退从"只处理 verified/published"改成走原生
+  `rollback_to_receive` 之后，样品仍然不动
+
+根因：
+
+- `guard_rollback_to_receive` 要求**样品下至少有一条 `unassigned`/`assigned` 的测试**
+- 原代码是"先动样品、后动测试"，判断时那个条件必然不成立
+- 而且 guard 为假**不报错**，样品只是静静地留在原状态
+
+处理方式：
+
+- 改成"**测试先走、父样品后退**"，与 core 的 `after_retract` 同序
+- 用 `isTransitionAllowed()` 择路，不要拿状态名硬编码 ——
+  否则样品侧范围一改，这里的清单就过期
+
+### 14. `IGuardAdapter` 的 `layer=` 拦不住它，必须自己做站点级收口
+
+现象（预防性，未实际发生）：
+
+- `for="*"` 的 guard 适配器会在**所有站点**参与每一次工作流 guard 求值，
+  包括从没装过本包的站点
+
+根因：
+
+- `guard_handler` 用 `getAdapters((instance,), IGuardAdapter)` 遍历，
+  **查找签名里没有 request**，所以 ZCML 的 `layer=` 在这里无效
+- 任一适配器返回 False 即否决整个 transition ——
+  写错一行就能把别人站点的原生按钮拦掉，**而且现象是"按钮没了"、不报错**
+
+处理方式：
+
+- 新增 `siteinstall.py`，guard 第一句先判本站是否装了本包，未装一律放行
+- 这是 `maitux.reviewerassignment` 的同构实现，**刻意复制而不是 import**
+  （两个包之间不建立依赖）
+- ⚠️ **跨站"没影响"单独看是无效证明**：本包的 guard 只对 `reactivate` 返回
+  False，而未装站点本来就没有这个 transition —— "没坏"也可能只是因为它
+  **压根没被调用**。必须另做一个能让 guard 真返回 False 的正面对照
+  （本轮用的是：取消样品 → 其下被拒测试的按钮从有变无 → 恢复样品 → 按钮回来）
+
+### 15. 接口 import 路径写错 = 整站起不来，且现象像"启动很慢"
+
+现象：
+
+- 容器进入重启循环，`docker logs` 尾部**退回到启动早期阶段**，看着像在慢慢起
+
+根因：
+
+- `IRequestAnalysis` 在 `bika.lims.interfaces.analysis`，**不在** `bika.lims.interfaces` 顶层
+- 写错在 ZCML 加载期抛 `ImportError`，整站起不来
+
+处理方式：
+
+- 判断"还在起"还是"起坏了"：看 `docker inspect --format '{{.RestartCount}}'`，
+  以及日志时间戳是否**倒退**到早期阶段
+- 新增 import 前先核实定义位置：
+  `grep -n "class IXxx" .../interfaces/*.py`
+
+### 16. 验证方法本身出错，比被验的代码出错更难发现
+
+本轮**四次**把观测手段的问题误读成了被观测对象的问题：
+
+| 现象 | 真实原因 |
+|---|---|
+| 列表端点返回"按钮列表为空" | 路径写错 → 服务端 503，脚本把错误响应解析成了空列表 |
+| 中文原因导致 `'utf8' codec can't decode byte 0xd6` | 本机 shell 按 GBK 编码了命令行，发出去的不是 UTF-8 |
+| `getVerificators` 有值 → 以为签名闸留下脏数据 | 那是**历史值**，激活不清评审历史（对照组同样有值） |
+| 确认页"有提醒" | 检测串 `alert alert-warning` 太松，命中了页面别处的元素 |
+
+**教训**：判据脚本必须先判 HTTP 状态码再解析 body；
+测中文表单一律用 `quote(s.encode('utf-8'))` 生成 body；
+判断"某个东西出现了没有"要用**该功能独有的标记串**，不要用通用的 CSS 类名；
+任何"没有变化"的结论都要配一个**能让它变化的正面对照**。
+
 ## 最终落地原则
 
 - 不改 `core` 页面展示逻辑

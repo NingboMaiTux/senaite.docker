@@ -8,9 +8,12 @@ from bika.lims import api
 from bika.lims.api.snapshot import get_storage
 from bika.lims.api.snapshot import take_snapshot
 from bika.lims.api.user import get_user_id
+from bika.lims.interfaces import IRejected
 from bika.lims.subscribers.auditlog import reindex_object
 from bika.lims.utils import changeWorkflowState
+from bika.lims.workflow import isTransitionAllowed
 from Products.CMFCore.WorkflowCore import WorkflowException
+from zope.interface import noLongerProvides
 
 
 ANALYSIS_PORTAL_TYPES = (
@@ -68,12 +71,18 @@ def reactivate_sample(sample, reason):
     """重新激活样品，并联动其下测试和工作表。"""
     validate_reason(reason)
 
+    # 样品自身的原状态决定了它底下 rejected 分析项的来历，所以必须在样品迁移
+    # **之前**取，迁移之后就取不到了。见 should_reactivate_with_sample。
+    origin_state = api.get_review_status(sample)
+
     transition_object(sample, "reactivate", reason)
 
     analyses = []
     worksheets = []
     seen_worksheets = set()
     for analysis in get_sample_analyses(sample):
+        if not should_reactivate_with_sample(analysis, origin_state):
+            continue
         analyses.append(analysis)
         reactivate_analysis_object(analysis, reason)
 
@@ -101,17 +110,48 @@ def reactivate_sample(sample, reason):
     }
 
 
+def should_reactivate_with_sample(analysis, sample_origin_state):
+    """整单激活样品时，这条分析项要不要跟着回来。
+
+    **被单独拒绝的分析项不跟着回来。** 报告就是按「不含它」的形态发出去的，
+    整单激活不该推翻那个决定；客户要恢复它，单独点那一条的 Reactivate
+    —— 分析项自己有独立的激活入口，两次操作即可。
+
+    唯一的例外是**样品自己就是被拒绝的**：那种情况下它底下的 rejected 是
+    ``after_reject`` 级联出来的，不是一条一条独立决定的，所以应当一起回来。
+    这就是为什么要用样品**迁移之前**的状态来判断。
+
+    其余状态一律看「这条 transition 现在拿不拿得到」：
+
+    - ``retracted`` 是 retract 留下的历史副本（原件已另生成重测项），没有出口
+    - ``cancelled`` 只能走样品的 reinstate，也没有出口
+
+    ★ 这一步同时是**防崩溃的兜底**：改之前，样品里只要有一条 retracted，
+      ``transition_object`` 就会抛 RuntimeError，把整单激活全部回滚 ——
+      而那条分析项本来就不该被激活。
+    """
+    state = api.get_review_status(analysis)
+
+    if state == "rejected":
+        return sample_origin_state == "rejected"
+
+    return isTransitionAllowed(analysis, "reactivate")
+
+
 def reactivate_analysis(analysis, reason, reactivate_parent_sample=True):
     """重新激活单条测试，并联动父样品和所属工作表。"""
     validate_reason(reason)
 
     sample = get_parent_sample(analysis)
-    if (reactivate_parent_sample and sample is not None and
-            api.get_review_status(sample) in ("verified", "published")):
-        # 从分析项发起时，已审核和已发布样品都需要同步回退到 sample_received。
-        transition_object(sample, "reactivate", reason)
 
+    # ★ 分析项先走，父样品后退 —— 这个顺序是硬要求，不是风格问题。
+    # guard_rollback_to_receive 要求样品下至少有一条 unassigned/assigned 的
+    # 分析项；在本条分析项还没迁移之前，那个条件必然不成立，样品会纹丝不动。
+    # core 的 after_retract 也是这个顺序（先建好重测副本，再回退样品）。
     reactivate_analysis_object(analysis, reason)
+
+    if reactivate_parent_sample and sample is not None:
+        rollback_parent_sample(sample, reason)
 
     worksheet = get_analysis_worksheet(analysis)
     if worksheet is not None:
@@ -152,14 +192,142 @@ def reactivate_analysis_object(analysis, reason):
     """
     # 落点由移动之前的事实决定，所以先把工作表抓住再做 transition。
     worksheet = get_analysis_worksheet(analysis)
+    was_rejected = IRejected.providedBy(analysis)
 
     transition_object(analysis, "reactivate", reason)
+
+    if was_rejected:
+        clear_reject_residue(analysis)
 
     if worksheet is None:
         # 不在工作表上：unassigned 就是终点，也正是能被工作表重新收录的状态。
         return
 
     sync_analysis_to_assigned(analysis, worksheet)
+
+
+def rollback_parent_sample(sample, reason):
+    """把父样品拉回可继续录入的状态。返回实际执行的 transition id 或 None。
+
+    **优先走原生 `rollback_to_receive`**，理由不只是"对齐 core"：
+    它的 after 处理会顺手清掉样品的 `IVerified` 标记，而本包的 `reactivate`
+    不会 —— 那是样品侧与分析项侧 `IRejected` 同构的一处残留。
+
+    `published` 样品**没有** `rollback_to_receive` 这条出口（状态层面就没有，
+    不是 guard 挡的），所以才回落到本包的 `reactivate`。
+
+    两条都不可用时什么都不做，这也是正确的：样品可能本来就在
+    `sample_received`，或者处于 rejected / cancelled 这类不该被单条分析项
+    拖着走的状态。**用 isTransitionAllowed 判断而不是拿状态名硬编码**，
+    避免再出现"改了样品侧范围、这里的状态清单就过期"的情况。
+    """
+    for transition_id in ("rollback_to_receive", "reactivate"):
+        if isTransitionAllowed(sample, transition_id):
+            transition_object(sample, transition_id, reason)
+            return transition_id
+    return None
+
+
+def clear_reject_residue(analysis):
+    """清掉 reject 在这条分析项自己身上留下的痕迹。
+
+    core 的 after_reject 做了三件事：打 IRejected 标记、把附件的 RenderInReport
+    置 False、把下游一并拒绝。前两件是这条分析项**自己**的状态，激活时必须还原；
+    第三件涉及别的对象，按「善意提醒、不级联」的决定交给确认页去提示，
+    这里绝不代劳（core 的 reject 本身也只向下游单向级联，不动上游）。
+
+    ★ IRejected 不是装饰性标记：``get_dependents()`` 默认（with_retests=False）
+    会把带这个标记的分析项从依赖集合里滤掉。不清掉它，这条分析项**状态活了、
+    却仍被排除在重算之外** —— 录入上游结果时不会被重新计算，而且不报错。
+    """
+    noLongerProvides(analysis, IRejected)
+
+    # after_reject 把该分析项的附件全部置为不进报告，这里全部恢复。
+    # ⚠ 这一步是不对称的：如果某个附件在被拒绝**之前**就已经被人为设成不进报告，
+    # 这里会把它一并打开。reject 没有记录改动前的值，无从区分。
+    for attachment in analysis.getAttachment():
+        attachment.setRenderInReport(True)
+
+
+def get_reactivate_warnings(objects):
+    """确认页要展示的提醒。**只读，不改变任何对象。**
+
+    两个方向各提醒一次（F13：core 的 reject 只向下游级联，不动上游）：
+
+    - 激活**上游**：当初被它连累拒绝的下游不会跟着活过来，列出来让人知道
+    - 激活**下游**：它依赖的上游若仍是 rejected，本项激活后也算不出结果
+
+    ★ 两处都必须传 ``with_retests=True``。``getDependents`` / ``getDependencies``
+    默认会把 retracted / rejected / retested 的项滤掉 —— 而我们要找的**恰恰就是
+    那些 rejected 的**。用默认参数的话，这个函数会永远返回空列表，
+    而且看起来一切正常。
+    """
+    warnings = []
+    for obj in unique_objects(objects):
+        portal_type = getattr(obj, "portal_type", "")
+
+        # 整单激活样品：把不会跟着回来的分析项列出来。不提示的话，
+        # 「被单独拒绝的项要自己再点一次」这个设计客户根本发现不了。
+        if portal_type in SAMPLE_PORTAL_TYPES:
+            skipped = get_skipped_analyses(obj)
+            if skipped:
+                warnings.append({
+                    "kind": "skipped",
+                    "analysis": api.safe_unicode(api.get_id(obj)),
+                    "items": skipped,
+                })
+            continue
+
+        if portal_type not in ANALYSIS_PORTAL_TYPES:
+            continue
+
+        title = api.safe_unicode(api.get_title(obj))
+
+        downstream = get_rejected_related(obj, "getDependents")
+        if downstream:
+            warnings.append({
+                "kind": "dependents",
+                "analysis": title,
+                "items": downstream,
+            })
+
+        upstream = get_rejected_related(obj, "getDependencies")
+        if upstream:
+            warnings.append({
+                "kind": "dependencies",
+                "analysis": title,
+                "items": upstream,
+            })
+    return warnings
+
+
+def get_skipped_analyses(sample):
+    """整单激活样品时**不会**跟着回来的那些分析项，返回标题列表。"""
+    origin_state = api.get_review_status(sample)
+    titles = []
+    for analysis in get_sample_analyses(sample):
+        if should_reactivate_with_sample(analysis, origin_state):
+            continue
+        titles.append(api.safe_unicode(api.get_title(analysis)))
+    return titles
+
+
+def get_rejected_related(analysis, method_name):
+    """取该分析项上游或下游中**仍处于拒绝状态**的那些，返回标题列表。"""
+    method = getattr(analysis, method_name, None)
+    if method is None:
+        return []
+    try:
+        related = method(with_retests=True)
+    except TypeError:
+        # 兼容不接受 with_retests 参数的实现
+        related = method()
+    titles = []
+    for item in related or []:
+        item = api.get_object(item)
+        if IRejected.providedBy(item):
+            titles.append(api.safe_unicode(api.get_title(item)))
+    return titles
 
 
 def sync_analysis_to_assigned(analysis, worksheet):

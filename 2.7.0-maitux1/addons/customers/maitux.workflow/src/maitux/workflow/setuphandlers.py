@@ -23,15 +23,26 @@ ANALYSIS_WORKFLOW_ID = "senaite_analysis_workflow"
 REACTIVATE_ROLES = ("LabManager", "Manager")
 WORKFLOW_ROOT_ID = "workflowroot"
 
+# 样品侧只在两个状态提供 Reactivate，依据是业务规则：**样品只要开工就必须走完
+# 流程到 published**，所以 verified 只是个过路状态，不需要在那里回退。
+#
+#   published —— 报告发出后发现要改
+#   rejected  —— 样品拒收（量不够 / 容器破损 / 超期）之后发现其实还能做，捞回来
+#
+# verified 这一条列的是**原生**出口全集，由 ensure_state_reactivate_removed()
+# 用它把早期版本装上去的 reactivate 摘掉。
 SAMPLE_STATE_TRANSITIONS = {
     "verified": [
         "publish", "invalidate", "rollback_to_receive", "detach",
         "reattach", "create_partitions", "dispatch", "multi_results",
-        "duplicate_sample", "reactivate",
+        "duplicate_sample",
     ],
     "published": [
         "republish", "invalidate", "create_partitions", "dispatch",
         "multi_results", "duplicate_sample", "reactivate",
+    ],
+    "rejected": [
+        "dispatch", "reactivate",
     ],
 }
 
@@ -48,6 +59,13 @@ ANALYSIS_STATE_TRANSITIONS = {
     ],
     "published": [
         "reactivate",
+    ],
+    # 被拒绝的分析项也允许激活回去。原生出口只有 unassign（且它的 guard 要求
+    # 分析项还挂在工作表上，而 after_reject 已经把它摘掉了 —— 等于没有出口）。
+    # 注意 retracted 刻意**不**在这里：那是 retract 留下的历史副本，
+    # 原件已经另生成了重测副本，把它激活回去在语义上是有害的。
+    "rejected": [
+        "unassign", "reactivate",
     ],
 }
 
@@ -210,11 +228,13 @@ def setup_workflows():
     if analysis_workflow is None:
         raise RuntimeError("Workflow '%s' not found" % ANALYSIS_WORKFLOW_ID)
 
-    # 样品发布态补充 reactivate 按钮及对应权限映射。
+    # 样品侧补充 reactivate 按钮及对应权限映射。
+    # 注意这里**没有** verified —— 而且光是不写它并不足以去掉：update_workflow
+    # 只增不删。真正摘掉的是下面的 ensure_state_reactivate_removed()。
     update_workflow(
         sample_workflow,
         states={
-            "verified": {
+            "rejected": {
                 "transitions": ["reactivate"],
                 "permissions": {
                     REACTIVATE_PERMISSION: REACTIVATE_ROLES,
@@ -241,10 +261,14 @@ def setup_workflows():
         },
     )
     # 某些 live 站点上 update_workflow 不会稳定刷新 state.transitions，这里强制校正。
-    ensure_state_reactivate_setup(
+    # verified 走"复原并撤权"那条路径：早期版本在它上面装过 reactivate，
+    # 业务确认样品必须走完流程到 published，所以这个入口要摘掉。
+    ensure_state_reactivate_removed(
         sample_workflow, "verified", SAMPLE_STATE_TRANSITIONS["verified"])
     ensure_state_reactivate_setup(
         sample_workflow, "published", SAMPLE_STATE_TRANSITIONS["published"])
+    ensure_state_reactivate_setup(
+        sample_workflow, "rejected", SAMPLE_STATE_TRANSITIONS["rejected"])
     ensure_state_permission_setup(
         sample_workflow, "verified", SAMPLE_STATE_PERMISSIONS["verified"])
 
@@ -268,6 +292,12 @@ def setup_workflows():
                     REACTIVATE_PERMISSION: REACTIVATE_ROLES,
                 },
             },
+            "rejected": {
+                "transitions": ["reactivate"],
+                "permissions": {
+                    REACTIVATE_PERMISSION: REACTIVATE_ROLES,
+                },
+            },
         },
         transitions={
             "reactivate": {
@@ -282,6 +312,11 @@ def setup_workflows():
                 "after_script": "",
                 "guard": {
                     "guard_permissions": REACTIVATE_PERMISSION,
+                    # 挂上 core 的 guard 分派入口，好让本包的 IGuardAdapter
+                    # 参与判断（父样品已 cancelled/rejected/invalid/dispatched
+                    # 时不给激活）。没有对应的 core guard_reactivate 函数，
+                    # guard_handler 在适配器都放行时默认返回 True。
+                    "guard_expr": 'python:here.guard_handler("reactivate")',
                 },
             },
         },
@@ -295,6 +330,8 @@ def setup_workflows():
         analysis_workflow, "verified", ANALYSIS_STATE_TRANSITIONS["verified"])
     ensure_state_reactivate_setup(
         analysis_workflow, "published", ANALYSIS_STATE_TRANSITIONS["published"])
+    ensure_state_reactivate_setup(
+        analysis_workflow, "rejected", ANALYSIS_STATE_TRANSITIONS["rejected"])
     ensure_state_permission_setup(
         analysis_workflow, "to_be_verified", ANALYSIS_STATE_PERMISSIONS["to_be_verified"])
     ensure_state_permission_setup(

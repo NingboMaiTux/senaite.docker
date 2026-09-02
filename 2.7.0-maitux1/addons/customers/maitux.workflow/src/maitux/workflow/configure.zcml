@@ -7,6 +7,7 @@
   <!-- 引入子包 ZCML 配置 -->
   <include package=".browser" />
   <include package=".content" />
+  <include package=".guards" />
 
   <permission
       id="maitux.workflow.permissions.TransitionReactivate"
