@@ -9,11 +9,10 @@ from zope.schema.interfaces import IVocabularyFactory
 from zope.schema.vocabulary import SimpleTerm
 from zope.schema.vocabulary import SimpleVocabulary
 
-from INNOCARE.arextension.defaults import DEFAULT_HAZARD_CATEGORIES
-from INNOCARE.arextension.setuphandlers import translate_with_fallback
-
 from maitux.hazardcategories import _
 from maitux.hazardcategories.config import PROJECTNAME
+from maitux.hazardcategories.config import DEFAULT_CATEGORIES
+from maitux.hazardcategories.translation import translate_with_fallback
 
 REGISTRY_KEY = "maitux.hazardcategories.categories"
 REGISTRY_JSON_KEY = "maitux.hazardcategories.categories.json"
@@ -357,10 +356,10 @@ def format_title(category):
 
 
 def _runtime_translate(msg, fallback=None):
-    # translate_with_fallback defaults to the INNOCARE.arextension domain,
-    # which does not contain the scope-label msgids. Resolve the message's
-    # own domain (maitux.hazardcategories) so the package catalog is used
-    # and the Chinese translations are picked up at runtime.
+    # 解耦后 translate_with_fallback 已迁到本包的 translation.py，默认 domain
+    # 就是 PROJECTNAME（maitux.hazardcategories），不再是 INNOCARE.arextension。
+    # 这里仍显式解析 message 自带的 domain：Message 对象可能来自别的域，
+    # 显式传入才能保证用对应的 catalog，运行期取到中文翻译。
     domain = getattr(msg, "domain", None) or PROJECTNAME
     return translate_with_fallback(msg, domain=domain)
 
