@@ -1,3 +1,20 @@
+# 时间与时区是两层，不要混：
+#
+# 时钟 —— 容器共享宿主内核时钟（CLOCK_REALTIME 不参与命名空间隔离），所以容器
+# 时间恒等于宿主时间，不需要任何配置。授时只在宿主做（chrony 对接内网时间源）；
+# 容器内绝不跑 ntpd/chrony：调时钟需要 CAP_SYS_TIME（Docker 默认已丢弃），真给了
+# 也是去改宿主时钟，连带影响同机所有容器。
+#
+# 时区 —— 只影响时间的「显示」。下面每个服务都给了两样：
+#   /etc/localtime 挂载   跟随宿主时区
+#   TZ: Asia/Shanghai     显式声明；glibc 中 TZ 优先于 /etc/localtime
+# 只挂载时，时区取决于实施时宿主怎么配 —— 实测宿主为 UTC 时三个容器全渲染 UTC，
+# SENAITE 时间戳就会差 8 小时。加上 TZ 后结果与宿主无关、可复现。三个镜像都自带
+# zoneinfo，所以 TZ 不会静默退回 UTC。
+#
+# 另注：SENAITE 界面上显示的时间还受 Plone 的 portal_timezone 控制
+# （@@dateandtime-controlpanel），那个值存在 ZODB 里，不由本文件决定。
+
 services:
   postgres:
     image: postgres:18
@@ -5,6 +22,7 @@ services:
     restart: unless-stopped
     shm_size: 1gb
     environment:
+      TZ: Asia/Shanghai
       POSTGRES_DB: lims_db
       POSTGRES_USER: lims_user
       POSTGRES_PASSWORD: Maitux=123456
@@ -51,6 +69,7 @@ services:
           cpus: "1"
           memory: 1024MB
     environment:
+      TZ: Asia/Shanghai
       SITE: MaiLIMS
       PASSWORD: Maitux=123456
       PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
@@ -81,6 +100,8 @@ services:
       - 443:443
     depends_on:
       - instance
+    environment:
+      TZ: Asia/Shanghai
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./nginx/certificate/certificate.pem:/etc/nginx/certificate/certificate.pem:ro
