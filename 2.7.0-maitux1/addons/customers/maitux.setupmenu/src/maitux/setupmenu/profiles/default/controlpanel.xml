@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<object name="portal_controlpanel"
+        meta_type="Plone Control Panel Tool"
+        xmlns:i18n="http://xml.zope.org/namespaces/i18n">
+
+  <!--
+    R9b（SENAITE-Addon开发规则）：configlet 的 title 必须是 ASCII，
+    中文通过 locales/ 的 i18n 翻译（i18n:attributes="title"）。
+  -->
+  <configlet
+      title="Menu Management"
+      action_id="maitux.setupmenu"
+      appId="maitux.setupmenu"
+      category="Products"
+      condition_expr=""
+      icon_expr="string:++plone++senaite.core.static/assets/icons/setup.svg"
+      url_expr="string:${portal_url}/@@maitux-setupmenu"
+      visible="True"
+      i18n:domain="maitux.setupmenu"
+      i18n:attributes="title">
+    <permission>senaite.core: Manage Bika</permission>
+  </configlet>
+
+</object>

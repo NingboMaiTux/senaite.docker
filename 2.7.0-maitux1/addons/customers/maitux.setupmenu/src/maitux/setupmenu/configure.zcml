@@ -1,0 +1,70 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:five="http://namespaces.zope.org/five"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    xmlns:i18n="http://namespaces.zope.org/i18n"
+    i18n_domain="maitux.setupmenu">
+
+  <!--
+    R1（SENAITE-Addon开发规则）：用到 senaite.core 自定义权限的注册
+    （browser:page 的 permission="senaite.core.permissions.ManageBika"），
+    必须先把权限注册顺序钉在自己前面。addon 的 configure.zcml 在
+    five:loadProducts 之前加载，直接引用未注册权限会触发
+    ComponentLookupError 导致 Zope 启动失败。
+  -->
+  <include package="senaite.core.permissions" />
+
+  <!-- Zope 2 包注册（皮肤层等基础机制需要） -->
+  <include package="Products.Five" />
+  <include package="Products.GenericSetup" file="meta.zcml" />
+  <five:registerPackage package="." />
+
+  <!-- 双语翻译（locales/<lang>/LC_MESSAGES/maitux.setupmenu.mo） -->
+  <i18n:registerTranslations directory="locales" />
+
+  <!-- 引入子包 ZCML 配置 -->
+  <include package=".browser" />
+
+  <!-- 隐藏卸载 Profile，保持 Add-ons 面板整洁 -->
+  <utility
+      factory=".setuphandlers.HiddenProfiles"
+      name="maitux.setupmenu"
+      />
+
+  <!-- 注册安装 Profile -->
+  <genericsetup:registerProfile
+      name="default"
+      title="Maitux Setup Menu"
+      directory="profiles/default"
+      description="Role-based Setup menu management add-on"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <!-- 标准安装入口：通过 importStep 调用 setup_handler -->
+  <genericsetup:importStep
+      name="maitux.setupmenu.setuphandler"
+      title="maitux.setupmenu setup handler"
+      description="Install Maitux Setup Menu registrations"
+      handler="maitux.setupmenu.setuphandlers.setup_handler">
+    <depends name="plone-various"/>
+  </genericsetup:importStep>
+
+  <!-- 注册卸载 Profile -->
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="Uninstall Maitux Setup Menu"
+      directory="profiles/uninstall"
+      description="Uninstalls the maitux.setupmenu package"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <!-- 标准卸载入口：通过 importStep 调用 uninstall_handler -->
+  <genericsetup:importStep
+      name="maitux.setupmenu.uninstallhandler"
+      title="maitux.setupmenu uninstall handler"
+      description="Uninstall Maitux Setup Menu registrations"
+      handler="maitux.setupmenu.setuphandlers.uninstall_handler">
+    <depends name="plone-various"/>
+  </genericsetup:importStep>
+
+</configure>

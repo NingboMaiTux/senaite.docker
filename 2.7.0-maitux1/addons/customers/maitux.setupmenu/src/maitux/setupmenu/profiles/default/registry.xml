@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<registry xmlns:i18n="http://xml.zope.org/namespaces/i18n" i18n:domain="maitux.setupmenu">
+
+  <!-- Setup 菜单角色分配存储 -->
+  <records interface="maitux.setupmenu.interfaces.ISetupMenuRegistry" />
+
+</registry>
