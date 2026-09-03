@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name="INNOCARE.arextension",
-    version="1.0.1",
+    version="1.0.2",
     description="Analysis Request Custom Extensions for INNOCARE",
     long_description="",
     author="Maitux Team",

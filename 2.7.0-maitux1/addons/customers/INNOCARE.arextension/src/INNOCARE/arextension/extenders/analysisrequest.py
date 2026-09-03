@@ -348,6 +348,11 @@ class ARSchemaExtender(object):
                 # （说明写入注释，不在界面上显示括号备注）
                 description=u"",
                 catalog="portal_catalog",
+                                # R12：base_query 是类级共享 dict，get_query() 会原地
+                # update(query) —— 不显式给本实例一个独占 dict，下面的键
+                # 就会污染整个进程里所有 ReferenceWidget。同时也让本控件
+                # 免疫别处（含 senaite.core 那 63 处）泼过来的键。
+                base_query={},
                 query={
                     "portal_type": "Project",
                     "sort_on": "sortable_title",
@@ -442,6 +447,11 @@ class ARSchemaExtender(object):
                 # （说明写入注释，不在界面上显示括号备注）
                 description=u"",
                 catalog=SETUP_CATALOG,
+                                # R12：base_query 是类级共享 dict，get_query() 会原地
+                # update(query) —— 不显式给本实例一个独占 dict，下面的键
+                # 就会污染整个进程里所有 ReferenceWidget。同时也让本控件
+                # 免疫别处（含 senaite.core 那 63 处）泼过来的键。
+                base_query={},
                 query={
                     "portal_type": "SampleMatrix",
                     "sort_on": "sortable_title",
@@ -464,6 +474,11 @@ class ARSchemaExtender(object):
                 # （说明写入注释，不在界面上显示括号备注）
                 description=u"",
                 catalog=SETUP_CATALOG,
+                                # R12：base_query 是类级共享 dict，get_query() 会原地
+                # update(query) —— 不显式给本实例一个独占 dict，下面的键
+                # 就会污染整个进程里所有 ReferenceWidget。同时也让本控件
+                # 免疫别处（含 senaite.core 那 63 处）泼过来的键。
+                base_query={},
                 query={
                     "portal_type": (
                         "SamplePreservation",
