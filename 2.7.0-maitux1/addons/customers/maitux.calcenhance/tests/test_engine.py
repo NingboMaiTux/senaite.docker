@@ -271,7 +271,8 @@ def test_count_values_rows(p, r):
 #              -> 61 (S3: six regression SE / CI wrappers)
 #              -> 62 (S2 revised: CF_GATE dropped, BAND + GATE added,
 #                     both tables -- the single-threshold rule was wrong)
-EXPECTED_SAFE_ENTRIES = 62
+#              -> 64 (S7: GROUP_CI_LOW / GROUP_CI_HIGH, array table only)
+EXPECTED_SAFE_ENTRIES = 64
 EXPECTED_SCALAR_ENTRIES = 26
 
 
@@ -627,6 +628,84 @@ def test_dependent_lookup_branch_wired(p, r):
             or u"may_be_dynamic_source" in src, True)
 
 
+# Nine recovery values: mean 100.0, sample SD 1.3693064.
+# Half-width = _T_95[8] * SD / sqrt(9) = 2.306004 * 1.3693064 / 3 = 1.0525.
+NINE = [98.0, 99.0, 100.0, 101.0, 102.0, 98.5, 99.5, 100.5, 101.5]
+NINE_MEAN = 100.0
+NINE_LO = 98.9475
+NINE_HI = 101.0525
+
+
+def _rebuild_group_ci(p):
+    """Rebuild the two ungrouped CI helpers, bottom-up through their cells."""
+    agg_stdev = rebuild(p, "_agg_stdev")
+    if agg_stdev is None:
+        return None, None
+    agg_ci = rebuild(p, "_agg_ci", freevars={"_agg_stdev": agg_stdev})
+    if agg_ci is None:
+        return None, None
+    deps = {"_agg_ci": agg_ci, "_nums_only": rebuild(p, "_nums_only")}
+    return (rebuild(p, "_group_ci_low", freevars=deps),
+            rebuild(p, "_group_ci_high", freevars=deps))
+
+
+def test_group_ci_whole_column(p, r):
+    """S7: CI of the mean over the whole column, no grouping key."""
+    lo_fn, hi_fn = _rebuild_group_ci(p)
+    r.check("rebuilt GROUP_CI_LOW", lo_fn is not None, True)
+    r.check("rebuilt GROUP_CI_HIGH", hi_fn is not None, True)
+    if lo_fn is None or hi_fn is None:
+        return
+
+    lo, hi = lo_fn(NINE), hi_fn(NINE)
+    r.check("GROUP_CI_LOW over nine values", lo, NINE_LO, tol=1e-6)
+    r.check("GROUP_CI_HIGH over nine values", hi, NINE_HI, tol=1e-6)
+
+    # ★ Recover t from the half-width.  A mean's interval uses df = n-1;
+    # the regression parameter intervals (S3) use n-2.  Both read _T_95, so
+    # asserting only the bound would not catch a slip between the two rows.
+    import math
+    sd = math.sqrt(sum((v - NINE_MEAN) ** 2 for v in NINE) / (len(NINE) - 1))
+    t_used = (hi - NINE_MEAN) / (sd / math.sqrt(len(NINE)))
+    r.check("df is n-1, so t = _T_95[8]", t_used, 2.306004, tol=1e-9)
+    r.check("t is NOT _T_95[7] (the neighbouring row)",
+            abs(t_used - p._T_95[7]) < 1e-6, False)
+
+    # Grouping keys are accepted and ignored, like GROUP_AVG and friends.
+    r.check("keys are ignored", lo_fn(NINE, ["a"] * 9, ["b"] * 9), lo,
+            tol=1e-12)
+
+    # Missing / non-numeric cells are skipped, not counted.
+    r.check("skips non-numeric",
+            lo_fn(NINE + [u"", None, u"---", u"abc"]), lo, tol=1e-12)
+
+    # Fewer than two values leaves the interval undefined -> "---", not 0.
+    r.check("n=1 is the placeholder", lo_fn([5.0]), p._PLACEHOLDER)
+    r.check("n=0 is the placeholder", lo_fn([]), p._PLACEHOLDER)
+    r.check("n=1 is not 0", lo_fn([5.0]) == 0, False)
+
+    # Table edges: df 10 is the last row, df 11 is off the end.
+    eleven = [float(i) for i in range(11)]      # n=11 -> df=10, in table
+    twelve = [float(i) for i in range(12)]      # n=12 -> df=11, off the end
+    r.check("n=11 (df=10) still computes",
+            isinstance(lo_fn(eleven), float), True)
+    r.check("n=12 (df=11) is the placeholder", lo_fn(twelve), p._PLACEHOLDER)
+
+
+def test_s7_registration(p, r):
+    """S7: registered in the array table only, and reachable by dispatch."""
+    safe = _registry_keys(p, "_SAFE")
+    scalar = _registry_keys(p, "safe_globals")
+    array_fn_re = re.compile(
+        r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS'
+        r'|COALESCE|SHIFT)\s*\(')
+    for name in ("GROUP_CI_LOW", "GROUP_CI_HIGH"):
+        r.check("%s in _SAFE" % name, name in safe, True)
+        r.check("%s not in safe_globals" % name, name in scalar, False)
+        r.check("%s takes the array path" % name,
+                bool(array_fn_re.search(u"%s([a])" % name)), True)
+
+
 def main():
     p = load_patches()
     print("IMPORT OK  (no Zope instance started)")
@@ -652,7 +731,9 @@ def main():
     test_lookup_dynamic_source_detection(p, r)
     test_literal_lookup_sources_unchanged(p, r)
     test_dependent_lookup_branch_wired(p, r)
-    return r.report("S0-S4 engine helpers")
+    test_group_ci_whole_column(p, r)
+    test_s7_registration(p, r)
+    return r.report("S0-S7 engine helpers")
 
 
 if __name__ == "__main__":

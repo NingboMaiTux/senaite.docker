@@ -4092,6 +4092,36 @@ def _evaluate_calculatedlist_interims(self, only=None):
         nums = _nums_only(values)
         return min(nums) if nums else _PLACEHOLDER
 
+    def _group_ci_low(values, *keys):
+        """Lower bound of the 95% interval of the mean, over the WHOLE column.
+
+        The ungrouped counterpart of GROUP_CI_LOWlist, matching the shape of
+        GROUP_AVG / GROUP_SUM / GROUP_MAX / GROUP_MIN above: `keys` is
+        accepted and ignored, so a formula can drop the grouping without
+        changing shape.
+
+        Added for "nine-injection mean recovery": that statistic is taken
+        over all nine values at once, not per spike level, and the grouped
+        version has no way to express "one group containing everything".
+        Faking it with a constant key column means typing the same value
+        nine times, where a single typo silently splits the set in two and
+        yields a perfectly plausible wrong interval.
+
+        Degrees of freedom here are n-1 -- this is the interval of a MEAN.
+        Do not confuse it with the regression parameter intervals
+        (SLOPE_CI_*, INTERCEPT_CI_*), which spend two degrees of freedom on
+        the fit and use n-2.  Both read the same _T_95 table, on different
+        rows.
+        """
+        return _agg_ci(_nums_only(values), -1)
+
+    def _group_ci_high(values, *keys):
+        """Upper bound of the 95% interval of the mean, over the WHOLE column.
+
+        See _group_ci_low.
+        """
+        return _agg_ci(_nums_only(values), 1)
+
     # _T_95 is module level now (see its comment there) -- the regression
     # parameter intervals need the same table, and two copies could drift.
 
@@ -4895,6 +4925,9 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "GROUP_SUM": _group_sum,
         "GROUP_MAX": _group_max,
         "GROUP_MIN": _group_min,
+        # Ungrouped CI of the mean -- completes the whole-column family above.
+        "GROUP_CI_LOW": _group_ci_low,
+        "GROUP_CI_HIGH": _group_ci_high,
         "GROUP_AVGlist": _group_avglist,
         "GROUP_SUMlist": _group_sumlist,
         "GROUP_MAXlist": _group_maxlist,

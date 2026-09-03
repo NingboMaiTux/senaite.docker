@@ -21,13 +21,13 @@
 
 | | 条目 | = 常量 | + 函数 |
 | -- | ---- | ---- | ---- |
-| CalculatedList `_SAFE` | **62** | 3 | **59** |
+| CalculatedList `_SAFE` | **64** | 3 | **61** |
 | 标量 `safe_globals` | **26** | 3 | **23** |
 
-较 v1.4.1：CalculatedList 52 -> 62（新增 10 个）。标量表 24 -> 26
+较 v1.4.1：CalculatedList 52 -> 64（新增 12 个）。标量表 24 -> 26
 （`BAND` / `GATE` 两个表都注册）。
 
-### 新增函数（10 个）
+### 新增函数（12 个）
 
 | 函数 | 用途 |
 | ---- | ---- |
@@ -35,6 +35,7 @@
 | `COUNT_VALUES_ROWS(c1,…,cN)` | 逐行实际有效格数。`AVG_ROWS` 的审计列 —— 跳过缺失后分母是隐含的，三针平均和六针平均在报表上长得一模一样 |
 | `BAND(value, low, high, inside)` | 落在 `[low, high]` 闭区间内取 `inside`，区间外取原值。校正因子「0.8~1.2 按 1 算」就是这个形状 |
 | `GATE(value, threshold, below)` | `value >= threshold`（含）取原值，否则取 `below`。总杂「≥0.05% 才计入」就是这个形状 |
+| `GROUP_CI_LOW(v, *k)` / `GROUP_CI_HIGH(v, *k)` | **整列**均值的 95% 置信区间（不分组）。补齐 `GROUP_AVG`/`SUM`/`MAX`/`MIN` 这一族里唯独缺的 CI |
 | `SLOPE_SE_ROWS(y…,x…)` | 逐行斜率标准误 |
 | `SLOPE_CI_LOW_ROWS(y…,x…)` | 逐行斜率 95% 下限 |
 | `SLOPE_CI_HIGH_ROWS(y…,x…)` | 逐行斜率 95% 上限 |
@@ -257,7 +258,7 @@ CalculatedList 引擎的 `_SAFE` 表：
 
 | 类别 | 函数 |
 | ---- | ---- |
-| 分组统计 | `GROUP_RSDlist`、`GROUP_CI_LOWlist`、`GROUP_CI_HIGHlist`、`GROUP_COUNTlist` |
+| 分组统计 | `GROUP_RSDlist`、`GROUP_CI_LOWlist`、`GROUP_CI_HIGHlist`、`GROUP_COUNTlist`、`GROUP_CI_LOW`、`GROUP_CI_HIGH` |
 | 修约与格式化 | `ROUND`、`ROUND_EVEN`、`FORMAT` |
 | 数值化 | `RESULT_NUM` |
 | 回归 | `SSE`、`SSE_ROWS`、`COUNT_ROWS` |
@@ -693,7 +694,40 @@ bin/instance restart
 | `GROUP_RSDlist(v,*k)`           | 按组 RSD%（广播）                    | `GROUP_RSDlist([rec],[level])`          |
 | `GROUP_CI_LOWlist(v,*k)`        | 按组 95% 置信下限（广播）            | `GROUP_CI_LOWlist([rec],[level])`       |
 | `GROUP_CI_HIGHlist(v,*k)`       | 按组 95% 置信上限（广播）            | `GROUP_CI_HIGHlist([rec],[level])`      |
+| `GROUP_CI_LOW(v,*k)`            | **整列**均值 95% 置信下限（忽略分组）| `GROUP_CI_LOW([rec])`                   |
+| `GROUP_CI_HIGH(v,*k)`           | **整列**均值 95% 置信上限（忽略分组）| `GROUP_CI_HIGH([rec])`                  |
 | `GROUP_COUNTlist(v,*k)`         | 按组有效值个数（广播），n 的留痕     | `GROUP_COUNTlist([rec],[level])`        |
+
+### 带 `list` 与不带 `list`：分组 vs 整列
+
+同一族里有两种形态，**差别是要不要分组**，不是数组与标量：
+
+| 形态 | 行为 | 例 |
+| ---- | ---- | -- |
+| `GROUP_XXXlist(v, *k)` | **按 key 分组**，每组算一个值，**广播回每一行** | `GROUP_AVGlist([rec],[level])` |
+| `GROUP_XXX(v, *k)` | **忽略 key，整列算一个值** | `GROUP_AVG([rec])` |
+
+不带 `list` 的一族原本只有 `GROUP_AVG` / `GROUP_SUM` / `GROUP_MAX` / `GROUP_MIN`，
+v1.5.0 补上了 `GROUP_CI_LOW` / `GROUP_CI_HIGH`。
+
+**补它的原因**：方法验证里的「九针平均回收率」是**九个值一起算**，不按加标水平分组。
+用分组版硬凑需要造一列「全表同值」当 key —— 那要人手填九次相同的值，
+**填错一个就静默分裂成两组，算出一个看着完全合理的错区间**。
+
+```
+imp_ns_rec_avg_recovery  = GROUP_AVGlist([imp_ns_rec_recovery],[imp_ns_rec_level])  # 按水平
+imp_ns_rec_avg9          = GROUP_AVG([imp_ns_rec_recovery])                          # 九针整列
+imp_ns_rec_ci9_lo        = GROUP_CI_LOW([imp_ns_rec_recovery])
+imp_ns_rec_ci9_hi        = GROUP_CI_HIGH([imp_ns_rec_recovery])
+```
+
+> ⚠️ **自由度是 n−1** —— 这是**均值**的置信区间。
+> 不要与 `SLOPE_CI_*` / `INTERCEPT_CI_*` 混淆，那是**回归参数**的区间，
+> 拟合直线要花掉两个自由度，用 n−2。**两者读同一张 `_T_95` 表的不同行**，
+> 用错了会得到一个看着完全合理的错区间。
+>
+> 整列版的 RSD 没有单独函数，标量字段直接写
+> `stdev([col]) / avg([col]) * 100` 即可。
 
 > 所有 `GROUP_*` 的 key 参数是**可变个数**的：`GROUP_AVGlist([v],[k1],[k2])`
 > 按两列组合分组。单 key 写法与旧版语义完全一致，**现有公式无需改动**。
