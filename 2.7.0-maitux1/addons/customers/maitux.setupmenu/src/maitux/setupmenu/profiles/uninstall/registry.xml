@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<registry xmlns:i18n="http://xml.zope.org/namespaces/i18n" i18n:domain="maitux.setupmenu">
+
+  <!-- 卸载：移除 registry 记录（幂等） -->
+  <record name="maitux.setupmenu.interfaces.ISetupMenuRegistry.enabled" remove="True" />
+  <record name="maitux.setupmenu.interfaces.ISetupMenuRegistry.menu_enabled" remove="True" />
+  <record name="maitux.setupmenu.interfaces.ISetupMenuRegistry.menu_allowed_roles" remove="True" />
+
+</registry>

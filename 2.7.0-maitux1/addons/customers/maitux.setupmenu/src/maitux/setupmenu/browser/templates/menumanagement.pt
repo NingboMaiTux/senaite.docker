@@ -1,0 +1,118 @@
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      lang="en"
+      metal:use-macro="here/prefs_main_template/macros/master"
+      i18n:domain="maitux.setupmenu">
+
+  <body>
+
+    <metal:override fill-slot="top_slot"
+                    tal:define="disable_column_one python:request.set('disable_plone.leftcolumn', 1);
+                                disable_column_two python:request.set('disable_plone.rightcolumn', 1);"/>
+
+    <div metal:fill-slot="prefs_configlet_main" id="lims-controlpanel">
+
+      <h1 class="documentFirstHeading" i18n:translate="">Menu Management</h1>
+
+      <div metal:use-macro="context/global_statusmessage/macros/portal_message">
+        Portal status message
+      </div>
+
+      <form method="post"
+            tal:define="menus view/menus;
+                        roles view/roles;">
+
+        <input type="hidden" name="_authenticator"
+               tal:attributes="value context/@@authenticator/token"/>
+
+        <div class="form-group form-check">
+          <input type="checkbox"
+                 id="filtering_enabled"
+                 class="form-check-input"
+                 name="filtering_enabled"
+                 value="1"
+                 tal:attributes="checked python:view.is_filtering_enabled and 'checked' or None"/>
+          <label class="form-check-label" for="filtering_enabled" i18n:translate="">
+            Enable role-based menu filtering
+          </label>
+          <small class="form-text text-muted" i18n:translate="">
+            When disabled, all menus are visible to everyone. When enabled, only
+            menus enabled below and assigned to the user's roles are displayed.
+            Menus are hidden for all non-admin users by default.
+          </small>
+        </div>
+
+        <table class="table table-striped table-sm table-hover">
+          <thead>
+            <tr>
+              <th style="width:30%" i18n:translate="">Menu</th>
+              <th style="width:12%" i18n:translate="">Source</th>
+              <th style="width:8%" i18n:translate="">Enabled</th>
+              <th i18n:translate="">Allowed roles</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tal:rows tal:repeat="entry menus">
+              <tr tal:define="i repeat/entry/index">
+                <td>
+                  <input type="hidden"
+                         tal:attributes="name string:menu_id_${i};
+                                         value entry/menu_id"/>
+                  <a tal:attributes="href entry/url; title entry/title"
+                     tal:content="entry/title">Menu</a>
+                </td>
+                <td>
+                  <tal:core condition="python:entry['source'] == 'core'">
+                    <span class="badge badge-secondary" i18n:translate="">Setup</span>
+                  </tal:core>
+                  <tal:legacy condition="python:entry['source'] == 'legacy'">
+                    <span class="badge badge-secondary" i18n:translate="">Legacy Setup</span>
+                  </tal:legacy>
+                  <tal:addon condition="python:entry['source'] == 'addon'">
+                    <span class="badge badge-info" i18n:translate="">Add-on</span>
+                  </tal:addon>
+                  <tal:other condition="python:entry['source'] == 'other'">
+                    <span class="badge badge-secondary" i18n:translate="">Other</span>
+                  </tal:other>
+                </td>
+                <td>
+                  <input type="checkbox"
+                         value="1"
+                         tal:attributes="name string:enabled_${i};
+                                         checked python:entry['enabled'] and 'checked' or None"/>
+                </td>
+                <td>
+                  <div class="form-row">
+                    <tal:roles tal:repeat="role roles">
+                      <div class="col-auto mb-1">
+                        <div class="form-check">
+                          <input type="checkbox"
+                                 class="form-check-input"
+                                 tal:attributes="name string:roles_${i}:list;
+                                                 value role;
+                                                 checked python:role in entry['allowed_roles'] and 'checked' or None"/>
+                          <label class="form-check-label small"
+                                 tal:content="role">role</label>
+                        </div>
+                      </div>
+                    </tal:roles>
+                  </div>
+                </td>
+              </tr>
+            </tal:rows>
+          </tbody>
+        </table>
+
+        <button type="submit"
+                class="btn btn-primary"
+                name="form.button.Save"
+                value="Save"
+                i18n:translate="">Save</button>
+      </form>
+
+    </div>
+
+  </body>
+</html>
