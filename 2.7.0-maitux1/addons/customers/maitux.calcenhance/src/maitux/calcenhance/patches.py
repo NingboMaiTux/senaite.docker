@@ -2258,6 +2258,13 @@ def _patch_setupdata_import():
         dict they build, so importing over an existing Calculation drops
         those three settings on every field.  They are carried through
         here whenever the sheet has the column.
+
+        `choices` is in the same boat and is worse to lose: a `select`
+        field whose choices never arrive renders an empty dropdown, so the
+        value can never be entered -- while the spreadsheet stays perfectly
+        valid and the import reports success.  It is a TextLine
+        ("key:label|key:label"), not a boolean, so it is passed through
+        verbatim.
         """
         interim = {
             "keyword": row["keyword"],
@@ -2272,7 +2279,10 @@ def _patch_setupdata_import():
             interim["result_type"] = row["result_type"]
         if row.get("formula"):
             interim["formula"] = row["formula"]
-        for col in ("report", "apply_wide", "locked", "cross_referenceable"):
+        if row.get("choices"):
+            interim["choices"] = row["choices"]
+        for col in ("report", "apply_wide", "locked", "cross_referenceable",
+                    "allow_empty"):
             if col in row:
                 interim[col] = _to_bool(row[col])
         return interim
