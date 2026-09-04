@@ -388,6 +388,100 @@ Plone 页面全崩时走 ZMI（不渲染 personal bar）：
 
 ---
 
+### R12. 给引用控件传 `query=` 时，必须同时传 `base_query={}`
+
+**规则**：凡是构造 `ReferenceWidget` / `QuerySelectWidget` / `UIDReferenceWidget`
+并传了 `query={...}` 的地方，**必须**同时显式传 `base_query={}`。
+
+```python
+widget=ReferenceWidget(
+    label=_(u"Sample properties"),
+    catalog=SETUP_CATALOG,
+    base_query={},                      # ← 必须有
+    query={
+        "portal_type": "HazardCategory",
+        "usage_scope": [u"both", u"ar", u"ar_only"],
+        "sort_on": "sortable_title",
+        "sort_order": "ascending",
+    },
+)
+```
+
+**理由**：`senaite.core` 的
+`ReferenceWidget._properties["base_query"]` 是一个**类级共享的可变 dict**。
+Archetypes 的 `_process_args` 只做 `self.__dict__.update(self._properties)`
+浅拷贝，所以没显式传 `base_query` 的实例，拿到的就是那个共享对象本身；
+而 `referencewidget.get_query()` 拿到它以后直接原地改：
+
+```python
+base_query = self.get_base_query(context, field)   # 共享 dict
+query = getattr(self, "query", None)
+if isinstance(query, dict):
+    base_query.update(query)                       # ← 原地写，全进程永久生效
+```
+
+只要渲染过一次**非拷贝**的原始 widget（打开任意样品的 `view` / `base_edit`
+就会），你 `query` 里的**所有**键就永久污染整个 Zope 进程里的所有引用控件。
+
+显式传 `base_query={}` 后，kwargs 覆盖类级默认值，`update` 只改本实例，
+既不污染别人，**也免疫别人泼过来的键**（`get_base_query` 返回你自己的 dict）。
+这一点很重要：`senaite.core` 自己有 63 处只传 `query=`，我们管不了上游，
+但传了 `base_query={}` 的控件不受影响。
+
+**泄漏不等于致命。致命需要两个条件同时成立**：
+
+1. 泄漏的键**是目标 catalog 的索引**
+2. 其他 `portal_type` **不具备该属性**（因而不进该索引 → 被过滤成 0 条）
+
+`senaite.core` 泄漏的 6 种键都撞不上第 2 条，所以原生环境一直没事：
+
+| 键 | core 泄漏处数 | 为什么无害 |
+|---|---|---|
+| `sort_on` / `sort_order` / `sort_limit` | 57 / 56 / 1 | 排序参数，不参与过滤 |
+| `is_active` | 57 | 通用索引，**每个内容类型都有该属性** |
+| `portal_type` | 2 | `get_query()` 末尾每次都覆写 |
+| `is_received` | 1 | 在 `senaite_catalog_setup` 里不是索引，ZCatalog 忽略 |
+
+**addon 天然更容易踩**，因为 addon 的典型动作恰恰是「给自己的内容类型建一个
+**专属索引** + 在自己的控件 query 里用它」——这两件事单独看都正常，合起来
+就同时满足了上面两个条件。`senaite.core` 从不这么做（它的索引都跨类型通用）。
+
+**实例**：`INNOCARE.arextension` 的 `SampleProperties` 字段 query 带
+`usage_scope`，而 `maitux.hazardcategories` 往 `senaite_catalog_setup` 建了
+`usage_scope` KeywordIndex。结果 Care 站样品登记页（`ar_add`）**所有**引用
+控件搜不出内容 —— 样品类型、模板、客户、联系人、批次全部空白。
+
+决定性 A/B（同一进程、同一次污染）：
+
+```
+Care      usage_scope in SampleType query: True  → 命中 0
+MaiLIMS   usage_scope in SampleType query: True  → 命中 13
+InnoCare  usage_scope in SampleType query: True  → 命中 13
+```
+
+三个站点被污染程度完全一致，唯一差别是 Care 建了那个索引 —— 变量是索引，
+不是 core。修法就是给该 widget 加 `base_query={}`，一行。
+
+**机器判据**：`lint_addon.py` 的 `E16_WIDGET_QUERY_LEAK` /
+`W16_WIDGET_QUERY_LEAK`。传了 `query=` 没传 `base_query=` 时：
+
+- query 含**通用键白名单之外**的键（或 query 不是字面量 dict，无法判定）→ **ERROR**
+- query 只含通用键（`sort_on` / `sort_order` / `sort_limit` / `portal_type` /
+  `is_active` / `is_received` / `review_state`）→ **WARN**
+
+拿出事前的代码回测过：`ec92400` 版本的 `analysisrequest.py` 第 488 行准确报
+ERROR、非通用键 `usage_scope`——这条规则会在重启前拦下那次事故。
+
+**排查提示**：怀疑中招时，先打开任意样品详情页把污染触发出来，再看
+`ar_add` 页面各控件的 `data-query`。判断某个键是不是真索引，**不要**用
+jsonapi（它对 `is_active` 等有自己的处理，`=true` 和 `=false` 会返回相同结果，
+根本区分不了），要读活 catalog 的索引表：
+`/<site>/senaite_catalog_setup/manage_catalogIndexes`。
+`senaite.core` 源码里的 `INDEXES` 是**出厂定义**，各站 ZODB 里的实际索引可能
+被 addon 改过。
+
+---
+
 ## 附：新建 addon 检查清单
 
 - [ ] `package-includes/` 下 configure + overrides **两个** slug 都建了
@@ -404,3 +498,4 @@ Plone 页面全崩时走 ZMI（不渲染 personal bar）：
 - [ ] 部署说明区分了"重启"与"重启 + 硬刷新"
 - [ ] 每项功能给出了可观测的验证判据
 - [ ] 静态数据维护型 addon 只提供内容/列表维护入口，不往附加产品配置区注册 configlet（R11）
+- [ ] 引用控件（ReferenceWidget / QuerySelectWidget）传了 `query=` 的地方，都同时传了 `base_query={}`（R12）
