@@ -1550,6 +1550,30 @@ def _collect_cross_referenceable_data(analysis):
 _PLACEHOLDER = u"---"
 
 
+# Two-sided 95% Student t, keyed by DEGREES OF FREEDOM -- not by n.  The
+# caller works out its own df, because the two users disagree: a confidence
+# interval of the mean uses df = n-1, while a confidence interval of a
+# regression parameter (slope, intercept) uses df = n-2, since fitting a line
+# spends two degrees of freedom.  Reading this table with the wrong df yields
+# an interval that looks entirely reasonable and is wrong, so the df is always
+# the caller's explicit decision.
+#
+# Exact table values only: an approximation here would produce a confidence
+# interval that looks right and is not.  A df outside the table is reported,
+# never guessed -- see the callers, which emit "---" plus one stderr line.
+#
+# Module level on purpose: it used to sit inside
+# _evaluate_calculatedlist_interims next to its only consumer.  Now that the
+# regression parameter intervals need the same table, a nested copy would mean
+# two tables that can drift apart -- the kind of defect that shows up as a
+# slightly wrong interval on a validation report and nowhere else.
+_T_95 = {
+    1: 12.706205, 2: 4.302653, 3: 3.182446, 4: 2.776445,
+    5: 2.570582, 6: 2.446912, 7: 2.364624, 8: 2.306004,
+    9: 2.262157, 10: 2.228139,
+}
+
+
 # Re-entrancy bound for the interim evaluation chain.  Evaluation calls
 # setInterimFields again whenever a value changed, which re-enters
 # evaluation; dependency chains settle in one or two extra passes.  A value
@@ -1627,6 +1651,259 @@ def _is_missing(value):
         return _safe_text(value) == _PLACEHOLDER
     except Exception:
         return False
+
+
+def _num_or_none(v):
+    """Coerce to float, or None when the cell is missing / not numeric.
+
+    Module level on purpose.  It used to live inside
+    _evaluate_calculatedlist_interims, which put it out of reach of any test:
+    that function is 1200 lines long and cannot be imported piecemeal, so
+    every row helper built on it could only be checked by hand.  The body
+    captures nothing from the enclosing scope -- only its argument and
+    builtins -- so hoisting it changes no behaviour, and the row statistics
+    that need it (_stdev_rows, _rsd_rows, _avg_rows, ...) can now be
+    exercised directly.
+    """
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return float(v)
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        if isinstance(v, str):
+            v = v.decode("utf-8", "replace")
+        s = unicode(v).strip()
+        if not s:
+            return None
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _row_survivors(cols, index):
+    """The numeric cells of one row across parallel columns.
+
+    Missing cells are skipped rather than abandoning the row: an injection
+    that was not run should not blank out the mean of the ones that were.
+    "Missing" covers everything _num_or_none rejects -- None, the empty
+    string a part-blank column degrades into, and the "---" placeholder.
+    """
+    return [v for v in (_num_or_none(col[index]) for col in cols)
+            if v is not None]
+
+
+def _avg_rows(*cols):
+    """Per-row mean across parallel columns -- AVG_ROWS(c1, c2, ..., cN).
+
+    Horizontal counterpart to STDEV_ROWS: one value per row, computed across
+    that row's cells rather than down a column.  It exists because the number
+    of injections is not fixed -- a substance may be run six times or three,
+    with the unused columns left empty -- and a hand-written
+    ``([a1]+[a2]+...+[a6])/6`` gets that wrong twice over: the sum raises on
+    the first missing cell, and the divisor stays 6 even when only three
+    injections happened.
+
+    A row with nothing numeric left yields "---".  Not 0.0: on a report a
+    zero mean reads as "we measured zero", which is a claim nobody made.
+    """
+    if not cols:
+        return []
+    results = []
+    for index in range(len(cols[0])):
+        row = _row_survivors(cols, index)
+        results.append(sum(row) / len(row) if row else _PLACEHOLDER)
+    return results
+
+
+def _count_values_rows(*cols):
+    """How many cells of each row actually held a number.
+
+    The audit trail for AVG_ROWS, and the same argument COUNT_ROWS makes for
+    the regressions: once missing cells are skipped, the n behind a mean is
+    invisible, and a three-injection average looks exactly like a six-
+    injection one on the report.  This is what puts it back on the page.
+
+    An empty row counts 0 -- unlike a statistic, "how many" always has a
+    definite answer.
+    """
+    if not cols:
+        return []
+    return [len(_row_survivors(cols, index))
+            for index in range(len(cols[0]))]
+
+
+def _gate_operand(name, raw):
+    """Coerce one numeric argument of BAND/GATE, or refuse it.
+
+    Python 2 happily orders a number against a string (every number sorts
+    below every string) instead of complaining, so a mistyped bound would not
+    raise -- it would quietly send every row down the same branch and produce
+    a column of entirely plausible wrong numbers.  Refusing turns that into
+    "---", which someone can actually see.
+    """
+    number = _num_or_none(raw)
+    if number is None:
+        raise ValueError("%s must be a number, got %r" % (name, raw))
+    return number
+
+
+def _band(value, low, high, inside):
+    """Replace `value` with `inside` while it sits inside [low, high].
+
+    BAND(value, low, high, inside) -- outside the band the real value is
+    used, inside it the substitute is.  Both ends are INCLUSIVE.
+
+    This is the correction-factor rule: a factor between 0.8 and 1.2 means the
+    impurity responds close enough to the main component that correcting is
+    noise, so 1.0 is used; further out in EITHER direction the deviation is
+    real and the measured factor applies.
+
+        BAND([imp_cf_lookup], 0.8, 1.2, 1.0)
+
+    Note it is two-sided.  A one-sided `x > 1.2 ? x : 1.0` reading agrees with
+    it above 1.0 and disagrees below 0.8 -- where it would discard a factor of
+    0.7 that the method says to apply -- and the two are indistinguishable on
+    any sample whose factors happen to land inside the band.
+
+    A missing input passes straight through rather than being replaced.
+    "Never entered" and "measured, and close enough to ignore" are different
+    facts; collapsing them makes a blank look like a decision.
+    """
+    # Before any comparison: _Missing refuses ordering operators, so asking
+    # `_MISSING <= high` raises instead of falling through.
+    if _is_missing(value):
+        return value
+
+    lo = _gate_operand("BAND low", low)
+    hi = _gate_operand("BAND high", high)
+    sub = _gate_operand("BAND inside", inside)
+    if lo > hi:
+        # An inverted band matches nothing, so every row would silently keep
+        # its raw value -- the gate would look applied and do nothing.
+        raise ValueError(
+            "BAND low (%r) must not exceed high (%r)" % (low, high))
+
+    number = _num_or_none(value)
+    if number is None:
+        # Not missing, but not comparable either: no honest decision exists,
+        # so report "no result" rather than inventing one.
+        return _PLACEHOLDER
+
+    return sub if lo <= number <= hi else number
+
+
+def _gate(value, threshold, below):
+    """Keep `value` from `threshold` upwards; below it, use `below`.
+
+    GATE(value, threshold, below) -- the threshold is INCLUSIVE, so a value
+    exactly equal to it is kept.
+
+    This is the reporting-limit rule: impurities at or above 0.05% count
+    toward the total, smaller ones contribute nothing.
+
+        GROUP_SUMlist(GATE([imp_pct], 0.05, 0), [imp_sample_id])
+
+    Kept separate from BAND on purpose.  The two differ in shape (one-sided
+    versus two-sided) AND in which side the boundary belongs to, and folding
+    them together would force one of the two to be written as its own
+    inverse -- unreadable in a formula an auditor has to check against the
+    method.
+
+    Missing passes through, as in BAND.
+    """
+    if _is_missing(value):
+        return value
+
+    limit = _gate_operand("GATE threshold", threshold)
+    fallback = _gate_operand("GATE below", below)
+
+    number = _num_or_none(value)
+    if number is None:
+        return _PLACEHOLDER
+
+    return number if number >= limit else fallback
+
+
+def _reg_stats(ys, xs):
+    """Least-squares fit plus the pieces a parameter interval needs.
+
+    Returns (slope, intercept, mse, sxx, xbar, n), or None when no interval
+    is defined for this data.
+
+    Fewer than three points is None, not a number: fitting a line spends two
+    degrees of freedom, so df = n-2 and n < 3 leaves nothing to estimate the
+    residual spread from.  Two points sit exactly on their own line, and the
+    "zero residual" that falls out of that is an artefact of having no spare
+    information -- reporting it as a standard error of 0 would assert perfect
+    certainty from no evidence at all.
+
+    All x equal is None for the same reason it is in _rows_regression: no
+    line through those points is determined.
+    """
+    n = len(ys)
+    if n < 3:
+        return None
+    xbar = sum(xs) / float(n)
+    ybar = sum(ys) / float(n)
+    sxx = sum((x - xbar) ** 2 for x in xs)
+    if sxx == 0:
+        return None
+    slope = sum((xs[i] - xbar) * (ys[i] - ybar) for i in range(n)) / sxx
+    intercept = ybar - slope * xbar
+    sse = sum((ys[i] - (slope * xs[i] + intercept)) ** 2 for i in range(n))
+    return slope, intercept, sse / float(n - 2), sxx, xbar, n
+
+
+def _reg_param(ys, xs, which):
+    """(estimate, standard error, n) for "slope" or "intercept", or None.
+
+        SE(slope)     = sqrt( MSE / Sxx )
+        SE(intercept) = sqrt( MSE * (1/n + xbar^2 / Sxx) )
+    """
+    stats = _reg_stats(ys, xs)
+    if stats is None:
+        return None
+    slope, intercept, mse, sxx, xbar, n = stats
+    import math as _reg_math
+    if which == "slope":
+        return slope, _reg_math.sqrt(mse / sxx), n
+    return (intercept,
+            _reg_math.sqrt(mse * (1.0 / n + xbar * xbar / sxx)),
+            n)
+
+
+def _reg_param_se(ys, xs, which):
+    """Standard error of a regression parameter, or "---"."""
+    got = _reg_param(ys, xs, which)
+    return _PLACEHOLDER if got is None else got[1]
+
+
+def _reg_param_ci(ys, xs, which, sign):
+    """One bound of a regression parameter's two-sided 95% interval.
+
+    ``estimate +/- t(0.05, n-2) * SE``.  Note the degrees of freedom: this is
+    NOT the mean's interval that GROUP_CI_* computes.  A mean spends one
+    degree of freedom and uses df = n-1; a fitted line spends two and uses
+    df = n-2.  Reading the t table with the wrong one yields an interval that
+    looks perfectly reasonable and is wrong, which is why the df is spelled
+    out here rather than left to a shared helper.
+    """
+    got = _reg_param(ys, xs, which)
+    if got is None:
+        return _PLACEHOLDER
+    estimate, se, n = got
+    t = _T_95.get(n - 2)
+    if t is None:
+        # Never extrapolate a t value.  Say so and return "---": a fabricated
+        # interval is indistinguishable from a real one on the report.
+        import sys as _ci_sys
+        _ci_sys.stderr.write(
+            "maitux:   regression CI: no t value for df=%d (n=%d); "
+            "table covers df 1-10\n" % (n - 2, n))
+        return _PLACEHOLDER
+    return estimate + sign * t * se
 
 
 def _present(values):
@@ -1839,6 +2116,12 @@ def _make_lookup(sibling_data):
 import re as _lookup_re
 _LOOKUP_SRC_RE = _lookup_re.compile(r'LOOKUP\s*\(\s*["\']([^"\']+)["\']')
 
+# LOOKUP whose source service is a [keyword] reference rather than a literal,
+# e.g. LOOKUP([imp_src_as], "imp_correction_factor", "imp_name", [imp_name]).
+# The value only exists at evaluation time, so _LOOKUP_SRC_RE -- which reads
+# quoted literals -- finds nothing and the formula looks dependency-free.
+_LOOKUP_DYNAMIC_SRC_RE = _lookup_re.compile(r'LOOKUP\s*\(\s*\[')
+
 _calc_propagation_local = None  # threading.local, lazily created
 
 
@@ -1859,6 +2142,40 @@ def _extract_lookup_sources(formula):
     if not formula:
         return set()
     return set(_LOOKUP_SRC_RE.findall(formula))
+
+
+def _lookup_has_dynamic_source(formula):
+    """Whether any LOOKUP in `formula` picks its source service at run time.
+
+    Which analysis such a formula reads cannot be known by reading the
+    formula -- the answer is in a field the analyst fills in.  Static parsing
+    therefore has two options: pretend there is no dependency, or assume
+    there might be one.  The first is what the code did by default, and it
+    fails silently and in the worst possible way: the downstream value is
+    computed correctly the first time and then never refreshed, so editing
+    the source leaves a stale correction factor on screen with no "---" and
+    no error to notice.  The second costs a recalculation that sometimes was
+    not needed.  That trade is not close.
+    """
+    if not formula:
+        return False
+    return bool(_LOOKUP_DYNAMIC_SRC_RE.search(formula))
+
+
+def _is_cross_referenceable_source(analysis):
+    """Whether this analysis exposes anything a LOOKUP could read.
+
+    Bounds the conservative branch above.  Without it, a dynamic-source
+    formula would be treated as depending on every analysis on the sample,
+    and each unrelated edit would drag it through a recalculation.  Only
+    analyses that actually publish cross-referenceable fields can be a
+    LOOKUP source, so only those need the benefit of the doubt.
+    """
+    try:
+        return any(i.get("cross_referenceable")
+                   for i in analysis.getInterimFields())
+    except Exception:
+        return False
 
 
 def _is_dead_analysis(analysis):
@@ -1909,6 +2226,11 @@ def _dependent_sibling_analyses(analysis):
     if not own_kw:
         return dependents
 
+    # A formula that chooses its source at run time might be pointing here,
+    # and there is no way to tell from the text.  Give it the benefit of the
+    # doubt, but only if this analysis could be a LOOKUP source at all.
+    may_be_dynamic_source = _is_cross_referenceable_source(analysis)
+
     for sibling in siblings:
         try:
             if sibling.UID() == analysis.UID():
@@ -1917,7 +2239,11 @@ def _dependent_sibling_analyses(analysis):
                 continue
             for interim in sibling.getInterimFields():
                 formula = interim.get("formula", "") or ""
-                if formula and own_kw in _extract_lookup_sources(formula):
+                if not formula:
+                    continue
+                if (own_kw in _extract_lookup_sources(formula)
+                        or (may_be_dynamic_source
+                            and _lookup_has_dynamic_source(formula))):
                     dependents.append(sibling)
                     break
         except Exception:
@@ -3380,6 +3706,12 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
             "log10": __import__("math").log10,
             "exp": __import__("math").exp,
             "LOOKUP": LOOKUP,
+            # Registered in BOTH tables.  A scalar Calculated field is just as
+            # entitled to gate a correction factor as a CalculatedList one,
+            # and a name missing from one table fails as NameError -> "---",
+            # which reads like a data problem rather than a missing function.
+            "BAND": _band,
+            "GATE": _gate,
             "COALESCE": _scalar_coalesce,
             "INDEX_BY": lambda target, keys, match: next(
                 (target[i] for i, k in enumerate(keys) if (
@@ -3691,23 +4023,8 @@ def _evaluate_calculatedlist_interims(self, only=None):
     # the '---' placeholder instead of a fabricated 0.0.  P1 removed the
     # downstream None-filter, so a placeholder no longer shifts index
     # alignment against the sibling arrays.
-    def _num_or_none(v):
-        """Coerce to float, or None when the cell is missing / not numeric."""
-        if v is None:
-            return None
-        if isinstance(v, bool):
-            return float(v)
-        if isinstance(v, (int, float)):
-            return float(v)
-        try:
-            if isinstance(v, str):
-                v = v.decode("utf-8", "replace")
-            s = unicode(v).strip()
-            if not s:
-                return None
-            return float(s)
-        except (ValueError, TypeError):
-            return None
+    # _num_or_none is module level now (see its docstring) -- it was nested
+    # here, which put every row statistic built on it out of reach of tests.
 
     def _nums_only(seq):
         """The numeric survivors of seq, in order."""
@@ -3775,15 +4092,38 @@ def _evaluate_calculatedlist_interims(self, only=None):
         nums = _nums_only(values)
         return min(nums) if nums else _PLACEHOLDER
 
-    # Two-sided 95% Student t, keyed by degrees of freedom (n - 1).
-    # Exact table values only: an approximation here would produce a
-    # confidence interval that looks right and is not.  A degrees-of-
-    # freedom value outside the table is reported, never guessed.
-    _T_95 = {
-        1: 12.706205, 2: 4.302653, 3: 3.182446, 4: 2.776445,
-        5: 2.570582, 6: 2.446912, 7: 2.364624, 8: 2.306004,
-        9: 2.262157, 10: 2.228139,
-    }
+    def _group_ci_low(values, *keys):
+        """Lower bound of the 95% interval of the mean, over the WHOLE column.
+
+        The ungrouped counterpart of GROUP_CI_LOWlist, matching the shape of
+        GROUP_AVG / GROUP_SUM / GROUP_MAX / GROUP_MIN above: `keys` is
+        accepted and ignored, so a formula can drop the grouping without
+        changing shape.
+
+        Added for "nine-injection mean recovery": that statistic is taken
+        over all nine values at once, not per spike level, and the grouped
+        version has no way to express "one group containing everything".
+        Faking it with a constant key column means typing the same value
+        nine times, where a single typo silently splits the set in two and
+        yields a perfectly plausible wrong interval.
+
+        Degrees of freedom here are n-1 -- this is the interval of a MEAN.
+        Do not confuse it with the regression parameter intervals
+        (SLOPE_CI_*, INTERCEPT_CI_*), which spend two degrees of freedom on
+        the fit and use n-2.  Both read the same _T_95 table, on different
+        rows.
+        """
+        return _agg_ci(_nums_only(values), -1)
+
+    def _group_ci_high(values, *keys):
+        """Upper bound of the 95% interval of the mean, over the WHOLE column.
+
+        See _group_ci_low.
+        """
+        return _agg_ci(_nums_only(values), 1)
+
+    # _T_95 is module level now (see its comment there) -- the regression
+    # parameter intervals need the same table, and two copies could drift.
 
     def _agg_rsd(nums):
         """Relative standard deviation, in percent."""
@@ -4418,6 +4758,48 @@ def _evaluate_calculatedlist_interims(self, only=None):
         """Residual sum of squares per row."""
         return _rows_regression(_sse, cols)
 
+    # --- Regression parameter standard errors and 95% intervals ------------
+    #
+    # Same argument shape as SLOPE_ROWS: first half Y columns, second half X.
+    # min_pairs is 3, not 2, because df = n-2 has to be at least 1 -- see
+    # _reg_stats.  Which of slope or intercept to judge a method by is the
+    # analyst's call, so both are offered and neither is privileged.
+
+    def _slope_se_rows(*cols):
+        """Standard error of the slope, per row."""
+        return _rows_regression(
+            lambda ys, xs: _reg_param_se(ys, xs, "slope"), cols, min_pairs=3)
+
+    def _slope_ci_low_rows(*cols):
+        """Lower bound of the slope's 95% interval, per row."""
+        return _rows_regression(
+            lambda ys, xs: _reg_param_ci(ys, xs, "slope", -1),
+            cols, min_pairs=3)
+
+    def _slope_ci_high_rows(*cols):
+        """Upper bound of the slope's 95% interval, per row."""
+        return _rows_regression(
+            lambda ys, xs: _reg_param_ci(ys, xs, "slope", 1),
+            cols, min_pairs=3)
+
+    def _intercept_se_rows(*cols):
+        """Standard error of the intercept, per row."""
+        return _rows_regression(
+            lambda ys, xs: _reg_param_se(ys, xs, "intercept"),
+            cols, min_pairs=3)
+
+    def _intercept_ci_low_rows(*cols):
+        """Lower bound of the intercept's 95% interval, per row."""
+        return _rows_regression(
+            lambda ys, xs: _reg_param_ci(ys, xs, "intercept", -1),
+            cols, min_pairs=3)
+
+    def _intercept_ci_high_rows(*cols):
+        """Upper bound of the intercept's 95% interval, per row."""
+        return _rows_regression(
+            lambda ys, xs: _reg_param_ci(ys, xs, "intercept", 1),
+            cols, min_pairs=3)
+
     def _count_rows(*cols):
         """How many (x, y) pairs each row actually contributed.
 
@@ -4543,6 +4925,9 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "GROUP_SUM": _group_sum,
         "GROUP_MAX": _group_max,
         "GROUP_MIN": _group_min,
+        # Ungrouped CI of the mean -- completes the whole-column family above.
+        "GROUP_CI_LOW": _group_ci_low,
+        "GROUP_CI_HIGH": _group_ci_high,
         "GROUP_AVGlist": _group_avglist,
         "GROUP_SUMlist": _group_sumlist,
         "GROUP_MAXlist": _group_maxlist,
@@ -4572,6 +4957,24 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "GROUP_COUNTlist": _group_countlist,
         "STDEV_ROWS": _stdev_rows,
         "RSD_ROWS": _rsd_rows,
+        # Horizontal mean and its audit count.  The _ROWS suffix is load-
+        # bearing, not decoration: _ARRAY_FN_RE dispatches on \w+_ROWS, and
+        # without it these would fall to the per-element path, whose
+        # placeholder short-circuit blanks a whole row as soon as ANY cell is
+        # missing -- exactly the case they exist to handle.
+        "AVG_ROWS": _avg_rows,
+        "COUNT_VALUES_ROWS": _count_values_rows,
+        # Scalar, so no _ROWS suffix: they must stay on the per-element path,
+        # where they see one value at a time.
+        "BAND": _band,
+        "GATE": _gate,
+        # Regression parameter standard errors and 95% intervals (df = n-2).
+        "SLOPE_SE_ROWS": _slope_se_rows,
+        "SLOPE_CI_LOW_ROWS": _slope_ci_low_rows,
+        "SLOPE_CI_HIGH_ROWS": _slope_ci_high_rows,
+        "INTERCEPT_SE_ROWS": _intercept_se_rows,
+        "INTERCEPT_CI_LOW_ROWS": _intercept_ci_low_rows,
+        "INTERCEPT_CI_HIGH_ROWS": _intercept_ci_high_rows,
     }}
 
     def _eval_expr(formula, values):
