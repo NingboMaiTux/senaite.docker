@@ -7,6 +7,23 @@
 > 运行时自动生成的 `custom-addon.cfg` 接入 buildout；显式 ZCML 最终体现为
 > `package-includes/` slug 的加载顺序。
 
+## 机器检查
+
+下面多条规则标了「机器判据：`lint_addon.py` 的 `Exx`」。检查器就在本目录：
+
+```bash
+python 2.7.0-maitux1/addons/customers/lint_addon.py --addon maitux.xxx   # 查一个
+python 2.7.0-maitux1/addons/customers/lint_addon.py                      # 全量
+```
+
+从哪个目录跑都行，它按自身位置找 `addons` 根。**改完 addon、重启容器之前跑一遍**；
+`ERROR` 为 0 才进部署。当前覆盖 R1 / R4 / R4b / R5b / R5c / R5d / R14 / R16
+以及若干 Python 2.7 编码陷阱。
+
+> 这份 `lint_addon.py` 有两份拷贝，内容保持一致：本仓库这份是给团队用的，
+> 另一份在维护者的个人工具库里。改任一份都要同步另一份 —— 文件头的注释里
+> 也记了这件事。
+
 ---
 
 ## 一、ZCML 加载顺序（最容易踩、且症状最吓人）
