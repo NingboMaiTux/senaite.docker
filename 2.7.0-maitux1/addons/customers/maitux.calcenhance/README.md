@@ -2,8 +2,77 @@
 
 为 SENAITE LIMS 的计算公式（Calculation）模块增加三种新的 Interim Field 控件类型，支持 HPLC 含量测定、装量差异、杂质含量等复杂计算场景。
 
-**版本：** 1.4.1
+**版本：** 1.5.0
 **兼容：** SENAITE 2.x（实测 2.7.0 / Plone 5.2 / Python 2.7）
+
+> **关于 `ISSUES.md`**：本文多处写着「详见 `ISSUES.md` ISSUE-0xx」，但**该文件
+> 不在本仓库里**（2026-09-03 核实，git 全历史也没有提交记录）。那些
+> `ISSUE-0xx` 编号仍可作为问题标识使用，但**不要指望在本包目录下找到对应文档**。
+> 若有人手上留着这份台账，值得补进仓库。
+
+---
+
+## 1.5.0 更新概要（2026-09-03）
+
+需求来源：`Docs/maitux.calcenhance-公式缺口_横向针数平均与校正因子阈值.md`；
+执行与验收记录：`Docs/maitux.calcenhance-公式引擎扩展-Backlog.md`。
+
+### 函数表规模
+
+| | 条目 | = 常量 | + 函数 |
+| -- | ---- | ---- | ---- |
+| CalculatedList `_SAFE` | **64** | 3 | **61** |
+| 标量 `safe_globals` | **26** | 3 | **23** |
+
+较 v1.4.1：CalculatedList 52 -> 64（新增 12 个）。标量表 24 -> 26
+（`BAND` / `GATE` 两个表都注册）。
+
+### 新增函数（12 个）
+
+| 函数 | 用途 |
+| ---- | ---- |
+| `AVG_ROWS(c1,…,cN)` | **逐行**横向平均，跳过缺失格。进样针数可变（6 针 / 3 针并存）时，手写 `(…)/6` 会连分子带分母一起错 |
+| `COUNT_VALUES_ROWS(c1,…,cN)` | 逐行实际有效格数。`AVG_ROWS` 的审计列 —— 跳过缺失后分母是隐含的，三针平均和六针平均在报表上长得一模一样 |
+| `BAND(value, low, high, inside)` | 落在 `[low, high]` 闭区间内取 `inside`，区间外取原值。校正因子「0.8~1.2 按 1 算」就是这个形状 |
+| `GATE(value, threshold, below)` | `value >= threshold`（含）取原值，否则取 `below`。总杂「≥0.05% 才计入」就是这个形状 |
+| `GROUP_CI_LOW(v, *k)` / `GROUP_CI_HIGH(v, *k)` | **整列**均值的 95% 置信区间（不分组）。补齐 `GROUP_AVG`/`SUM`/`MAX`/`MIN` 这一族里唯独缺的 CI |
+| `SLOPE_SE_ROWS(y…,x…)` | 逐行斜率标准误 |
+| `SLOPE_CI_LOW_ROWS(y…,x…)` | 逐行斜率 95% 下限 |
+| `SLOPE_CI_HIGH_ROWS(y…,x…)` | 逐行斜率 95% 上限 |
+| `INTERCEPT_SE_ROWS(y…,x…)` | 逐行截距标准误 |
+| `INTERCEPT_CI_LOW_ROWS(y…,x…)` | 逐行截距 95% 下限 |
+| `INTERCEPT_CI_HIGH_ROWS(y…,x…)` | 逐行截距 95% 上限 |
+
+### 修复：LOOKUP 动态选源时下游不再停留在旧值
+
+下游 AS 可以用 `LOOKUP([源字段], …)` 在运行时决定读哪个源 AS —— 例如线性验证
+分「各浓度点单独称量」和「其它称量共用」两套，下游不必也做两套。
+
+**求值一直是对的，坏的是依赖传播**：`_LOOKUP_SRC_RE` 只认带引号的字面量，
+首参写成 `[字段]` 时解析不出任何源，于是「谁 LOOKUP 了我」判断不出来，
+源 AS 改数后下游不会重算 —— **屏幕上留着旧的校正因子，不报错、也不出 `---`**。
+
+现在的做法是**保守传播**：公式里出现运行时选源的 LOOKUP，就把它当作可能依赖
+任意候选源。代价是多算一次，换来的是结果永远不过期。这个"疑罪从有"**只对
+本身发布了 `cross_referenceable` 字段的 analysis 生效** —— 否则任何无关编辑
+都会拖着下游重算一遍。
+
+对现有的 98 条字面量 LOOKUP 公式实测：解析行为**零变化**、**零误判**。
+
+### 内部变化
+
+- `_num_or_none` 与 `_T_95` 从 `_evaluate_calculatedlist_interims` 的闭包**提到
+  模块级**。前者让新的行统计复用同一份取数逻辑（此前 `_stdev_rows` 与
+  `_rsd_rows` 已各抄了一份）；后者是因为回归参数 CI 与均值 CI 要共用 t 表，
+  两份表不同步是极难查的错。
+  ★ `_T_95` **按自由度索引，不按 n**：均值 CI 用 df=n−1，回归参数 CI 用
+  df=n−2，自由度由调用方自己算。
+- **新增 `tests/`（本包第一份测试）**。`patches.py` 在模块级 import 了
+  bika.lims / Products.Archetypes / zope.event，直接导入会拖起整个 Zope，
+  而 `bin/instance run` 会在 1024MB 的容器里起第二个 Zope 进程把实例一起
+  OOM 掉。`tests/harness.py` 用三个 stub 顶掉那三个 import，在容器里以真
+  Python 2.7 加载**真实的 patches.py**；`rebuild()` 还能把闭包里的嵌套函数
+  绑回模块命名空间真调用。跑法见 `tests/harness.py` 顶部。
 
 ---
 
@@ -189,7 +258,7 @@ CalculatedList 引擎的 `_SAFE` 表：
 
 | 类别 | 函数 |
 | ---- | ---- |
-| 分组统计 | `GROUP_RSDlist`、`GROUP_CI_LOWlist`、`GROUP_CI_HIGHlist`、`GROUP_COUNTlist` |
+| 分组统计 | `GROUP_RSDlist`、`GROUP_CI_LOWlist`、`GROUP_CI_HIGHlist`、`GROUP_COUNTlist`、`GROUP_CI_LOW`、`GROUP_CI_HIGH` |
 | 修约与格式化 | `ROUND`、`ROUND_EVEN`、`FORMAT` |
 | 数值化 | `RESULT_NUM` |
 | 回归 | `SSE`、`SSE_ROWS`、`COUNT_ROWS` |
@@ -601,6 +670,16 @@ bin/instance restart
 | `COUNT_ROWS(y…,x…)`           | 逐行实际参与回归的点数（数组）       | `COUNT_ROWS([a1]…[a6],[c1]…[c6])`     |
 | `STDEV_ROWS(c1,c2,…)`         | **逐行**样本标准偏差（数组）         | `STDEV_ROWS([a1]…[a6])`               |
 | `RSD_ROWS(c1,c2,…)`           | **逐行** RSD%（数组）                | `RSD_ROWS([a1]…[a6])`                 |
+| `AVG_ROWS(c1,c2,…)`           | **逐行**横向平均，跳过缺失格（数组） | `AVG_ROWS([a1]…[a6])`                 |
+| `COUNT_VALUES_ROWS(c1,c2,…)`  | 逐行有效格数，`AVG_ROWS` 的审计列    | `COUNT_VALUES_ROWS([a1]…[a6])`        |
+| `SLOPE_SE_ROWS(y…,x…)`        | 逐行斜率标准误（数组）               | `SLOPE_SE_ROWS([a1]…[a6],[c1]…[c6])`  |
+| `SLOPE_CI_LOW_ROWS(y…,x…)`    | 逐行斜率 95% 下限（df=n−2）          | `SLOPE_CI_LOW_ROWS([a1]…,[c1]…)`      |
+| `SLOPE_CI_HIGH_ROWS(y…,x…)`   | 逐行斜率 95% 上限（df=n−2）          | `SLOPE_CI_HIGH_ROWS([a1]…,[c1]…)`     |
+| `INTERCEPT_SE_ROWS(y…,x…)`    | 逐行截距标准误（数组）               | `INTERCEPT_SE_ROWS([a1]…,[c1]…)`      |
+| `INTERCEPT_CI_LOW_ROWS(y…,x…)`  | 逐行截距 95% 下限（df=n−2）        | `INTERCEPT_CI_LOW_ROWS([a1]…,[c1]…)`  |
+| `INTERCEPT_CI_HIGH_ROWS(y…,x…)` | 逐行截距 95% 上限（df=n−2）        | `INTERCEPT_CI_HIGH_ROWS([a1]…,[c1]…)` |
+| `BAND(value,low,high,inside)`   | 闭区间内取 `inside`，区间外取原值  | `BAND([imp_cf_lookup], 0.8, 1.2, 1.0)` |
+| `GATE(value,threshold,below)`   | `>=` 阈值取原值，否则取 `below`    | `GATE([imp_pct], 0.05, 0)`            |
 | `RESULT_STATUS(vals,loq?,lod?)` | 逐行LOQ/LOD状态判定，**原样透传数值** | `RESULT_STATUS([val],[loq],[lod])`      |
 | `RESULT_NUM(val,name?,main?)`   | 逐元素数值化：主成分/限下标记→0     | `RESULT_NUM([rep],[name],[main_ref])`   |
 | `ROUND(x,n)`                    | 四舍五入，返回**数值**               | `ROUND([A], 3)`                         |
@@ -615,7 +694,40 @@ bin/instance restart
 | `GROUP_RSDlist(v,*k)`           | 按组 RSD%（广播）                    | `GROUP_RSDlist([rec],[level])`          |
 | `GROUP_CI_LOWlist(v,*k)`        | 按组 95% 置信下限（广播）            | `GROUP_CI_LOWlist([rec],[level])`       |
 | `GROUP_CI_HIGHlist(v,*k)`       | 按组 95% 置信上限（广播）            | `GROUP_CI_HIGHlist([rec],[level])`      |
+| `GROUP_CI_LOW(v,*k)`            | **整列**均值 95% 置信下限（忽略分组）| `GROUP_CI_LOW([rec])`                   |
+| `GROUP_CI_HIGH(v,*k)`           | **整列**均值 95% 置信上限（忽略分组）| `GROUP_CI_HIGH([rec])`                  |
 | `GROUP_COUNTlist(v,*k)`         | 按组有效值个数（广播），n 的留痕     | `GROUP_COUNTlist([rec],[level])`        |
+
+### 带 `list` 与不带 `list`：分组 vs 整列
+
+同一族里有两种形态，**差别是要不要分组**，不是数组与标量：
+
+| 形态 | 行为 | 例 |
+| ---- | ---- | -- |
+| `GROUP_XXXlist(v, *k)` | **按 key 分组**，每组算一个值，**广播回每一行** | `GROUP_AVGlist([rec],[level])` |
+| `GROUP_XXX(v, *k)` | **忽略 key，整列算一个值** | `GROUP_AVG([rec])` |
+
+不带 `list` 的一族原本只有 `GROUP_AVG` / `GROUP_SUM` / `GROUP_MAX` / `GROUP_MIN`，
+v1.5.0 补上了 `GROUP_CI_LOW` / `GROUP_CI_HIGH`。
+
+**补它的原因**：方法验证里的「九针平均回收率」是**九个值一起算**，不按加标水平分组。
+用分组版硬凑需要造一列「全表同值」当 key —— 那要人手填九次相同的值，
+**填错一个就静默分裂成两组，算出一个看着完全合理的错区间**。
+
+```
+imp_ns_rec_avg_recovery  = GROUP_AVGlist([imp_ns_rec_recovery],[imp_ns_rec_level])  # 按水平
+imp_ns_rec_avg9          = GROUP_AVG([imp_ns_rec_recovery])                          # 九针整列
+imp_ns_rec_ci9_lo        = GROUP_CI_LOW([imp_ns_rec_recovery])
+imp_ns_rec_ci9_hi        = GROUP_CI_HIGH([imp_ns_rec_recovery])
+```
+
+> ⚠️ **自由度是 n−1** —— 这是**均值**的置信区间。
+> 不要与 `SLOPE_CI_*` / `INTERCEPT_CI_*` 混淆，那是**回归参数**的区间，
+> 拟合直线要花掉两个自由度，用 n−2。**两者读同一张 `_T_95` 表的不同行**，
+> 用错了会得到一个看着完全合理的错区间。
+>
+> 整列版的 RSD 没有单独函数，标量字段直接写
+> `stdev([col]) / avg([col]) * 100` 即可。
 
 > 所有 `GROUP_*` 的 key 参数是**可变个数**的：`GROUP_AVGlist([v],[k1],[k2])`
 > 按两列组合分组。单 key 写法与旧版语义完全一致，**现有公式无需改动**。
@@ -793,6 +905,148 @@ imp_correction_factor = [imp_main_slope] / [imp_lin_slope]                  # �
 
 ---
 
+## SLOPE_CI_* / INTERCEPT_CI_* — 回归参数的 95% 置信区间
+
+对应 Excel「数据分析 → 回归」输出里的 `标准误差` 和 `Lower/Upper 95%` 两列。
+参数形状与 `SLOPE_ROWS` 完全一致：**前半段 Y 列、后半段 X 列**。
+
+| 函数 | 说明 |
+| ---- | ---- |
+| `SLOPE_SE_ROWS(y…, x…)` | 斜率标准误 |
+| `SLOPE_CI_LOW_ROWS(y…, x…)` / `SLOPE_CI_HIGH_ROWS(y…, x…)` | 斜率 95% 区间下/上限 |
+| `INTERCEPT_SE_ROWS(y…, x…)` | 截距标准误 |
+| `INTERCEPT_CI_LOW_ROWS(y…, x…)` / `INTERCEPT_CI_HIGH_ROWS(y…, x…)` | 截距 95% 区间下/上限 |
+
+### ★ 与 `GROUP_CI_*list` 不是一回事：自由度不同
+
+这是本章最容易出错的地方，而且**错了不会报错，只会给出一个看着很合理的区间**。
+
+| | `GROUP_CI_*list`（回收率的均值 CI） | 本章（回归参数 CI） |
+| -- | -- | -- |
+| 自由度 | **n−1** | **n−2**（拟合一条线花掉两个自由度） |
+| 标准误 | `SD/√n` | `sqrt(MSE/Sxx)` / `sqrt(MSE·(1/n + x̄²/Sxx))` |
+| 对象 | 组均值 | 斜率、截距 |
+
+t 值表（`_T_95`）两边共用，**但索引的是自由度，不是 n**。
+
+```
+Sxx = Σ(x−x̄)²          MSE = SSE/(n−2)
+SE(slope)     = sqrt( MSE / Sxx )
+SE(intercept) = sqrt( MSE × (1/n + x̄²/Sxx) )
+区间          = 参数 ± t(0.05, n−2) × SE
+```
+
+### 点数边界
+
+| 浓度点数 n | df = n−2 | 行为 |
+| ---- | ---- | ---- |
+| ≤ 2 | ≤ 0 | `---`。两点必然落在自己那条线上，残差为 0 是"没有多余信息"的假象，报成标准误 0 等于凭空断言完美 |
+| 3 – 12 | 1 – 10 | 正常计算 |
+| ≥ 13 | ≥ 11 | `---` + 一行 stderr。**绝不外推 t 值** —— 编出来的区间和真区间在报表上没有区别 |
+| 所有 x 相同 | — | `---`（没有确定的直线） |
+
+ICH Q2 常用的 5~7 个浓度点落在 df = 3~5，都在表内。
+
+### 斜率还是截距，由你在公式里选
+
+两套都提供，谁也不预设。斜率 CI 回答「线性是否显著」（区间不含 0 = 响应随浓度
+显著变化）；截距 CI 回答「截距能否忽略 / 是否过原点」。以文档里那组 6 点数据为例，
+截距 = −958.88、CI = [−1403.5, −514.2]，**不含 0 但相对 100% 响应（约 5.6 万）
+只偏 −1.7%** —— 这正是要按各自验收标准决定用哪个判据的典型情况。
+
+```
+imp_lin_slope_ci_lo = SLOPE_CI_LOW_ROWS([imp_lin_a1]…[imp_lin_a7],
+                                        [imp_lin_c1]…[imp_lin_c7])
+imp_lin_slope_ci_hi = SLOPE_CI_HIGH_ROWS([imp_lin_a1]…[imp_lin_a7],
+                                         [imp_lin_c1]…[imp_lin_c7])
+```
+
+---
+
+## BAND / GATE — 区间替换与下限门控
+
+两个标量函数，形状不同，别混用。
+
+```
+BAND(value, low, high, inside)   →  inside  当 low <= value <= high（含两端）；否则 value
+GATE(value, threshold, below)    →  value   当 value >= threshold（含）；否则 below
+```
+
+### BAND — 校正因子落在区间内就按 1 算
+
+方法规定：校正因子在 **0.8 ~ 1.2 之间（含边界）按 1 计算**，区间以外按实际数值
+乘系数。含义是「离 1 足够近就当没有差异」——**两个方向都算**。
+
+```
+imp_cf_gated = BAND([imp_cf_lookup], 0.8, 1.2, 1.0)
+```
+
+| cf | 结果 | |
+| -- | -- | -- |
+| 1.5 | 1.5 | 区间外，用实际值 |
+| 1.2 | 1.0 | **含边界** |
+| 0.92 | 1.0 | 区间内 |
+| 0.8 | 1.0 | **含边界** |
+| **0.7** | **0.7** | 区间外，用实际值 |
+
+> ⚠️ **不要写成单边的「大于 1.2 才用」**。那种读法在 1.0 以上与 BAND 一致，
+> 在 **0.8 以下就错了**：cf=0.7 会被压成 1.0，而方法要求用 0.7。
+> 更麻烦的是，**只要样本里的因子都落在区间内，两种写法结果完全一样**，
+> 拿数据比对发现不了 —— 已知实测值 Z7=0.920、Z13=0.844 就都在区间内，
+> 而 0.844 距下边界只差 0.044。
+
+### GATE — 达到下限才计入
+
+方法规定：**大于等于 0.05% 的杂质才计入总杂**。
+
+```
+imp_total = GROUP_SUMlist(GATE([imp_pct], 0.05, 0), [imp_sample_id])
+```
+
+| 值 | 结果 |
+| -- | -- |
+| 0.06 | 0.06 |
+| **0.05** | **0.05**（含边界，保留） |
+| 0.049 | 0 |
+
+### 为什么是两个函数而不是一个
+
+两条规则的**边界方向相反**：`BAND` 的边界属于「被替换」的一侧（0.8 和 1.2 都取
+1.0），`GATE` 的边界属于「被保留」的一侧（0.05 保留）。合成一个函数就得把其中
+一条写成自己的反面（比如 `BAND(v, -∞, 0.05, 0)` 会把恰好 0.05 的也归零，正好
+搞反），公式里没人看得懂 —— 而这类函数的失败形态是**返回一个看着合理的错数**，
+可读性就是防线。
+
+### ⚠️ `max(1.0, x)` 不是等价写法
+
+看起来能替代 BAND 的区间上半段，实际在**兜底值和上界之间那一段**是错的：
+
+| x | 业务要 | `max(1.0, x)` |
+| -- | -- | -- |
+| 1.1 | **1.0** | **1.1 ✗** |
+| 1.5 | 1.5 | 1.5 ✓ |
+
+关键在于**兜底值 1.0 ≠ 上界 1.2**，中间有条缝。而下界那一侧 `max` 更是完全不管。
+
+### 两个函数共同的约定
+
+| 项 | 行为 | 为什么 |
+| -- | ---- | ---- |
+| 边界值**必填** | 不给就 `TypeError` | 0.8/1.2/0.05 是某个方法的业务判据，不是引擎属性；藏进默认值就没人找得到 |
+| 缺失值**原样透传** | `---` 进 `---` 出 | 「源没填」和「测了，且可以忽略」是两回事，压成 1.0 或 0 会让空白看起来像一个决定 |
+| 非数字但非缺失 | 返回 `---` | 无从比较，就不编造结果 |
+| 边界写成文本 | 抛错（→ `---`） | ★ Python 2 允许数字与字符串比较（数字恒小于字符串），边界写错成文本会让**每一行都被静默送进同一个分支，且完全看不出异常** |
+| `BAND` 的 low > high | 抛错 | 空区间会匹配不到任何行 —— 门控看着挂上了，实际什么都没做 |
+
+两者都是标量函数，**两个函数表都注册了**，`calculated` 与 `calculatedlist`
+字段都能用。
+
+> 引擎至今没有通用的 `IF`，是刻意的（Python 函数调用不惰性，`IF` 会把丢弃的
+> 分支也算一遍，那一支报错就毁掉整条公式）。`BAND` / `GATE` 把判断放在 Python
+> 函数**内部**，不引入 `IF` 语法，与这个原则一致。
+
+---
+
 ## STDEV_ROWS / RSD_ROWS — 逐行精密度统计
 
 按**行索引**对多列做统计，每行独立算一次，返回数组。方法验证里的**重复性**
@@ -807,11 +1061,15 @@ imp_correction_factor = [imp_main_slope] / [imp_lin_slope]                  # �
 
 | | 参数含义 | 列数要求 |
 | -- | -------- | -------- |
-| `SLOPE_ROWS` / `INTERCEPT_ROWS` / `RSQ_ROWS` / `SSE_ROWS` / `COUNT_ROWS` | **前半段 Y 列、后半段 X 列** | 必须**偶数** |
-| `STDEV_ROWS` / `RSD_ROWS` | **所有列都是数据列**，不对半分 | 任意，**奇数也可以** |
+| `SLOPE_ROWS` / `INTERCEPT_ROWS` / `RSQ_ROWS` / `SSE_ROWS` / `COUNT_ROWS`<br>`SLOPE_SE_ROWS` / `SLOPE_CI_*_ROWS` / `INTERCEPT_SE_ROWS` / `INTERCEPT_CI_*_ROWS` | **前半段 Y 列、后半段 X 列** | 必须**偶数** |
+| `STDEV_ROWS` / `RSD_ROWS` / `AVG_ROWS` / `COUNT_VALUES_ROWS` | **所有列都是数据列**，不对半分 | 任意，**奇数也可以** |
 
-这两个函数只是「把同一行的这些列拿来做统计」，没有自变量/因变量的概念。
+后一组只是「把同一行的这些列拿来做统计」，没有自变量/因变量的概念。
 把它们和回归系列写成同样的参数形状是常见误配。
+
+> ⚠️ **`COUNT_ROWS` 与 `COUNT_VALUES_ROWS` 不是一回事**，名字像但语义不同：
+> 前者数的是**回归里成对存活的 (x,y) 点数**（走对半分），后者数的是
+> **同一行里有几个格子有值**（不对半分）。用错了会得到一个看着合理的数字。
 
 **示例：重复性 6 针进样的 RSD**
 
@@ -843,6 +1101,56 @@ imp_rep_rsd_disp = FORMAT([imp_rep_rsd], 2)
 | -------- | ------ |
 | **同一行的多列**（6 针 = 6 个列） | `STDEV_ROWS` / `RSD_ROWS` |
 | **同一列的多行按 key 分组**（多个物质各 3 个平行） | `GROUP_STDEVlist` / `GROUP_RSDlist` |
+
+---
+
+## AVG_ROWS / COUNT_VALUES_ROWS — 针数可变的横向平均
+
+和 `STDEV_ROWS` 同一族：所有列都是数据列，按行索引横着算，返回数组。
+
+| 函数 | 说明 |
+| ---- | ---- |
+| `AVG_ROWS(c1, c2, …)` | 逐行平均，**跳过缺失格**；整行全缺返回 `---` |
+| `COUNT_VALUES_ROWS(c1, c2, …)` | 逐行有效格数；空行返回 `0` |
+
+### 为什么不能手写 `(…)/6`
+
+进样针数不是恒定的。同一批里对照品可能进 6 针，供试品只进 3 针，
+`imp_area_4/5/6` 留空。此时手写的 `([a1]+[a2]+…+[a6])/6` **两处都错**：
+
+| 问题 | 后果 |
+| ---- | ---- |
+| 分子 | 缺失格在标量路径上是 `None`，`None + 数字` 抛 `TypeError`，整列变 `---` |
+| 分母 | 就算分子能算，固定 `/6` 也不是 3 针的平均 |
+
+还有一种更隐蔽的：**只要有一行缺针，整列会被降级成字符串列**，
+于是**连有值的那些行也一起变 `---`** —— 一个物质缺针污染同表其它物质。
+
+`AVG_ROWS` 三种缺失都跳过：`None`、空串 `""`（降级成字符串列后的形态）、
+占位符 `---`。
+
+```
+imp_avg_area = AVG_ROWS([imp_area_1],[imp_area_2],[imp_area_3],
+                        [imp_area_4],[imp_area_5],[imp_area_6])
+imp_area_n   = COUNT_VALUES_ROWS([imp_area_1],[imp_area_2],[imp_area_3],
+                                 [imp_area_4],[imp_area_5],[imp_area_6])
+```
+
+| 物质 | 针1…针6 | `AVG_ROWS` | `COUNT_VALUES_ROWS` |
+| ---- | ------- | ---------- | ------------------- |
+| Z7 | 97816, 96710, 98251, 98596, 98715, 98112 | 98033.33 | 6 |
+| Z13 | 50000, 50100, 50200, （空）, （空）, （空） | 50100.00 | 3 |
+
+### 审计列不是可选的
+
+跳过缺失之后，**分母就看不见了** —— 三针平均和六针平均在报表上长得一模一样。
+`COUNT_VALUES_ROWS` 是把它放回页面上的唯一办法，理由和回归系列配 `COUNT_ROWS`
+完全一致。做方法验证的表建议一律带上。
+
+### 整行全缺返回 `---`，不是 `0.0`
+
+报表上的 `0` 读作「测到了 0」，那是没人做过的断言。与 `STDEV_ROWS`
+的既定取舍一致。
 
 ---
 
