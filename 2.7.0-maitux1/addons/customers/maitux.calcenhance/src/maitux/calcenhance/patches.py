@@ -3125,7 +3125,17 @@ def _patch_setupdata_import():
                 Price="%02f" % Float(row['Price']),
                 BulkPrice="%02f" % Float(row['BulkPrice']),
                 VAT="%02f" % Float(row['VAT']),
-                _Method=defaultmethod,
+                # `Method`, not `_Method`.  The schema field was renamed years
+                # ago; core's importer still passes the old name, and
+                # Archetypes' edit() looks mutators up BY FIELD NAME -- an
+                # unknown key is silently dropped.  So the default method was
+                # never set by any import: measured on Care, 0 of 53 services
+                # had one, including services imported long before this patch.
+                #
+                # Note the field is only half of it: getMethod() also returns
+                # None when the default is not among `Methods`, so both have to
+                # land.  `methods` below already includes defaultmethod.
+                Method=defaultmethod,
                 Methods=methods,
                 ManualEntryOfResults=allowmanualentry,
                 InstrumentEntryOfResults=allowinstrentry,
