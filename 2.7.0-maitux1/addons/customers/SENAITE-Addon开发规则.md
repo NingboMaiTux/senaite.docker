@@ -499,6 +499,106 @@ jsonapi（它对 `is_active` 等有自己的处理，`=true` 和 `=false` 会返
 
 ---
 
+### R13. `except` 里不许重复刚刚失败的那个调用；Py2 转字符串一律用安全函数
+
+**规则**：两条，第二条是第一条的常见成因。
+
+1. **`except` 分支不许再调用刚在 `try` 里失败的那个函数。** 兜底路径要么换一种
+   做法，要么就直接接受失败 —— 重复一遍必然再抛一次，而这次没人接。
+2. **Python 2 下把可能含非 ASCII 的值转成字符串，一律用 `_safe_text()`
+   之类的安全函数，不要用 `str()`。**
+
+```python
+# ✗ 错：兜底重复了刚失败的 str()，第二次没人接 —— 整页 500
+try:
+    parsed = json.loads(str(value))          # UnicodeEncodeError
+except (ValueError, TypeError):              # 接住了（它是 ValueError 的子类）
+    value = json.dumps([str(value)])         # ← 再抛一次，冒到 publisher
+
+# ✓ 对：先安全转换一次，try/except 只负责"是不是 JSON"
+text = _safe_text(value)                     # 见 patches.py:798
+try:
+    parsed = json.loads(text)
+    ...
+except (ValueError, TypeError):
+    value = json.dumps([text])
+```
+
+**为什么 `except (ValueError, TypeError)` 会接住编码错误**：
+`UnicodeEncodeError` → `UnicodeError` → **`ValueError`**。所以它看着像"只接
+解析失败"，实际把编码失败也吞了 —— 然后兜底再炸一次。
+
+**这一族在本环境已经出过三次**（`maitux.calcenhance/patches.py`）：
+
+| 时间 | 位置 | 表现 |
+|---|---|---|
+| 早期 | listing 的 `get_formatted_interim` | 已修 |
+| 2026-08-26 | 报告渲染的 `format_interim` / `format_supsub` | **整份 PDF 生成不出来**；实测 MaiLIMS 23 个字段、InnoCare 8 个、Care 6 个命中 |
+| 2026-09-07 | `patched_folderitem` 的 `calculatedlist` 分支（PR #48） | 分析项**提交后**整个 `manage_results` 页面 500，AS-Grouped 与 Classic 都打不开 |
+| 2026-09-07 | **同一处的另一半**（PR #50） | 修掉崩溃**不等于修好**：兜底仍把显示文本包成 `json.dumps([text])`，于是**撤回后**那些计算列渲染成 `["1.0\n1.0"]` / `["—\n—"]` 这样的裸数组。#48 只是把「崩」换成了「显示垃圾」 |
+
+### R13b. 「不可编辑」时 core 会把值换成显示文本 —— 别把它当数据
+
+这是上面那张表最后两行的共同成因，单独拎出来，因为它**同时**是崩溃和数据错乱的源头：
+
+```python
+# bika/lims/browser/analyses/view.py, _folder_item_calculation
+if not is_editable:
+    interim_field["value"] = interim_formatted     # ← 不再是 JSON！
+```
+
+**存的值**是 `json.dumps` 出来的、ASCII 安全的数组；**显示文本**两者都不是 ——
+`list` 用 `", "` 连接、`calculatedlist` 用 **`"\n"`** 连接（见
+`patched_get_formatted_interim`）。所以任何在 `folderitem` 之后读 `item[kw]["value"]`
+的代码，拿到的东西**取决于该分析项能不能编辑**。
+
+两个必须遵守的推论：
+
+1. **别对它做 `str()`** —— 它可能含中文或 em dash（R13 第 2 条）
+2. **解析失败时别把它包成数组** —— 它是显示文本，不是数据。包了就会得到
+   `["1.0\n1.0"]` 这种假单元素数组，控件再原样渲染出来
+
+`list` 分支一直是对的（注释写着 *Already formatted display text — keep as-is*），
+`calculatedlist` 分支曾经是错的 —— **同一个函数里两个分支对同一种情况处理相反**，
+这种不一致本身就是信号。
+
+**要真正拿到数据而不是显示文本**，得绕过这次替换去读对象：
+`maitux.worksheet` 的 `_raw_interim_values()` 就是干这个的，它的 docstring 记着
+为什么必须这么做（否则多行列在评审阶段会塌成一行）。
+
+第三次尤其说明这一族多难发现：**存的值是 ASCII 安全的**（`json.dumps` 默认
+`ensure_ascii=True` 会把中文转义），触发它需要 core 在"分析项不可编辑"时把值
+换成**格式化显示文本**：
+
+```python
+# bika/lims/browser/analyses/view.py, _folder_item_calculation
+if not is_editable:
+    interim_field["value"] = interim_formatted     # ← u"—<br/>—" 或中文，不是 JSON
+```
+
+所以它只在**提交之后**才现形 —— 潜伏了整整两周没人撞到。
+
+**★ 只 `pass` 掉的兄弟同样有害，只是不崩。** `patches.py` 里另有 7 处
+`json.loads(str(...))` 的 `except` 是 `pass`/吞掉：不会 500，但**整列会被静默
+丢弃**。2026-09-07 用真模块实测（`scratchpad/s1919/test_ascii_drop.py`）：
+
+| 位置 | escaped CJK | **literal CJK** |
+|---|---|---|
+| `3492` 标量引擎收集器 | `20.0` | **丢 → `---`** |
+| `3963` 数组引擎收集器 | `[20.0]` | **丢 → `["---","---"]`** |
+| `1508` 跨 AS LOOKUP 收集器 | `[10.0, 20.0]` | **丢 → `["---"]`** |
+
+它们目前**不触发**，因为线上 663 个有值的 list 字段里字面非 ASCII 的是 0 个 ——
+也就是说 **"`json.dumps` 默认 `ensure_ascii=True`" 这件事现在是承重的，而且没人
+显式声明过**。唯一的字面非 ASCII 生产者是 `patches.py:1221`
+（`_normalize_list_value_once` 的最后兜底支，`ensure_ascii=False`），它在分析员
+往 list 字段里直接打/粘中文时触发。
+
+**写代码时的自查**：任何 `str(` 出现在可能含中文的值上就是嫌疑；任何 `except`
+里出现和 `try` 里同名的调用就是嫌疑。
+
+---
+
 ## 附：新建 addon 检查清单
 
 - [ ] `package-includes/` 下 configure + overrides **两个** slug 都建了
