@@ -25,6 +25,15 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
+# 早退而不是崩：本机 `python` 往往是跟容器同版本的 2.7，直接跑下去会在
+# 打印阶段炸成 UnicodeEncodeError，报错位置完全指不到病根。
+if sys.version_info[0] < 3:
+    sys.stderr.write(
+        "lint_addon.py 需要 Python 3（本机 `python` 可能是 2.7）。\n"
+        "请用 python3（Linux/CI）或 py -3（Windows）运行。\n")
+    sys.exit(2)
+
+
 def _default_addons_root():
     """找 addons 根：先按自身位置，再退回按当前目录。
 
@@ -133,9 +142,10 @@ def scan_widget_base_query(src):
                 continue
             if isinstance(kw.value, ast.Dict):
                 for k in kw.value.keys:
-                    if isinstance(k, ast.Str):
-                        keys.append(k.s)
-                    elif isinstance(k, ast.Constant) and isinstance(k.value, str):
+                    # py3.8+ 字面量统一是 ast.Constant。ast.Str / k.s 从 3.12
+                    # 起 DeprecationWarning、3.14 移除，别再判它，否则 CI 会在
+                    # 某个跟本次改动毫无关系的早上因为镜像滚版本而红掉。
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str):
                         keys.append(k.value)
                     else:
                         opaque = True
@@ -305,6 +315,49 @@ _TRANSLATE_ATTR = re.compile(r"i18n:translate\s*=\s*\"([^\"]*)\"|"
 _VOID_TAGS = frozenset((
     "area", "base", "br", "col", "embed", "hr", "img", "input",
     "link", "meta", "param", "source", "track", "wbr"))
+
+# --- E15 辅助：<script>/<style> 里的 JS/CSS 注释也该放行 ------------------
+#
+# E15 只关心「用户会看到、却永远翻不了」的文案。JS/CSS 注释既不进 msgid
+# 也不渲染，写中文跟 HTML 注释里写中文是同一件事。
+# 第一版只剥 <!-- -->，于是 maitux.stability 的 stabilityplantemplate_form.pt
+# 里 12 处 `//` 说明注释、task_board.pt 里 2 处 `/* */` 全被判成 ERROR ——
+# 又是「对着能跑的代码报警」，跟 E14/E15 第一版同一个毛病。
+#
+# ★ 只在 script/style 块内剥。整份文档剥 `//` 会把 href="https://…/中文"
+#   这类真文案一起吃掉；那是假阴性，比假阳性更难发现。
+_SCRIPT_STYLE_RE = re.compile(
+    r"(<(script|style)\b[^>]*>)(.*?)(</\2\s*>)", re.S | re.I)
+
+
+def _strip_js_line_comment(line):
+    """去掉行尾 // 注释；跳过字符串里的 //（http:// 这类不能当注释切）。"""
+    quote = None
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == u"\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in u"\"'`":
+            quote = ch
+        elif ch == u"/" and line[i + 1:i + 2] == u"/":
+            return line[:i]
+        i += 1
+    return line
+
+
+def strip_script_style_comments(text):
+    """把 <script>/<style> 块里的 /* */ 与 // 注释挖空，块外原样保留。"""
+    def repl(m):
+        body = re.sub(r"/\*.*?\*/", "", m.group(3), flags=re.S)
+        body = u"\n".join(_strip_js_line_comment(line)
+                          for line in body.splitlines())
+        return m.group(1) + body + m.group(4)
+    return _SCRIPT_STYLE_RE.sub(repl, text)
 
 
 def split_i18n_defaults(body):
@@ -545,6 +598,7 @@ def check_addon(addon, findings):
                 rel = os.path.relpath(p, a.path)
                 # 注释里的中文是给人看的说明，不进 msgid，放行
                 body = re.sub(r"<!--.*?-->", "", read_text(p), flags=re.S)
+                body = strip_script_style_comments(body)
                 rest, msgids, defaults = split_i18n_defaults(body)
 
                 # ① 显式 msgid 本身不许是非 ASCII —— catalog 的键必须可移植
