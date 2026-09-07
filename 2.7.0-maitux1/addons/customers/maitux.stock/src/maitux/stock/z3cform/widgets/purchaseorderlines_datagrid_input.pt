@@ -45,6 +45,7 @@
   </table>
   <input type="hidden" tal:replace="structure view/counterMarker" />
   <button type="button" class="btn btn-sm btn-outline-secondary mb-2" id="po-lines-add-row" i18n:translate="">Add row</button>
+  <span id="po-msg-quantity-decimal" class="d-none" i18n:translate="">Quantity Ordered must be a number (decimals allowed)</span>
   <script type="text/javascript" src="" tal:attributes="src string:${view/portal_url}/++resource++senaite.core.z3cform.static/datagrid.js"></script>
   <script type="text/javascript">
   (function () {
@@ -197,13 +198,6 @@
         s = s.replace(/,/g, "");
       }
       return s;
-    }
-
-    function decodeEntities(str) {
-      if (!str) return "";
-      var el = document.createElement("textarea");
-      el.innerHTML = str;
-      return el.value;
     }
 
     function getRowStockValue(row) {
@@ -404,7 +398,9 @@
         if (!ok) {
           e.preventDefault();
           e.stopPropagation();
-          alert(decodeEntities("Quantity Ordered 必须是数字（可含小数点）"));
+          var msgEl = document.getElementById("po-msg-quantity-decimal");
+          alert((msgEl && msgEl.textContent.trim()) ||
+                "Quantity Ordered must be a number (decimals allowed)");
         }
       }, true);
     })();
