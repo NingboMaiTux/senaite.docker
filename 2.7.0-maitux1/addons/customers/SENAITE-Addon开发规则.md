@@ -599,6 +599,76 @@ if not is_editable:
 
 ---
 
+### R14. 注入外来 UI / 注册外来内容的适配器，必须 layer 门控
+
+**规则**：包一旦声明了自己的 browser layer，凡是 `<subscriber>` / `<adapter>`
+指向**外来**内容或视图接口（`senaite.*` / `bika.lims.*` / `plone.*`）的注册，
+都必须门控到本包的 layer 上。两条通道，按适配签名里有没有 request 二选一：
+
+```xml
+<!-- 签名里有 request → ZCML 门控：把 IBrowserRequest 换成自己的 layer -->
+<adapter
+    name="workflow_action_xxx"
+    for="senaite.core.interfaces.IWorksheets
+         maitux.xxx.interfaces.IXxxLayer"     <!-- ← 不是 IBrowserRequest -->
+    factory="..."
+    provides="bika.lims.interfaces.IWorkflowActionAdapter"
+    permission="zope.Public" />
+```
+
+```python
+# 签名里没有 request（IListingViewAdapter 是 (view, context)）
+# → ZCML 无处插 layer，只能运行时门控
+def before_render(self):
+    if not IXxxLayer.providedBy(self.view.request):
+        return                               # ← 必须有，否则全站点泄漏
+    ...
+```
+
+**理由**：`package-includes/` 里的 slug 一进去，ZCML 就是**全局加载**的，
+跟 profile 装没装、跟哪个站点毫不相干。`browser:page` 有 `layer=` 属性所以
+大家都记得写；`subscriber` / `adapter` **没有** `layer=` 属性，门控只能靠上面
+两条通道 —— 于是最容易漏，而漏了以后**没装这个 addon 的站点照样吃到注册**。
+
+**事故实例**（`maitux.instrument_acquisition`，2026-09-07 测试时发现）：
+Worksheets 列表底部的「仪器采集」按钮由 `IListingViewAdapter` 订阅者注入，
+`before_render()` 无条件往 `review_states` 里塞 `custom_transitions`，
+结果**四个站点全都显示这个按钮**，包括从未装过该 addon 的。
+同一个 `browser/worksheet/configure.zcml` 里两个 `browser:page` 都规规矩矩写了
+`layer=`，唯独 subscriber 和 adapter 没有 —— 而且注释还把它当成优点：
+
+```
+不覆盖视图、不声明 permission、不依赖 browser layer，
+避免 Zope 4 的 ZCML 加载顺序 / 权限注册冲突问题
+```
+
+作者是**刻意**绕开 layer 去躲 R1 那类加载顺序问题的。躲开的办法是对的
+（`IListingViewAdapter` 确实不该覆盖视图），但代价被忽略了：不依赖 layer
+＝ 不受 layer 约束 ＝ 全局生效。R1 的正解是补
+`<include package="senaite.core.permissions" />`，不是弃用 layer。
+
+**机器判据**：`lint_addon.py` 的 `E17_UI_INJECTION_UNGATED` /
+`W17_FOREIGN_ADAPTER_UNGATED`。前置条件是**本包声明过 layer**（没 layer 的包
+无从门控，不报）：
+
+- `<subscriber>` 的 `provides` 是 UI 注入类接口（`IListingViewAdapter` 等），
+  `for=` 里没 layer，且工厂模块里也搜不到 layer 名 → **ERROR**（必现泄漏）
+- `<adapter>` / `<subscriber>` 的 `for=` 是「外来内容接口 + 任意请求接口」
+  （`IBrowserRequest` / `IHTTPRequest` / `IRequest`）→ **WARN**
+  （要够到它得手工构造 POST，不像上一条那样打开页面就看见）
+
+三条收窄条件，缺一条就会误报（初版打 17 处、其中 15 处是误报）：
+① 本包必须声明过 layer；② `for=` 里出现 layer 即算已门控；
+③ 只认指向外来内容接口的，`for="*"` 配自有动作名不报。
+自测在 `lint_addon.py` 的 R14 段注释里有说明，合成用例覆盖这三条各自的边界。
+
+**排查提示**：怀疑某个按钮/菜单泄漏时，**别看 profile 装没装** —— 那是无关变量。
+直接去没装该 addon 的站点打开对应列表页：能看见就是 ZCML 全局注册没门控。
+反过来，`prefs_install_products_form` 里显示"未安装"却仍有功能出现，
+基本都是这一条。
+
+---
+
 ## 附：新建 addon 检查清单
 
 - [ ] `package-includes/` 下 configure + overrides **两个** slug 都建了
@@ -616,3 +686,4 @@ if not is_editable:
 - [ ] 每项功能给出了可观测的验证判据
 - [ ] 静态数据维护型 addon 只提供内容/列表维护入口，不往附加产品配置区注册 configlet（R11）
 - [ ] 引用控件（ReferenceWidget / QuerySelectWidget）传了 `query=` 的地方，都同时传了 `base_query={}`（R12）
+- [ ] 指向外来内容/视图接口的 `subscriber` / `adapter` 都做了 layer 门控：签名里有 request 的换成自己的 layer，没 request 的（`IListingViewAdapter`）在工厂里判 `providedBy(request)`（R14）

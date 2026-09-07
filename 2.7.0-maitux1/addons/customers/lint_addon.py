@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """SENAITE addon 静态检查器（宿主机 Python 3 运行，不进容器也能跑大部分检查）。
 
-判据来源：addons/customers/SENAITE-Addon开发规则.md 的 R1–R10、
+判据来源：addons/customers/SENAITE-Addon开发规则.md 的 R1–R14、
 gen-custom-addon.sh 的收录规则、CLAUDE.md §5 的语言约束。
 每条检查都对应一次真实事故，不做"风格"检查。
 
@@ -33,7 +33,7 @@ def _default_addons_root():
       · NingboMaiTux/senaite.docker 的 2.7.0-maitux1/addons/customers/
 
     后者是为了让「规则」和「检查器」待在一起 —— SENAITE-Addon开发规则.md
-    的 R1–R12 就靠它机器化，规则在共用库而检查器不在，别人照规则写完跑不了检查。
+    的 R1–R14 就靠它机器化，规则在共用库而检查器不在，别人照规则写完跑不了检查。
 
     所以定位不能写死相对当前目录：单独 clone senaite.docker 的人，
     cwd 和目录层级都跟这边不一样。
@@ -142,6 +142,139 @@ def scan_widget_base_query(src):
             else:
                 opaque = True
         out.append((node.lineno, name, keys, opaque))
+    return out
+
+
+# --- R14：注入外来 UI / 注册外来内容适配器必须 layer 门控 -----------------
+# ZCML 一旦进 package-includes 就**全局加载**，跟 profile 装没装无关。所以
+# 「只对本 addon 的站点生效」这件事只有两条路：把自己的 browser layer 放进
+# 适配签名（ZCML 门控），或在工厂里显式判 layer.providedBy(request)（运行时
+# 门控）。两条都不走 = 没装该 addon 的站点也照样吃到这次注册。
+#
+# 事故实例（maitux.instrument_acquisition）：Worksheets 列表底部「仪器采集」
+# 按钮由 IListingViewAdapter 订阅者注入，四个站点全都显示 —— 包括从未装过
+# 这个 addon 的站点。同一文件里两个 browser:page 都规规矩矩写了 layer=，
+# 唯独 subscriber / adapter 没有，注释还把它当成优点（"不依赖 browser layer"）。
+#
+# ★ 两种注册的可门控方式不一样，别混：
+#   · IListingViewAdapter 的查找签名是 (view, context)，**request 不在里面**
+#     → ZCML 里无处插 layer，只能在 before_render() 里判 → 必须运行时门控
+#   · workflow 动作 adapter 的签名是 (context, IBrowserRequest)
+#     → 把 IBrowserRequest 换成自己的 layer 即可 → 纯 ZCML 可修
+#
+# 收窄条件（摸底时初版打 17 处、15 处误报，加了这三条后精确命中 2 处）：
+#   ① 包必须自己声明过 browser layer —— 没有 layer 的包无从门控，不报
+#   ② for= 里出现 layer 算已门控（有 3 处是这么写的）
+#   ③ 只认 for= 指向**外来**内容接口的；for="*" 配自有动作名不报（12 处）
+FOREIGN_IFACE_PREFIXES = ("senaite.", "bika.lims.", "plone.", "Products.",
+                          "zope.app.", "OFS.", "Acquisition.")
+# 这些是「任意请求」，出现在 for= 里说明作者没打算用 layer 收窄
+GENERIC_REQUEST_IFACES = frozenset([
+    "zope.publisher.interfaces.browser.IBrowserRequest",
+    "zope.publisher.interfaces.browser.IDefaultBrowserLayer",
+    "zope.publisher.interfaces.http.IHTTPRequest",
+    "zope.publisher.interfaces.IRequest",
+    "IBrowserRequest", "IHTTPRequest", "IRequest",
+])
+# provides 是这些后缀的订阅者 = 往别人的视图里注入 UI
+UI_INJECT_PROVIDES = ("IListingViewAdapter", "ViewAdapter",
+                      "IViewletManager", "IListingSearchableTextProvider")
+
+
+def _iface_is_layer(dotted):
+    """接口短名以 Layer 结尾即视为 browser layer。
+
+    本环境 12 个 layer 的基类五花八门（ISenaiteCore / IDefaultBrowserLayer /
+    IDefaultPloneLayer / 甚至别的 addon 的 layer），按基类识别认不全，
+    只有命名约定是齐的。
+    """
+    return dotted.rsplit(".", 1)[-1].endswith("Layer")
+
+
+def collect_browser_layers(code_dir):
+    """扫包内 .py，返回自己声明的 layer 接口短名集合。"""
+    out = set()
+    for dirpath, dirs, files in os.walk(code_dir):
+        dirs[:] = [d for d in dirs if not d.endswith("egg-info")]
+        for fn in files:
+            if not fn.endswith(".py"):
+                continue
+            try:
+                tree = ast.parse(read_text(os.path.join(dirpath, fn)))
+            except Exception:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ClassDef) and \
+                        node.name.startswith("I") and \
+                        node.name.endswith("Layer"):
+                    out.add(node.name)
+    return out
+
+
+def _factory_module_path(code_dir, dist_name, factory):
+    """factory 点分名 → 模块文件路径（取不到返回 None）。"""
+    if not factory or "." not in factory:
+        return None
+    module = factory.rsplit(".", 1)[0]          # 去掉类名
+    if not module.startswith(dist_name + "."):
+        return None
+    rel = module[len(dist_name) + 1:].replace(".", os.sep)
+    for cand in (os.path.join(code_dir, rel + ".py"),
+                 os.path.join(code_dir, rel, "__init__.py")):
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
+def scan_ui_gating(code_dir, dist_name, layers):
+    """返回 [(kind, rel_zcml, tag, name, provides, for_str, detail)]。
+
+    kind: "ui_inject"（A，必现 UI 泄漏）/ "foreign_adapter"（B，可 ZCML 门控）
+    """
+    if not layers:
+        return []
+    out = []
+    for dirpath, dirs, files in os.walk(code_dir):
+        dirs[:] = [d for d in dirs if not d.endswith("egg-info")]
+        for fn in sorted(files):
+            if not fn.endswith(".zcml"):
+                continue
+            zpath = os.path.join(dirpath, fn)
+            root, err = parse_xml(zpath)
+            if err:
+                continue                      # 解析失败由 E08 负责
+            rel = os.path.relpath(zpath, code_dir)
+            for el in iter_elements(root):
+                tag = localname(el.tag)
+                if tag not in ("subscriber", "adapter"):
+                    continue
+                # 收窄②：layer 写在 for= 里也算门控
+                fors = (el.get("for") or "").split()
+                if any(_iface_is_layer(f) for f in fors):
+                    continue
+                # 收窄③：只认指向外来内容接口的
+                foreign = [f for f in fors
+                           if f.startswith(FOREIGN_IFACE_PREFIXES)
+                           and f not in GENERIC_REQUEST_IFACES]
+                if not foreign:
+                    continue
+                provides = el.get("provides") or ""
+                reg_name = el.get("name") or ""
+                for_str = " ".join(fors)
+                if tag == "subscriber" and provides.endswith(UI_INJECT_PROVIDES):
+                    # 无 ZCML 门控通道 → 看工厂里有没有运行时判 layer
+                    mod = _factory_module_path(code_dir, dist_name,
+                                               el.get("factory") or "")
+                    if mod:
+                        src = read_text(mod)
+                        if any(name in src for name in layers):
+                            continue          # 有运行时门控，不报
+                    out.append(("ui_inject", rel, tag, reg_name, provides,
+                                for_str,
+                                os.path.relpath(mod, code_dir) if mod else u""))
+                elif any(f in GENERIC_REQUEST_IFACES for f in fors):
+                    out.append(("foreign_adapter", rel, tag, reg_name, provides,
+                                for_str, foreign[0]))
     return out
 
 
@@ -485,6 +618,35 @@ def check_addon(addon, findings):
                 u"合规豁免已声明且 upgrades/ 存在（人工确认过 upgrade step "
                 u"真的能在后台执行）", "R4b")
 
+    # --- R14：注入外来 UI / 注册外来内容适配器必须 layer 门控 -----------
+    # ★ 这里必须走**全部** .zcml，不能只看顶层 configure/overrides ——
+    #   事故那处就在 browser/worksheet/configure.zcml 里。
+    layers = collect_browser_layers(a.code_dir)
+    for kind, rel, tag, reg_name, provides, for_str, detail in \
+            scan_ui_gating(a.code_dir, a.dist_name, layers):
+        relz = os.path.relpath(os.path.join(a.code_dir, rel), a.path)
+        if kind == "ui_inject":
+            add(LEVEL_ERROR, "E17_UI_INJECTION_UNGATED",
+                u"<%s provides=\"%s\" for=\"%s\"> 往外来视图注入 UI，"
+                u"既没在 for= 里放 layer，工厂 %s 里也没判 %s。"
+                u"ZCML 是全局加载的 → **没装本 addon 的站点也会显示**。"
+                u"该签名不含 request，ZCML 无处插 layer，"
+                u"只能在 before_render() 开头判 "
+                u"layer.providedBy(self.request)，不成立就 return"
+                % (tag, provides.rsplit(".", 1)[-1], for_str,
+                   detail or u"(未定位)", u" / ".join(sorted(layers))),
+                "R14", relz)
+        else:
+            add(LEVEL_WARN, "W17_FOREIGN_ADAPTER_UNGATED",
+                u"<%s name=\"%s\" for=\"%s\"> 把「外来内容 %s + 任意请求」"
+                u"这一对全局占了，没装本 addon 的站点同样注册。"
+                u"该签名里有 request —— 把它换成自己的 layer（%s）即可门控。"
+                u"暂列 WARN：要够到它得手工构造 POST，不像 E17 那样必现"
+                % (tag, reg_name or u"(无名)", for_str,
+                   detail.rsplit(".", 1)[-1],
+                   u" / ".join(sorted(layers))),
+                "R14", relz)
+
     # --- E14：GenericSetup XML 里的非 ASCII title/description ----------
     #
     # 2026-08-31 实测事故：actions.xml 里写了中文 title + i18n:domain，
@@ -757,6 +919,191 @@ def collect_addons(addons_root, only=None):
     return out
 
 
+# --------------------------------------------------------------------------
+# 基线：把门禁语义从「lint 全绿」改成「不新增 ERROR」
+#
+# 这条政策 Docs/SENAITE-Addon流水线.md 早就写死了：
+#     「新包的门槛是"不新增 ERROR"，不是"lint 全绿"。」
+# 但工具一直是"有 ERROR 就 exit 1"，两者不一致 —— 后果是**别人一跑就红，
+# 红的还是别人包的问题**，于是所有人开始忽略 lint 输出，真 ERROR 也拦不住了。
+# 那正是 SKILL.md「宁可窄，不可宽」一节反复警告的失效模式。
+#
+# 指纹用 (addon, code, path) 三元组，**故意不含行号和消息文本**：
+# 行号一改代码就漂，消息里还带计数（W07b 的"33 处"），都会让基线天天失效。
+# 同一个 (addon, code, path) 可能命中多次，所以基线存 count，
+# 实测数 > 基线数 也算新增。
+#
+# ★ 基线不是"永久豁免"，是"欠账清单"：
+#   · 每条带 recorded 日期与 note，可评审
+#   · 基线里已经不再出现的条目会被报成「已消失」，提示重写基线把它剔掉
+#     —— 否则基线会烂成一张没人看的免死金牌
+BASELINE_FILENAME = "lint_baseline.json"
+
+
+def default_baseline_path(addons_root):
+    """基线跟着 addons/customers/ 走 —— 那样 clone senaite.docker 的人白得。"""
+    return os.path.join(addons_root, "customers", BASELINE_FILENAME)
+
+
+def finding_key(f):
+    """基线指纹。path 统一成正斜杠，免得 Windows / Linux 上互相不认。"""
+    return (f.addon, f.code, (f.path or u"").replace("\\", "/"))
+
+
+def _counted(findings):
+    out = {}
+    for f in findings:
+        k = finding_key(f)
+        out[k] = out.get(k, 0) + 1
+    return out
+
+
+def load_baseline(path):
+    """返回 ({key: count}, meta, err)。文件不存在不是错误。"""
+    if not os.path.isfile(path):
+        return {}, None, None
+    try:
+        with io.open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception as exc:
+        return {}, None, u"基线文件读不动（%s）：%r" % (path, exc)
+    counts = {}
+    for e in data.get("entries", []):
+        try:
+            k = (e["addon"], e["code"],
+                 (e.get("path") or u"").replace("\\", "/"))
+        except KeyError:
+            continue
+        counts[k] = counts.get(k, 0) + int(e.get("count", 1))
+    return counts, data, None
+
+
+def write_baseline(path, findings, only_levels=(LEVEL_ERROR,)):
+    """把当前结果写成基线。默认只记 ERROR —— WARN 不参与门禁，记它没意义。"""
+    keep = [f for f in findings if f.level in only_levels]
+    entries = []
+    for (addon, code, p), n in sorted(_counted(keep).items()):
+        lvl = next((f.level for f in keep if finding_key(f) == (addon, code, p)),
+                   LEVEL_ERROR)
+        entries.append({
+            "addon": addon, "code": code, "path": p, "count": n,
+            "level": lvl,
+            "note": u"",       # ← 人工填：为什么还欠着、谁负责、什么时候还
+        })
+    payload = {
+        "_说明": u"lint 门禁基线：这里列的是**已知欠账**，门禁只拦不在本表里的 "
+                 u"ERROR（政策见 Docs/SENAITE-Addon流水线.md「不新增 ERROR」）。"
+                 u"基线不是永久豁免 —— 修掉一条就重写本表把它剔掉；"
+                 u"lint 会把「基线里已消失」的条目报出来提醒你重写。",
+        "_重写命令": u"python lint_addon.py --write-baseline "
+                     u"<addons>/customers/" + BASELINE_FILENAME,
+        "recorded": _today(),
+        "entries": entries,
+    }
+    with io.open(path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(payload, ensure_ascii=False, indent=2))
+    return len(entries)
+
+
+def _today():
+    import datetime
+    return datetime.date.today().isoformat()
+
+
+def split_by_baseline(findings, baseline):
+    """按基线切三份：new（要拦）、suppressed（已知欠账）、stale（基线里已消失）。"""
+    seen = _counted(findings)
+    new, suppressed = [], []
+    used = {}
+    for f in findings:
+        k = finding_key(f)
+        allowed = baseline.get(k, 0)
+        used[k] = used.get(k, 0) + 1
+        if used[k] <= allowed:
+            suppressed.append(f)
+        else:
+            new.append(f)
+    stale = [(k, n) for k, n in sorted(baseline.items())
+             if seen.get(k, 0) < n]
+    return new, suppressed, stale
+
+
+# --------------------------------------------------------------------------
+# 两份副本的漂移守卫
+#
+# lint_addon.py 有两份（见文件头注释），必须内容一致。多人协作下这必然漂：
+# 有人只改了 senaite.docker 那份，技能里那份还是旧的（或反之），
+# 于是"同一条规则两个人跑出不同结果"，比没有规则更糟。
+# 只提示、不拦 —— 拦了会在别人只 clone 一份的场景下误伤。
+def check_self_copies(addons_root):
+    """返回提示文本或 None。"""
+    me = os.path.abspath(__file__)
+    other = os.path.abspath(os.path.join(addons_root, "customers",
+                                         os.path.basename(__file__)))
+    if me == other or not os.path.isfile(other):
+        return None
+    try:
+        a = read_text(me).replace(u"\r\n", u"\n")
+        b = read_text(other).replace(u"\r\n", u"\n")
+    except Exception:
+        return None
+    if a == b:
+        return None
+    return (u"⚠ 两份 lint_addon.py 内容不一致（忽略行尾差异后仍不同）：\n"
+            u"    正在跑：%s\n"
+            u"    另一份：%s\n"
+            u"  规则文档靠 addons/customers 那份机器化，两份必须同步；"
+            u"否则同一条规则两个人会跑出不同结果。" % (me, other))
+
+
+# --------------------------------------------------------------------------
+# 按包汇总表：批量看 21 个包时的主视图
+#
+# 逐条明细适合"我刚改完这一个包"；批量评审要的是另一种东西 ——
+# 哪些包干净、哪些包欠账、欠的是哪一类。**干净的包也必须列出来**，
+# 否则看不出"扫到了但没问题"和"压根没扫到"的区别（后者是 R5d 的经典坑：
+# 目录缺 setup.py 被生成器整包跳过，部署上等于不存在）。
+def print_rollup(scanned, findings, baseline):
+    per = {}
+    for a in scanned:
+        per[a.dir_name] = {"layer": a.layer, LEVEL_ERROR: 0,
+                           LEVEL_WARN: 0, LEVEL_INFO: 0, "new_err": 0}
+    new, _sup, _stale = split_by_baseline(findings, baseline)
+    new_keys = _counted([f for f in new if f.level == LEVEL_ERROR])
+    for f in findings:
+        row = per.get(f.addon)
+        if row is None:
+            continue
+        row[f.level] += 1
+    for (addon, _c, _p), n in new_keys.items():
+        if addon in per:
+            per[addon]["new_err"] += n
+
+    def sort_key(item):
+        name, r = item
+        return (-r["new_err"], -r[LEVEL_ERROR], -r[LEVEL_WARN], name)
+
+    lines = [u"按包汇总（%d 个包；★ = 本次新增 ERROR，门禁只看这一列）" % len(per),
+             u"  %-32s %-10s %5s %5s %5s  %s"
+             % (u"包", u"层", u"ERR", u"WARN", u"INFO", u"判定")]
+    for name, r in sorted(per.items(), key=sort_key):
+        if r["new_err"]:
+            verdict = (u"★ 新增 %d 条 ERROR" % r["new_err"] if baseline
+                       else u"★ %d 条 ERROR（无基线）" % r["new_err"])
+        elif r[LEVEL_ERROR]:
+            verdict = u"欠账（基线已记）"
+        elif r[LEVEL_WARN]:
+            verdict = u"仅 WARN"
+        elif r[LEVEL_INFO]:
+            verdict = u"干净（有 INFO）"
+        else:
+            verdict = u"干净"
+        lines.append(u"  %-32s %-10s %5d %5d %5d  %s"
+                     % (name, r["layer"], r[LEVEL_ERROR], r[LEVEL_WARN],
+                        r[LEVEL_INFO], verdict))
+    return u"\n".join(lines) + u"\n"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="SENAITE addon 静态检查")
     ap.add_argument("--addons-root", default=DEFAULT_ADDONS_ROOT)
@@ -765,6 +1112,15 @@ def main(argv=None):
                     help="额外用容器里的 Python 2.7 跑 compileall")
     ap.add_argument("--container", default=DEFAULT_CONTAINER)
     ap.add_argument("--json", help="把结果写成 JSON")
+    ap.add_argument("--baseline",
+                    help=u"基线文件（默认自动找 <addons>/customers/%s）"
+                         % BASELINE_FILENAME)
+    ap.add_argument("--no-baseline", action="store_true",
+                    help=u"忽略基线，按「lint 全绿」判定（严格模式）")
+    ap.add_argument("--write-baseline", nargs="?", const="", metavar="FILE",
+                    help=u"把当前 ERROR 写成基线然后退出（不带值＝写默认路径）")
+    ap.add_argument("--summary", action="store_true",
+                    help=u"只打按包汇总表，不打逐条明细（批量看 21 个包时用）")
     args = ap.parse_args(argv)
 
     try:
@@ -776,6 +1132,10 @@ def main(argv=None):
     if not os.path.isdir(root):
         print(u"找不到 addons 根目录：%s" % root)
         return 2
+
+    drift = check_self_copies(root)
+    if drift:
+        print(drift + u"\n")
 
     addons = collect_addons(root, args.addon)
     if args.addon and not any(not a._muted for a in addons):
@@ -802,31 +1162,120 @@ def main(argv=None):
     infos = [f for f in findings if f.level == LEVEL_INFO]
 
     scanned = [a for a in addons if not a._muted]
-    print(u"扫描 %d 个 addon（%s）\n" % (len(scanned), root))
-    for level, bucket in ((LEVEL_ERROR, errors), (LEVEL_WARN, warns),
-                          (LEVEL_INFO, infos)):
-        for f in bucket:
-            rule = u"[%s]" % f.rule if f.rule else u""
-            path = u" %s" % f.path if f.path else u""
-            print(u"%-5s %-26s %s%s%s\n      %s"
-                  % (level, f.code, f.addon, path, rule, f.msg))
-    print(u"\n合计：%d ERROR / %d WARN / %d INFO" % (len(errors), len(warns),
-                                                     len(infos)))
-    if not errors:
-        print(u"ERROR 为 0 —— 可以进入 senaite-addon-deploy")
+
+    # --- 写基线后退出 ------------------------------------------------------
+    if args.write_baseline is not None:
+        target = args.write_baseline or default_baseline_path(root)
+        if args.addon:
+            print(u"拒绝执行：--write-baseline 必须全量扫描后再写，"
+                  u"否则会把没扫到的包当成「已修好」从基线里抹掉。"
+                  u"去掉 --addon 重跑。")
+            return 2
+        n = write_baseline(target, findings)
+        print(u"已把 %d 条 ERROR 写成基线：%s\n"
+              u"→ 请逐条填上 note（为什么还欠着 / 谁负责），再提交。"
+              % (n, target))
+        return 0
+
+    # --- 基线 --------------------------------------------------------------
+    baseline, bmeta, berr = {}, None, None
+    bpath = args.baseline or default_baseline_path(root)
+    if not args.no_baseline:
+        baseline, bmeta, berr = load_baseline(bpath)
+        if berr:
+            print(u"⚠ %s\n  本次按严格模式（有 ERROR 即拦）判定。\n" % berr)
+
+    new, suppressed, stale = split_by_baseline(findings, baseline)
+    new_errors = [f for f in new if f.level == LEVEL_ERROR]
+
+    print(u"扫描 %d 个 addon（%s）" % (len(scanned), root))
+    if baseline:
+        print(u"基线：%s（%d 条已知欠账，recorded=%s）"
+              % (bpath, sum(baseline.values()),
+                 (bmeta or {}).get("recorded", u"?")))
+    elif not args.no_baseline:
+        print(u"基线：无（%s 不存在）—— 按「有 ERROR 即拦」判定。"
+              u"要把现存欠账固化成基线：--write-baseline" % bpath)
+    print(u"")
+
+    # --- 逐条明细（--summary 时跳过）---------------------------------------
+    if not args.summary:
+        shown = new if baseline else findings
+        for level, bucket in ((LEVEL_ERROR, [f for f in shown
+                                             if f.level == LEVEL_ERROR]),
+                              (LEVEL_WARN, [f for f in shown
+                                            if f.level == LEVEL_WARN]),
+                              (LEVEL_INFO, [f for f in shown
+                                            if f.level == LEVEL_INFO])):
+            for f in bucket:
+                rule = u"[%s]" % f.rule if f.rule else u""
+                path = u" %s" % f.path if f.path else u""
+                print(u"%-5s %-26s %s%s%s\n      %s"
+                      % (level, f.code, f.addon, path, rule, f.msg))
+
+    # --- 按包汇总表：批量看的主视图 ---------------------------------------
+    if len(scanned) > 1:
+        print(print_rollup(scanned, findings, baseline))
+
+    # --- 基线账目 ----------------------------------------------------------
+    if suppressed:
+        by_addon = {}
+        for f in suppressed:
+            by_addon.setdefault(f.addon, []).append(f.code)
+        print(u"基线抑制了 %d 条既有 ERROR（不拦，但仍是欠账）：" % len(suppressed))
+        for addon in sorted(by_addon):
+            print(u"  · %-30s %s"
+                  % (addon, u"、".join(sorted(set(by_addon[addon])))))
+        print(u"")
+    if stale:
+        print(u"★ 基线里有 %d 条已经不再出现 —— 说明修好了，"
+              u"请重写基线把它们剔掉（否则基线会烂成免死金牌）：" % len(stale))
+        for (addon, code, p), n in stale:
+            print(u"  · %s %s %s" % (addon, code, p))
+        print(u"  重写：python %s --write-baseline\n"
+              % os.path.basename(__file__))
+
+    # --- 判定 --------------------------------------------------------------
+    print(u"合计：%d ERROR / %d WARN / %d INFO"
+          % (len(errors), len(warns), len(infos)))
+    if baseline:
+        print(u"门禁（不新增 ERROR）：新增 %d 条 ERROR" % len(new_errors))
+    if not new_errors:
+        if suppressed:
+            print(u"✔ 通过 —— 没有新增 ERROR（%d 条既有欠账见上）。"
+                  u"可以进入 senaite-addon-deploy" % len(suppressed))
+        else:
+            print(u"✔ 通过 —— ERROR 为 0，可以进入 senaite-addon-deploy")
+    elif baseline:
+        print(u"✘ 拦下 —— 上面 %d 条 ERROR 不在基线里，是本次新增的"
+              % len(new_errors))
+    else:
+        # 没有基线时这些 ERROR 未必是"本次"引入的，别把话说死 ——
+        # 措辞一失真，人就开始不信这个工具了。
+        print(u"✘ 拦下 —— %d 条 ERROR（无基线，无法区分既有欠账与本次新增）。"
+              u"若确认都是既有问题，用 --write-baseline 固化后再跑"
+              % len(new_errors))
 
     if args.json:
         payload = {
             "addons_root": root,
             "scanned": [a.dir_name for a in scanned],
             "errors": len(errors), "warnings": len(warns),
+            "baseline_path": bpath if baseline else None,
+            "new_errors": len(new_errors),
+            "suppressed": len(suppressed),
+            "stale_baseline": [
+                {"addon": k[0], "code": k[1], "path": k[2], "count": n}
+                for k, n in stale],
+            "gate": "pass" if not new_errors else "fail",
             "findings": [f.as_dict() for f in findings],
+            "new_findings": [f.as_dict() for f in new],
         }
         with io.open(args.json, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(payload, ensure_ascii=False, indent=2))
         print(u"已写出 %s" % args.json)
 
-    return 1 if errors else 0
+    return 1 if new_errors else 0
 
 
 if __name__ == "__main__":
