@@ -70,6 +70,50 @@ addons/
 - 只保存 zip 不行，必须是解压后的源码目录：buildout `develop` 直接引用源码目录。
   要留档 zip，就和源码目录并存。
 
+## 本目录里那几个非 add-on 文件是什么
+
+这几个不是 add-on（没有 `setup.py`，扫描会跳过），是**规则检查工具**，
+刻意和 `SENAITE-Addon开发规则.md` 放在一起 —— 规则在这、检查器不在，
+照规则写完的人跑不了检查。
+
+| 文件 | 是什么 |
+|---|---|
+| `lint_addon.py` | 静态检查器。把开发规则里的 R1 / R4 / R4b / R5b / R5c / R5d / R9b / R12 / R14 机器化，外加 Python 2.7 编码陷阱 |
+| `lint_baseline.json` | **门禁基线 = 已知欠账清单**。门禁只拦不在这张表里的 ERROR |
+| `selftest_r14.py` | R14 规则的合成用例自测（10 例） |
+| `selftest_gate.py` | 门禁语义自测（17 例） |
+
+**改完 add-on、重启容器之前跑一遍**：
+
+```bash
+python lint_addon.py --addon <你的包名>
+```
+
+**批量看全部包**（评审别人的包、交接、定期体检）：
+
+```bash
+python lint_addon.py --summary
+```
+
+### 门禁语义：不新增 ERROR，不是 lint 全绿
+
+退出码 1 = **你这次新增了 ERROR**。仓库里现存的欠账已记在
+`lint_baseline.json`，不会算到你头上 —— 所以**红了就是你的**，别忽略。
+
+几条纪律，请务必遵守：
+
+- **不要为了让门禁变绿而往 `lint_baseline.json` 里加条目。** 那等于把
+  责任推给下一个人。本次新增的 ERROR 就该修。
+- 基线里每条的 `note` 不许留空（为什么还欠着 / 谁负责）。
+- 修掉一条基线里的问题后，重写基线把它剔掉：
+  `python lint_addon.py --write-baseline`（必须全量扫描，带 `--addon` 会被拒绝）。
+  lint 会主动提醒你哪些条目"已经不再出现"。
+- 想看**总欠账**（无视基线）：`python lint_addon.py --no-baseline`
+
+> `lint_addon.py` 和两个 `selftest_*.py` 各有两份（另一份在维护者的技能目录里），
+> 内容必须一致。lint 启动时会比对并在不一致时警告 —— 看到那条警告说明有人
+> 只改了一份，**两个人跑同一条规则会得到不同结果**，先把它同步掉。
+
 ## 常见问题
 
 **新加了 add-on，重启后没生效？**
