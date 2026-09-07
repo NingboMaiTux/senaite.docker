@@ -1,0 +1,15 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:plone="http://namespaces.plone.org/plone"
+    i18n_domain="maitux.worksheetfields">
+
+  <plone:behavior
+      title="Worksheet Multi-Select Fields Behavior"
+      description="Adds multi-valued Instruments and Stock Batches fields to Worksheets"
+      name="maitux.worksheetfields.behavior.worksheetmultiselect"
+      provides=".worksheet.IWorksheetMultiSelectSchema"
+      factory=".worksheet.WorksheetMultiSelectBehaviorFactory"
+      for="senaite.core.interfaces.IWorksheet"
+      />
+
+</configure>

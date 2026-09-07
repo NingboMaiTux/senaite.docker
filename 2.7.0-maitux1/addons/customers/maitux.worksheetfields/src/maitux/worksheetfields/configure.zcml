@@ -1,0 +1,74 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:five="http://namespaces.zope.org/five"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    xmlns:i18n="http://namespaces.zope.org/i18n"
+    xmlns:plone="http://namespaces.plone.org/plone"
+    i18n_domain="maitux.worksheetfields">
+
+  <!--
+    R1（SENAITE-Addon开发规则）：browser:page 用到 senaite.core 自定义权限
+    （senaite.core.permissions.ViewResults）时，必须先把权限注册顺序钉在
+    本包前面，否则 configure.zcml 阶段（five:loadProducts 之前）引用未注册
+    权限会触发 ComponentLookupError 导致 Zope 启动失败。
+  -->
+  <include package="senaite.core.permissions" />
+
+  <!-- plone:behavior 指令（behaviors/configure.zcml 中使用） -->
+  <include package="plone.behavior" file="meta.zcml" />
+
+  <!-- Zope 2 包注册（i18n:registerTranslations 等基础机制） -->
+  <include package="Products.Five" />
+  <include package="Products.GenericSetup" file="meta.zcml" />
+  <five:registerPackage package="." />
+
+  <!-- 双语翻译（locales/<lang>/LC_MESSAGES/maitux.worksheetfields.mo） -->
+  <i18n:registerTranslations directory="locales" />
+
+  <!-- 引入子包 ZCML 配置 -->
+  <include package=".behaviors" />
+  <include package=".browser" />
+
+  <!-- 隐藏卸载 Profile，保持 Add-ons 面板整洁 -->
+  <utility
+      factory=".setuphandlers.HiddenProfiles"
+      name="maitux.worksheetfields"
+      />
+
+  <!-- 注册安装 Profile -->
+  <genericsetup:registerProfile
+      name="default"
+      title="Maitux Worksheet Fields (Instruments &amp; Stock Batches)"
+      directory="profiles/default"
+      description="Worksheet multi-select Instruments and Stock Batches fields"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <!-- 标准安装入口：通过 importStep 调用 setup_handler -->
+  <genericsetup:importStep
+      name="maitux.worksheetfields.setuphandler"
+      title="maitux.worksheetfields setup handler"
+      description="Install Maitux Worksheet Fields registrations"
+      handler="maitux.worksheetfields.setuphandlers.setup_handler">
+    <depends name="plone-various"/>
+  </genericsetup:importStep>
+
+  <!-- 注册卸载 Profile -->
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="Uninstall Maitux Worksheet Fields"
+      directory="profiles/uninstall"
+      description="Uninstalls the maitux.worksheetfields package"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <!-- 标准卸载入口：通过 importStep 调用 uninstall_handler -->
+  <genericsetup:importStep
+      name="maitux.worksheetfields.uninstallhandler"
+      title="maitux.worksheetfields uninstall handler"
+      description="Uninstall Maitux Worksheet Fields registrations"
+      handler="maitux.worksheetfields.setuphandlers.uninstall_handler">
+    <depends name="plone-various"/>
+  </genericsetup:importStep>
+
+</configure>

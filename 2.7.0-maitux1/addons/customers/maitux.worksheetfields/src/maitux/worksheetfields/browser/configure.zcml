@@ -1,0 +1,20 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    i18n_domain="maitux.worksheetfields">
+
+  <!-- 覆盖 manage_results：
+       本模块浏览器层 IWorksheetFieldsLayer 继承 IInstrumentAcquisitionLayer
+       （其又继承 IReviewerAssignmentLayer / ISenaiteCore），因此本注册在
+       层优先级上高于 senaite.core / reviewerassignment / instrument_acquisition
+       的同名视图；模板隐藏原『仪器』单选与『仪器采集』入口，
+       并新增 多选仪器 / 多选库存批次 两个选择器。 -->
+  <browser:page
+      name="manage_results"
+      for="senaite.core.interfaces.IWorksheet"
+      class="maitux.worksheetfields.browser.manage_results.ManageResultsView"
+      permission="senaite.core.permissions.ViewResults"
+      layer="maitux.worksheetfields.interfaces.IWorksheetFieldsLayer"
+      />
+
+</configure>

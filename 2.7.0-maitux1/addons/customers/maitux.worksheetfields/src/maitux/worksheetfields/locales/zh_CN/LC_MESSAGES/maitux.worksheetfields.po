@@ -1,0 +1,117 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: maitux.worksheetfields\n"
+"POT-Creation-Date: 2026-01-01 00:00+0000\n"
+"PO-Revision-Date: 2026-01-01 00:00+0000\n"
+"Last-Translator: Maitux Team <dev@maitux.example>\n"
+"Language-Team: zh <dev@maitux.example>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0\n"
+"Language-Code: zh\n"
+"Language-Name: Simplified Chinese\n"
+"Preferred-Encodings: utf-8 latin1\n"
+"Domain: maitux.worksheetfields\n"
+
+msgid "Analyst"
+msgstr "分析员"
+
+msgid "Reviewer"
+msgstr "审核人"
+
+msgid "Please select a reviewer"
+msgstr "请选择审核人"
+
+msgid "Not assigned"
+msgstr "未分配"
+
+msgid "Apply"
+msgstr "应用"
+
+msgid "Instruments"
+msgstr "仪器"
+
+msgid "Select instruments"
+msgstr "请选择仪器"
+
+msgid "Stock Batches"
+msgstr "库存批次"
+
+msgid "Select stock batches"
+msgstr "请选择库存批次"
+
+msgid "Type to search..."
+msgstr "输入关键字搜索"
+
+msgid "Select all"
+msgstr "全选"
+
+msgid "Clear"
+msgstr "清空"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "OK"
+msgstr "确定"
+
+msgid "wsf_instruments_count_summary"
+msgstr "已选 ${count} 台"
+
+msgid "wsf_stock_batches_count_summary"
+msgstr "已选 ${count} 个批次"
+
+msgid "wsf_more_results_hint"
+msgstr "已显示前 ${shown} 项，共 ${total} 项，请输入关键字过滤。"
+
+msgid "Not defined"
+msgstr "未定义"
+
+msgid "Layout"
+msgstr "布局"
+
+msgid "Print Worksheet"
+msgstr "打印工作表"
+
+msgid "Print"
+msgstr "打印"
+
+msgid "Autofill"
+msgstr "自动填充"
+
+msgid "Field"
+msgstr "字段"
+
+msgid "Value"
+msgstr "数值"
+
+msgid "Only to empty or zero fields"
+msgstr "仅对空值或零值生效"
+
+msgid "Remarks"
+msgstr "备注"
+
+msgid "title_worksheet_multi_instruments"
+msgstr "仪器（多选）"
+
+msgid "description_worksheet_multi_instruments"
+msgstr "与工作表关联的多台仪器，仅作记录，不会自动分配到表内各分析。"
+
+msgid "title_worksheet_stock_batches"
+msgstr "库存批次（多选）"
+
+msgid "description_worksheet_stock_batches"
+msgstr "与工作表关联的库存批次对象（来自 maitux.stock 模块，可多选，含已过期/销毁批次）。"
+
+msgid "Worksheet instruments and stock batches can only be edited while the worksheet is open."
+msgstr "仅当工作表处于开放状态时才能修改仪器与库存批次。"
+
+msgid "Worksheet instruments and stock batches saved."
+msgstr "工作表仪器与库存批次已保存。"
+
+msgid "Worksheet instruments saved."
+msgstr "工作表仪器已保存。"
+
+msgid "Worksheet stock batches saved."
+msgstr "工作表库存批次已保存。"
