@@ -44,8 +44,13 @@ class SampleAnalysesGroupedBase(GroupedRenderingMixin, AnalysesView):
         self.show_select_column = True
         self.show_search = False
 
-    def get_redirect_url(self):
-        """Back to the sample view once workflow_action is done."""
+    def get_page_url(self):
+        """The sample view: this listing renders as one of its viewlets.
+
+        Same value the mixin's default would give; kept explicit because it is
+        what workflow_action redirects to and what the review-state filter
+        links point at.
+        """
         return self.context.absolute_url()
 
 

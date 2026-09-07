@@ -209,3 +209,22 @@
   color: #b02a37;
   font-weight: 600;
 }
+
+/* Review state filter tabs (Valid / Invalid / All).  Bootstrap 4 nav-tabs
+   markup, toned down: they sit inside the results form, above the AS panels,
+   so the stock full-width tab strip would read as a page-level navigation. */
+.as-grouped-filters {
+  margin-bottom: 12px;
+  border-bottom: 1px solid #c0c6ce;
+}
+
+.as-grouped-filters .nav-link {
+  padding: 4px 12px;
+  font-size: 13px;
+  color: #555;
+}
+
+.as-grouped-filters .nav-link.active {
+  font-weight: 600;
+  color: #095c7d;
+}
