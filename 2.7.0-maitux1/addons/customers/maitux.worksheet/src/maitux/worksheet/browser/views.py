@@ -193,6 +193,7 @@ class GroupedRenderingMixin(object):
 
         Possible values:
           - "numeric"   : editable number input
+          - "select"    : editable dropdown, options from the field's choices
           - "multivalue": editable list (MultiValue)
           - "readonly"  : calculated scalar (ReadonlyField)
           - "readonlylist": calculated list (readonly MultiValue)
@@ -203,6 +204,9 @@ class GroupedRenderingMixin(object):
         # A locked interim (instrument-acquired data) is never hand-editable.
         # maitux.calcenhance refuses the write server-side anyway; rendering it
         # read-only keeps the form honest about it.
+        #
+        # This stays FIRST on purpose: a locked select must fall through to the
+        # read-only branch below, not to the new "select" one.
         if AnalysesGroupedView._is_locked(ifield):
             base = orig or rt
             if base in ("list", "calculatedlist", "multivalue"):
@@ -223,6 +227,16 @@ class GroupedRenderingMixin(object):
             return "multivalue"
         if rt == "readonly":
             return "readonly"
+        # `select` is a CORE result type (senaite.core's RESULT_TYPES), not one
+        # of maitux.calcenhance's additions, which is exactly why it was missed:
+        # calcenhance's _folder_item_calculation patch rewrites only its own
+        # three types and leaves select alone, and everything left over used to
+        # land on "numeric" below.  A select rendered as a free-text box is the
+        # worst possible failure for these fields -- imp_cf_source holds an AS
+        # KEYWORD that a LOOKUP resolves, so a typo or a hand-typed label makes
+        # the whole correction-factor chain read '---' with no error anywhere.
+        if rt == "select":
+            return "select"
         return "numeric"
 
     @staticmethod
@@ -248,6 +262,72 @@ class GroupedRenderingMixin(object):
     def _is_list_render_type(rt):
         """Return True if render_type is list-like (multi-row)."""
         return rt in ("multivalue", "readonlylist")
+
+    # Label of the blank option, matching the Method / Instrument columns of
+    # the same table so "no selection" reads the same way everywhere.
+    _BLANK_CHOICE_LABEL = u"—"          # em dash
+
+    @classmethod
+    def _with_blank_choice(cls, choices):
+        """Guarantee a blank first option, without duplicating core's.
+
+        Why this is needed at all: core only prepends the blank option while
+        the field is still EMPTY --
+
+            # bika/lims/browser/analyses/view.py, _folder_item_calculation
+            if not interim_value and not multi:
+                interim_allow_empty = True
+
+        -- so once a value has been saved the blank option disappears and the
+        analyst can set the field but never unset it.  Measured on Care: empty
+        field -> 3 options, after saving `imp_linearity` -> 2.  That is a
+        capability this view USED to have, because before the select was
+        rendered the cell was a free-text input you could just clear; shipping
+        the dropdown without this would trade one silent trap for another.
+
+        The Method column two blocks up in as_grouped_table.pt hardcodes its
+        blank option unconditionally for the same reason, which is why the
+        blank is normalised to the same em dash rather than to "" -- an
+        empty-labelled option is a blank line nobody can see is clickable.
+        """
+        # Copy rather than mutate: these dicts are the ones core put on the
+        # item, and other columns of the same item read them too.
+        out = []
+        seen_blank = False
+        for choice in (choices or []):
+            if choice.get("ResultValue") in (None, u"", ""):
+                seen_blank = True
+                # core already supplied one; only fix the invisible label
+                choice = dict(choice)
+                if not choice.get("ResultText"):
+                    choice["ResultText"] = cls._BLANK_CHOICE_LABEL
+            out.append(choice)
+        if seen_blank:
+            return out
+        return [{"ResultValue": u"",
+                 "ResultText": cls._BLANK_CHOICE_LABEL}] + out
+
+    @staticmethod
+    def choices_label(column, value):
+        """The display label of a select value, falling back to the value.
+
+        A select stores a KEY (`imp_linearity`) and shows a label
+        (`情况1 各浓度点单独称量`).  Read-only cells must show the label, the
+        same way the native get_formatted_interim() does -- the key is an
+        internal identifier and means nothing on a report.  Falling back to the
+        raw value rather than to "" is deliberate: a stored value that is not
+        among the choices any more is a data problem worth SEEING, not hiding.
+
+        Public name on purpose: the template calls it, and ZPT refuses to
+        traverse an attribute whose name starts with an underscore -- which is
+        also why get_method_choices/get_instrument_choices are named that way.
+        """
+        if value in (None, ""):
+            return ""
+        for choice in column.get("choices") or []:
+            if choice.get("ResultValue") == value:
+                return choice.get("ResultText") or value
+        return value
 
     @staticmethod
     def _to_array(value):
@@ -379,6 +459,18 @@ class GroupedRenderingMixin(object):
                     # Precomputed so the template does not have to reach for
                     # the view's helpers inside a repeat loop.
                     "is_list": self._is_list_render_type(render_type),
+                    # Options for a select column, already normalised to
+                    # [{"ResultValue":..., "ResultText":...}].  Taken from the
+                    # item rather than parsed out of the interim's `choices`
+                    # string: the native _folder_item_calculation has already
+                    # split it, so re-parsing here would give this view a
+                    # second, silently divergent semantics.  The blank option
+                    # is the one thing core cannot be trusted with -- it drops
+                    # it as soon as the field has a value; see
+                    # _with_blank_choice.
+                    "choices": self._with_blank_choice(
+                        self._choices_to_list(
+                            (item.get("choices") or {}).get(kw))),
                 }
         return list(cols.values())
 
