@@ -1,0 +1,117 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: maitux.worksheetfields\n"
+"POT-Creation-Date: 2026-01-01 00:00+0000\n"
+"PO-Revision-Date: 2026-01-01 00:00+0000\n"
+"Last-Translator: Maitux Team <dev@maitux.example>\n"
+"Language-Team: en <dev@maitux.example>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Language-Code: en\n"
+"Language-Name: English\n"
+"Preferred-Encodings: utf-8 latin1\n"
+"Domain: maitux.worksheetfields\n"
+
+msgid "Analyst"
+msgstr "Analyst"
+
+msgid "Reviewer"
+msgstr "Reviewer"
+
+msgid "Please select a reviewer"
+msgstr "Please select a reviewer"
+
+msgid "Not assigned"
+msgstr "Not assigned"
+
+msgid "Apply"
+msgstr "Apply"
+
+msgid "Instruments"
+msgstr "Instruments"
+
+msgid "Select instruments"
+msgstr "Select instruments"
+
+msgid "Stock Batches"
+msgstr "Stock Batches"
+
+msgid "Select stock batches"
+msgstr "Select stock batches"
+
+msgid "Type to search..."
+msgstr "Type to search..."
+
+msgid "Select all"
+msgstr "Select all"
+
+msgid "Clear"
+msgstr "Clear"
+
+msgid "Cancel"
+msgstr "Cancel"
+
+msgid "OK"
+msgstr "OK"
+
+msgid "wsf_instruments_count_summary"
+msgstr "${count} instruments selected"
+
+msgid "wsf_stock_batches_count_summary"
+msgstr "${count} stock batches selected"
+
+msgid "wsf_more_results_hint"
+msgstr "Showing the first ${shown} of ${total} results. Type to filter."
+
+msgid "Not defined"
+msgstr "Not defined"
+
+msgid "Layout"
+msgstr "Layout"
+
+msgid "Print Worksheet"
+msgstr "Print Worksheet"
+
+msgid "Print"
+msgstr "Print"
+
+msgid "Autofill"
+msgstr "Autofill"
+
+msgid "Field"
+msgstr "Field"
+
+msgid "Value"
+msgstr "Value"
+
+msgid "Only to empty or zero fields"
+msgstr "Only to empty or zero fields"
+
+msgid "Remarks"
+msgstr "Remarks"
+
+msgid "title_worksheet_multi_instruments"
+msgstr "Instruments"
+
+msgid "description_worksheet_multi_instruments"
+msgstr "Multiple instruments associated with this worksheet. Stored for traceability only; they are not assigned automatically to the contained analyses."
+
+msgid "title_worksheet_stock_batches"
+msgstr "Stock Batches"
+
+msgid "description_worksheet_stock_batches"
+msgstr "Multiple Stock Batch objects associated with this worksheet (from the maitux.stock module)."
+
+msgid "Worksheet instruments and stock batches can only be edited while the worksheet is open."
+msgstr "Worksheet instruments and stock batches can only be edited while the worksheet is open."
+
+msgid "Worksheet instruments and stock batches saved."
+msgstr "Worksheet instruments and stock batches saved."
+
+msgid "Worksheet instruments saved."
+msgstr "Worksheet instruments saved."
+
+msgid "Worksheet stock batches saved."
+msgstr "Worksheet stock batches saved."

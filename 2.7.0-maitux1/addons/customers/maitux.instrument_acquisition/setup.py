@@ -4,7 +4,7 @@ from setuptools import setup
 
 setup(
     name="maitux.instrument_acquisition",
-    version="1.0.1",
+    version="1.0.0",
     description="Instrument Acquisition for MAITUX",
     packages=find_packages("src"),
     package_dir={"": "src"},
