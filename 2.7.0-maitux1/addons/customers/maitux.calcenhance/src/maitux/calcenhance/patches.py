@@ -412,13 +412,26 @@ def _patch_folder_item():
                         # Same family as the two [PY2-UNICODE] patches further
                         # down (get_formatted_interim and format_interim): a
                         # value that is legitimately text reaching a str().
+                        #
+                        # And do NOT re-wrap text that failed to parse.  A
+                        # calculatedlist whose value is not json is the
+                        # not-editable case above: it is already DISPLAY TEXT,
+                        # newline-joined by patched_get_formatted_interim.
+                        # Wrapping it produced a bogus single-element array
+                        # that the MultiValue widget then showed verbatim --
+                        # a retracted analysis rendered its computed columns as
+                        # one quoted string with an escaped newline inside
+                        # instead of the two values it holds.  The `list`
+                        # branch above already gets this right ("Already
+                        # formatted display text - keep as-is"); the two
+                        # branches disagreed on the same situation.
                         text = _safe_text(value)
                         try:
                             parsed = json.loads(text)
                             if not isinstance(parsed, list):
                                 value = json.dumps([text])
                         except (ValueError, TypeError):
-                            value = json.dumps([text])
+                            pass
                     item[keyword]["value"] = value
                     item[keyword]["result_type"] = "multivalue"
                     item[keyword]["_orig_result_type"] = "calculatedlist"
