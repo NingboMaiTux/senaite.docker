@@ -272,6 +272,7 @@
                       <tal:interims repeat="col group/interim_columns">
                         <tal:cell define="kw col/keyword;
                                           is_list col/is_list;
+                                          is_select python:col['render_type'] == 'select';
                                           val python:row['interim'].get(kw, '');
                                           cell_uid python:row['interim_uid'].get(kw, '');
                                           editable python:row['interim_editable'].get(kw, False);
@@ -281,19 +282,40 @@
                           <td tal:condition="python:is_list or row['_is_first']"
                               tal:attributes="class python:is_list and css or (css + ' as-span-cell');
                                               rowspan python:None if is_list else sample['row_count']">
-                            <input tal:condition="editable"
+
+                            <!-- A select-type interim.  The whole option list
+                                 including the leading blank one is prepared in
+                                 _build_interim_columns / _with_blank_choice,
+                                 so nothing is hardcoded here (the Method
+                                 column above hardcodes its blank option; doing
+                                 that here would duplicate the one core already
+                                 supplies while the field is empty). -->
+                            <select tal:condition="python:is_select and editable"
+                                    class="as-select"
+                                    tal:attributes="data-uid cell_uid;
+                                                    data-keyword kw;">
+                              <option tal:repeat="ic col/choices"
+                                      tal:attributes="value ic/ResultValue;
+                                                      selected python:val == ic['ResultValue'] and 'selected' or None;"
+                                      tal:content="ic/ResultText">&mdash;</option>
+                            </select>
+
+                            <input tal:condition="python:not is_select and editable"
                                    type="text"
                                    class="as-input as-input-numeric"
                                    tal:attributes="value val;
                                                    data-uid cell_uid;
                                                    data-keyword kw;
                                                    data-row-index row_index;" />
+
+                            <!-- Read-only: a select shows its LABEL, not the
+                                 stored key (see choices_label). -->
                             <span tal:condition="not: editable"
                                   class="as-readonly"
                                   tal:attributes="data-uid cell_uid;
                                                   data-keyword kw;
                                                   data-row-index row_index;"
-                                  tal:content="val">&mdash;</span>
+                                  tal:content="python:view.choices_label(col, val) if is_select else val">&mdash;</span>
                           </td>
 
                         </tal:cell>
