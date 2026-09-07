@@ -1531,7 +1531,16 @@ def _collect_cross_referenceable_data(analysis):
                     continue
                 if rt in ("list", "calculatedlist") and val:
                     try:
-                        arr = _jj.loads(str(val))
+                        # [PY2-UNICODE] _safe_text, not str().  See R13 in
+                        # SENAITE-Addon开发规则.md.  A stored value holding
+                        # LITERAL CJK (rather than backslash-uXXXX escapes) makes
+                        # str() raise UnicodeEncodeError; the handler below only
+                        # passes, so the column would vanish from sibling_data
+                        # and every downstream LOOKUP against it would read
+                        # '---' with no error anywhere.  Reachable through XLSX
+                        # import, which writes an interim's DEFAULT value
+                        # verbatim without going through _normalize_list_value.
+                        arr = _jj.loads(_safe_text(val))
                         if isinstance(arr, list):
                             # Convert floatable string elements to float
                             # (frontend MultiValue submits text inputs → JSON strings)
@@ -3515,7 +3524,11 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
             # Auto-average for bare [KW] references (backward compat)
             # Also preserve raw array for sum([KW]) / max([KW]) / ...
             try:
-                arr = _jj2.loads(str(val))
+                # [PY2-UNICODE] _safe_text, not str() -- see R13.  On literal
+                # CJK, str() raises, the handler swallows it, and this column
+                # never reaches value_map / str_arrays: INDEX_BY cannot match
+                # its key and the field silently reads '---'.
+                arr = _jj2.loads(_safe_text(val))
                 if isinstance(arr, list) and arr:
                     nums = []
                     str_vals = []
@@ -3986,7 +3999,10 @@ def _evaluate_calculatedlist_interims(self, only=None):
 
         if rt in ("list", "calculatedlist"):
             try:
-                arr = _jj.loads(str(val))
+                # [PY2-UNICODE] _safe_text, not str() -- see R13.  This is the
+                # calculatedlist engine's own collector: a dropped column here
+                # takes every formula that references it down to '---'.
+                arr = _jj.loads(_safe_text(val))
                 if isinstance(arr, list) and arr:
                     def _to_unicode(v):
                         if v is None:

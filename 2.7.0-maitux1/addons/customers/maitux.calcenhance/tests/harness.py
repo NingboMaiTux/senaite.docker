@@ -204,3 +204,199 @@ class Results(object):
             print("       got  %r" % (got,))
             print("       want %r" % (want,))
         return 0 if not self.failures else 1
+
+
+# ==============================================================================
+# Fake object graph — lets the tests drive the REAL engines without Zope
+# ==============================================================================
+#
+# harness.load_patches() above reaches module-level helpers.  The two engines
+# (_evaluate_calculated_interims / _evaluate_calculatedlist_interims) and the
+# ordered driver need something to read their inputs off, and that is the only
+# thing standing between "test a helper" and "test the engine end to end".
+#
+# What is faked is the Zope/SENAITE object graph, and nothing else: an Analysis
+# with getInterimFields/setInterimFields, the AnalysisService (for the keyword
+# and the LOQ/LOD limits RESULT_STATUS reads) and the Sample that holds the
+# siblings LOOKUP resolves against.  That graph is data ACCESS, not
+# calculation, so standing in for it does not stand in for anything the tests
+# are meant to prove.
+#
+# The engines also import bika.lims.api and log through bika.lims.logger from
+# inside their own bodies, which load_patches deliberately does not stub (its
+# stubs only cover what module import needs), so install_engine_stubs() fills
+# those in.
+
+
+def install_engine_stubs():
+    """bika.lims.api + a capturing logger, as the engines expect them.
+
+    Returns the logger, whose `.lines` is worth asserting on: several silent
+    failures in this package are only visible as a warn() call.
+    """
+    def is_floatable(value):
+        try:
+            float(value)
+            return True
+        except (TypeError, ValueError):
+            return False
+
+    class _Logger(object):
+        def __init__(self):
+            self.lines = []
+
+        def _log(self, level, msg, *args):
+            try:
+                text = msg % args if args else msg
+            except Exception:
+                text = repr((msg, args))
+            if isinstance(text, unicode):  # noqa: F821  (Python 2 only)
+                text = text.encode("utf-8", "replace")
+            self.lines.append("%s: %s" % (level, text))
+
+        def warn(self, msg, *a):
+            self._log("WARN", msg, *a)
+        warning = warn
+
+        def info(self, msg, *a):
+            self._log("INFO", msg, *a)
+
+        def error(self, msg, *a):
+            self._log("ERROR", msg, *a)
+
+        def debug(self, msg, *a):
+            pass
+
+    logger = _Logger()
+    api = types.ModuleType("bika.lims.api")
+    api.is_floatable = is_floatable
+    sys.modules["bika.lims.api"] = api
+    bika_lims = sys.modules["bika.lims"]
+    bika_lims.api = api
+    bika_lims.logger = logger
+    # `import bika.lims.api as api` walks the attribute chain after the import,
+    # so the packages have to be linked to each other -- being in sys.modules
+    # only satisfies `from bika.lims import ...`.
+    sys.modules["bika"].lims = bika_lims
+    return logger
+
+
+class FakeService(object):
+    """Only what the engines ask an AnalysisService for."""
+
+    def __init__(self, keyword, loq=None, lod=None):
+        self._kw = keyword
+        self._loq = loq
+        self._lod = lod
+
+    def getKeyword(self):
+        return self._kw
+
+    def getLowerLimitOfQuantification(self):
+        return self._loq
+
+    def getLowerDetectionLimit(self):
+        return self._lod
+
+
+class FakeSample(object):
+    """The sample tree LOOKUP resolves siblings against."""
+
+    def __init__(self):
+        self.analyses = []
+
+    def getAncestors(self, all_ancestors=True):
+        return []
+
+    def getAnalyses(self, full_objects=True):
+        return list(self.analyses)
+
+
+class FakeAnalysis(object):
+    """The handful of methods the engines actually call on an Analysis."""
+
+    def __init__(self, uid, service, interims, sample):
+        self.id = uid
+        self._uid = uid
+        self._service = service
+        self._interims = interims
+        self._sample = sample
+        self.write_count = 0
+
+    def UID(self):
+        return self._uid
+
+    def getAnalysisService(self):
+        return self._service
+
+    def getInterimFields(self):
+        return self._interims
+
+    def setInterimFields(self, interims):
+        self._interims = interims
+        self.write_count += 1
+
+    def getRequest(self):
+        return self._sample
+
+    def getResult(self):
+        return ""
+
+    def getKeyword(self):
+        return self._service.getKeyword()
+
+
+def build_sample(specs):
+    """One fake sample holding one analysis per spec.
+
+    `specs` is a list of dicts:
+
+        {"as_id": "SRC", "service_kw": "src_as", "loq": None, "lod": None,
+         "fields": [{"keyword", "title", "result_type", "formula",
+                     "value", "cross_referenceable"}, ...]}
+
+    Returns (sample, {as_id: FakeAnalysis}).  Interim `value`s go in exactly as
+    given -- that is the point: a test decides whether a stored array is
+    escaped or literal, which is the difference several defects turn on.
+    """
+    sample = FakeSample()
+    analyses = {}
+    for spec in specs:
+        service = FakeService(spec["service_kw"], spec.get("loq"),
+                              spec.get("lod"))
+        interims = []
+        for field in spec["fields"]:
+            interims.append({
+                "keyword": field["keyword"],
+                "title": field.get("title", field["keyword"]),
+                "result_type": field["result_type"],
+                "formula": field.get("formula", u""),
+                "value": field.get("value", u""),
+                "cross_referenceable": bool(
+                    field.get("cross_referenceable")),
+                "unit": u"",
+                "hidden": False,
+            })
+        analysis = FakeAnalysis(spec["as_id"], service, interims, sample)
+        sample.analyses.append(analysis)
+        analyses[spec["as_id"]] = analysis
+    return sample, analyses
+
+
+def evaluate(module, analyses, order, passes=3):
+    """Run the real ordered driver over `order`, `passes` times.
+
+    Several passes because a LOOKUP can only see a sibling's value once that
+    sibling has been evaluated, and fixtures keep the real cross-AS dependency
+    graph rather than pre-computing the sources.  Returns
+    {"<as_id>.<keyword>": stored value} for every interim.
+    """
+    for _ in range(passes):
+        for as_id in order:
+            module._evaluate_interims_ordered(analyses[as_id])
+    out = {}
+    for as_id, analysis in analyses.items():
+        for interim in analysis.getInterimFields():
+            out["%s.%s" % (as_id, interim["keyword"])] = interim.get(
+                "value", u"")
+    return out
