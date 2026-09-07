@@ -6,6 +6,7 @@ import json
 
 from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
 from bika.lims import api
+from bika.lims import senaiteMessageFactory as _
 from bika.lims.api.analysis import is_out_of_range
 from senaite.core.browser.worksheets.worksheet.analyses_listing import (
     AnalysesView as WorksheetAnalysesView,
@@ -14,6 +15,27 @@ from senaite.core.i18n import translate
 
 # Sentinel: tells "decoded to None" apart from "could not be decoded".
 _UNPARSEABLE = object()
+
+# Review states of the "Valid" / "Invalid" listing filters.  Copied verbatim
+# from senaite.core's AnalysesView.review_states
+# (bika/lims/browser/analyses/view.py) -- the sample view's own filters, whose
+# default is "Valid" and therefore leaves retracted analyses out.  Written out
+# here rather than read off the base class because the base builds them in
+# __init__ and the worksheet listing then throws them away; see
+# AnalysesGroupedView._restore_state_filters().
+VALID_ANALYSES_STATES = (
+    "registered",
+    "unassigned",
+    "assigned",
+    "to_be_verified",
+    "verified",
+    "published",
+)
+INVALID_ANALYSES_STATES = (
+    "cancelled",
+    "retracted",
+    "rejected",
+)
 
 # Guards the unwrapping below against pathological data.  Real values are one
 # level deep; anything past a handful of levels is corruption, not data.
@@ -896,9 +918,73 @@ class GroupedRenderingMixin(object):
             translated[tid] = api.safe_unicode(translate(message))
         return json.dumps(translated)
 
-    def get_redirect_url(self):
-        """Where workflow_action returns to once it is done."""
+    def get_page_url(self):
+        """URL of the page this listing is embedded in.
+
+        Not the view's own URL: both concrete views render as a fragment of
+        something else (a sample view, or the worksheet's manage_results), and
+        reloading the fragment on its own would lose the whole shell.  Used
+        both by the review-state filter links and as the workflow_action
+        redirect target.
+        """
         return self.context.absolute_url()
+
+    def get_state_filter_key(self):
+        """Request key that selects the active review state.
+
+        Mirrors ListingView.review_state (senaite.app.listing/view.py), which
+        reads `<form_id>_review_state` off the request form and falls back to
+        `default_review_state`.  The form_id differs per listing -- the
+        worksheet keeps senaite.core's "analyses_form", the sample listings
+        build their own -- so it has to be derived, not hardcoded.
+        """
+        return "{}_review_state".format(self.form_id)
+
+    def get_state_filters(self):
+        """Review-state filter tabs, for the template.
+
+        The ReactJS listing renders these itself from the view's
+        `review_states`; this layout replaces the listing, so the tabs have to
+        be emitted by our own template or the user has no way to reach a
+        non-default filter.  Returns [] for a single-state listing so the
+        template renders no tab bar at all.
+
+        Each entry: {id, title, url, selected}.  Titles are translated here
+        rather than in the template: they are senaite.core i18n messages, and
+        this template's i18n domain is maitux.worksheet.  Same reason
+        get_confirm_messages() translates server-side.
+        """
+        states = self.review_states or []
+        if len(states) < 2:
+            return []
+        current = (self.review_state or {}).get("id", self.default_review_state)
+        key = self.get_state_filter_key()
+        base = self.get_page_url()
+        filters = []
+        for state in states:
+            state_id = state.get("id", "")
+            if not state_id:
+                continue
+            title = state.get("title") or state_id
+            filters.append({
+                "id": state_id,
+                "title": api.safe_unicode(translate(title)),
+                "url": u"{}?{}={}".format(base, key, state_id),
+                "selected": state_id == current,
+            })
+        return filters
+
+    def get_redirect_url(self):
+        """Where workflow_action returns to once it is done.
+
+        Carries the active filter, so unassigning one of several retracted
+        analyses from the "Invalid" tab comes back to that tab instead of
+        silently dropping the user on "Valid".
+        """
+        return u"{}?{}={}".format(
+            self.get_page_url(),
+            self.get_state_filter_key(),
+            (self.review_state or {}).get("id", self.default_review_state))
 
     def get_all_uids(self):
         """Return comma-separated UIDs of all analyses in this worksheet.
@@ -957,6 +1043,71 @@ class AnalysesGroupedView(GroupedRenderingMixin, WorksheetAnalysesView):
 
     view_name = "as_grouped"
 
+    def __init__(self, context, request):
+        super(AnalysesGroupedView, self).__init__(context, request)
+        self.review_states = self._restore_state_filters()
+
+    def _restore_state_filters(self):
+        """Put back the Valid / Invalid / All filters on a worksheet listing.
+
+        senaite.core's AnalysesView declares those three for the sample view
+        (bika/lims/browser/analyses/view.py), where "Valid" is a whitelist of
+        review states that deliberately leaves retracted, rejected and
+        cancelled out -- which is why a sample shows no retracted analyses
+        until the user asks for them.
+
+        The worksheet listing then replaces the whole list with a single
+        state titled "All" and an empty contentFilter
+        (senaite/core/browser/worksheets/worksheet/analyses_listing.py), so
+        the catalog query stops filtering by state and every retracted
+        analysis is rendered next to its retest.  Restoring the three states
+        moves the filtering back into the catalog query
+        (ListingView.get_catalog_query merges the active state's
+        contentFilter) instead of hiding rows afterwards, and keeps the
+        "Invalid" tab as the way to reach a retracted analysis -- it still has
+        one transition left, `unassign`, and no other way to be selected.
+
+        Retract chains need no special handling: every historical copy stays
+        in `retracted` however many times an analysis is retracted, and the
+        live one is always in one of the valid states.
+
+        The single state core leaves behind is the base of all three: it
+        carries the `reject` confirmation message and the custom transitions,
+        and get_confirm_messages() reads them off whichever state is active.
+        """
+        base = self.review_states[0] if self.review_states else {}
+        return [
+            self._state_filter(base, "default", _("Valid"),
+                               VALID_ANALYSES_STATES),
+            self._state_filter(base, "invalid", _("Invalid"),
+                               INVALID_ANALYSES_STATES),
+            self._state_filter(base, "all", _("All"), None),
+        ]
+
+    def _state_filter(self, base, state_id, title, review_states):
+        """One review state derived from `base`.
+
+        `review_states=None` means "do not filter by state" (the All tab).
+
+        Every mutable value is copied, not shared: folderitems() walks
+        `self.review_states` and inserts the interim columns it discovered
+        into each state's `columns` list, so a list shared between the three
+        would collect the same columns three times over.
+        """
+        state = base.copy()
+        state["id"] = state_id
+        state["title"] = title
+        state["columns"] = list(base.get("columns") or self.columns.keys())
+        state["custom_transitions"] = list(base.get("custom_transitions") or [])
+        state["confirm_messages"] = dict(base.get("confirm_messages") or {})
+        content_filter = dict(base.get("contentFilter") or {})
+        if review_states is None:
+            content_filter.pop("review_state", None)
+        else:
+            content_filter["review_state"] = list(review_states)
+        state["contentFilter"] = content_filter
+        return state
+
     def __call__(self):
         """Redirect direct visits back to manage_results.
 
@@ -982,6 +1133,7 @@ class AnalysesGroupedView(GroupedRenderingMixin, WorksheetAnalysesView):
         """Return the manage_results URL (used for redirect after save)."""
         return "{}/manage_results".format(self.context.absolute_url())
 
-    def get_redirect_url(self):
-        # Back to the results form, not to the bare worksheet view.
+    def get_page_url(self):
+        # The results form, not the bare worksheet view: this layout only
+        # ever renders inside manage_results.
         return self.get_manage_results_url()

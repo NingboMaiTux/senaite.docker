@@ -39,6 +39,30 @@
     <input type="hidden" name="uids"
            tal:attributes="value view/get_all_uids" />
 
+    <!-- ====================== Review state filters ======================= -->
+    <!--
+      The Valid / Invalid / All tabs of the listing.  The ReactJS listing draws
+      these itself from the view's review_states; this layout replaces it, so
+      without them a non-default filter would be unreachable.  Plain links, no
+      ajax: switching filter re-runs the catalog query, which is a page load.
+
+      Deliberately ABOVE the "no analyses found" branch below: a filter that
+      matches nothing must still show the tabs, or there is no way back.
+
+      Note for editors: chameleon rejects a bare "- -" (without the space)
+      inside an HTML comment, so do not use it as a dash here.  It is a
+      compile error, and it takes the whole manage_results page down.
+    -->
+    <tal:filters define="filters view/get_state_filters">
+      <ul class="nav nav-tabs as-grouped-filters" tal:condition="filters">
+        <li class="nav-item" tal:repeat="state_filter filters">
+          <a tal:attributes="href state_filter/url;
+                             class python:'nav-link active' if state_filter['selected'] else 'nav-link'"
+             tal:content="state_filter/title">Valid</a>
+        </li>
+      </ul>
+    </tal:filters>
+
     <tal:empty condition="not: view/get_as_groups">
       <div class="alert alert-warning">
         <i class="fas fa-info-circle"></i>
