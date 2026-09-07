@@ -94,6 +94,12 @@ def apply_patches():
     _patch_set_interim_fields()
     _patch_calculate_result()
     _patch_validator_interimfields_unicode()
+    # Same class of problem as the line above, kept next to it on purpose.
+    # Deliberately NOT inside one of the try/except blocks further down: those
+    # exist for patches whose imports can fail during ZCML bootstrap, and this
+    # one imports at function scope.  Swallowing a failure here would mean the
+    # patch silently does not apply -- the startup marker is what proves it did.
+    _patch_validator_choices_syntax_unicode()
 
     # senaite.app.listing.ajax imports senaite.core at module scope, so
     # on a cold start this can fail here; an IDatabaseOpenedWithRoot
@@ -521,6 +527,114 @@ def _patch_validator_interimfields_unicode():
 
     InterimFieldsValidator.__call__ = _patched_call
     _sys.stderr.write("maitux: InterimFieldsValidator unicode patch done\n")
+    _sys.stderr.flush()
+
+
+# ==============================================================================
+# CHOICES SYNTAX VALIDATOR PATCH — a Chinese label must not read as bad syntax
+# ==============================================================================
+
+def _to_unicode_safe(value):
+    """UTF-8 bytes -> unicode; anything else handed back unchanged.
+
+    Same shape as the _uni() inside _patch_validator_interimfields_unicode.
+    Kept at module scope so tests/ can exercise it without a Zope instance.
+    """
+    if isinstance(value, str):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.decode("utf-8", "replace")
+    return value
+
+
+def _parse_choices_unicode_safe(value):
+    """Parse a ``k:v|k:v`` choices string into a dict, unicode-safe.
+
+    Raises ValueError on a malformed string, exactly like the core code this
+    replaces -- the caller turns that into the "No valid format in choices
+    field" message, so genuinely bad syntax still gets rejected.
+
+    What core does and why it breaks (senaite.core 2.x,
+    senaite/core/validators/interimfields.py, choices_syntax_validator):
+
+        dict(map(lambda ch: map(str.strip, str(ch).split(":")), choices))
+
+    Calculation is Dexterity, so z3c.form hands the field over as *unicode*.
+    ``str(u'imp_linearity:...中文...')`` raises UnicodeEncodeError on Python 2,
+    and UnicodeEncodeError is a subclass of ValueError -- so the very ``except
+    ValueError`` a few lines below catches it and reports a *syntax* error for
+    a string whose syntax is perfectly fine.  The label is Chinese; that is
+    all.  Nothing is logged either, because the exception never leaves that
+    inner try, so the only clue on screen points the wrong way.
+
+    ★ BOTH conversions have to go, not just the first one.  Swap only
+    ``str(ch)`` and ``map(str.strip, ...)`` is next in line:
+
+        TypeError: descriptor 'strip' requires a 'str' object
+                   but received a 'unicode'
+
+    TypeError is not a ValueError, so it escapes to the outer
+    ``except Exception`` in InterimFieldsValidator.validate() and comes back as
+    "Validation chain internal error" -- a different wrong answer.  Half-fixing
+    this trades one misleading message for another.
+    """
+    raw = _to_unicode_safe(value) or u""
+    chunks = raw.split(u"|") if raw else []
+    pairs = []
+    for chunk in chunks:
+        chunk = _to_unicode_safe(chunk)
+        # A chunk that is not exactly "<value>:<text>" yields a sequence of
+        # length != 2, and dict() rejects it with ValueError -- which is the
+        # behaviour the caller relies on.
+        pairs.append([piece.strip() for piece in chunk.split(u":")])
+    return dict(pairs)
+
+
+def _patch_validator_choices_syntax_unicode():
+    """Make the Dexterity choices validator unicode-safe.
+
+    Only the parsing changes.  The three nested checks (empty keys, unique
+    keys, at least two options) run exactly as before and the failure message
+    keeps core's msgid, so a real syntax error still reads the same in every
+    language.  See _parse_choices_unicode_safe for the full account.
+    """
+    import sys as _sys
+    _sys.stderr.write(
+        "maitux: patching choices_syntax_validator for unicode safety\n")
+    _sys.stderr.flush()
+
+    from senaite.core.validators import interimfields as _if
+
+    def _choices_syntax_validator():
+        def validate(field):
+            k, v = next(iter(field.items()))
+            try:
+                choices = _parse_choices_unicode_safe(v)
+            except ValueError:
+                # Same msgid as core, so the zh_CN catalogue still resolves it.
+                return _if.fail(k, _if.translate(_if._(
+                    u"choice_syntax_validation_error",
+                    default=u"No valid format in choices field. "
+                            u"Supported format is: "
+                            u"<value-0>:<text>|<value-1>:<text>|"
+                            u"<value-n>:<text>")))
+            nested = [
+                _if.choices_empty_keys_validator(),
+                _if.choices_unique_keys_validator(),
+                _if.choices_min_items_validator(),
+            ]
+            result = _if.ValidatedData(choices).run(*nested)
+            if len(result["errors"]) > 0:
+                return _if.fail("choices", result["errors"])
+            return _if.success(field)
+        return validate
+
+    # The call site is inside InterimFieldsValidator.validate(), so the name is
+    # looked up in module globals every time the form is submitted -- replacing
+    # the module attribute is enough, no need to touch the validator class.
+    _if.choices_syntax_validator = _choices_syntax_validator
+    _sys.stderr.write("maitux: choices_syntax_validator unicode patch done\n")
     _sys.stderr.flush()
 
 
