@@ -433,6 +433,30 @@ class GroupedRenderingMixin(object):
             return "Slot {}".format(pos)
         return "unknown"
 
+    @staticmethod
+    def _resolve_block_key(item, sample_id):
+        """Identity of one row block: the analysis itself.
+
+        Blocks used to be keyed by (AS keyword, sample id), which silently
+        assumed a sample never carries two analyses of the same service.
+        It does:
+
+          * `retract` keeps the original (-> retracted) and adds a retest of
+            the same service on the same sample -- both in the register;
+          * a duplicate (DuplicateAnalysis) reports the source sample's ID;
+          * two blanks/controls sharing a slot resolve to the same "Slot N".
+
+        Any of those put two analyses in one block, and only `items[0]` was
+        ever rendered.  Worst case observed: a retest whose original was
+        retracted first got no cell at all, so the repeat results could not
+        be entered -- and nothing failed loudly, because the surviving row
+        looked like a perfectly reasonable read-only retracted record.
+
+        The UID is the identity.  Empty worksheet slots carry no UID, so
+        they fall back to the sample id and keep grouping as before.
+        """
+        return item.get("uid") or sample_id
+
     # ------------------------------------------------------------------
     # Grouping
     # ------------------------------------------------------------------
@@ -502,29 +526,39 @@ class GroupedRenderingMixin(object):
             return result
         return []
 
-    def _expand_sample_rows(self, sample_data, columns):
-        """Expand a sample's items into display rows.
+    def _expand_sample_rows(self, block_data, columns):
+        """Expand ONE analysis into display rows.
 
         Handles list-type interim fields by expanding them into multiple
         sub-rows. Scalar fields use rowspan in the template.
 
-        :param sample_data: dict with sample_id and items list
+        One block is one analysis, never several.  It used to be one block per
+        (AS, sample) on the premise that a sample carries a single analysis of
+        any given Analysis Service -- and that premise is wrong: `retract`
+        keeps the original (-> retracted) *and* adds a retest of the same
+        service on the same sample, so both sit in the register at once.
+        Everything below then read `items[0]`, the retracted original won on
+        creation order, and the retest was rendered nowhere at all: no cell,
+        no state, no input, no way to enter the repeat results.  Full account
+        in `_resolve_block_key()`.
+
+        :param block_data: dict with sample_id, block_key and its items list
         :param columns: list of interim column dicts
         :returns: {
             "display_rows": [list of row dicts],
             "row_count": int (for rowspan),
         }
         """
-        items = sample_data["items"]
+        items = block_data["items"]
+        item = items[0] if items else {}
 
-        # Longest list that actually holds data across this sample's analyses.
+        # Longest list that actually holds data on this analysis.
         max_len = 0
-        for item in items:
-            for col in columns:
-                if not col["is_list"]:
-                    continue
-                max_len = max(
-                    max_len, len(self._get_list_array(item, col["keyword"])))
+        for col in columns:
+            if not col["is_list"]:
+                continue
+            max_len = max(
+                max_len, len(self._get_list_array(item, col["keyword"])))
 
         max_rows = max(1, max_len)
 
@@ -534,11 +568,8 @@ class GroupedRenderingMixin(object):
             # (calculatedlist) has as many elements as the engine produced.
             if col["render_type"] != "multivalue":
                 continue
-            for item in items:
-                if self._is_interim_editable(item, col):
-                    has_editable_list = True
-                    break
-            if has_editable_list:
+            if self._is_interim_editable(item, col):
+                has_editable_list = True
                 break
 
         # Mirror the native MultiValue widget, which keeps one empty input at
@@ -556,12 +587,12 @@ class GroupedRenderingMixin(object):
             row = {
                 "_row_idx": row_idx,
                 "_is_first": (row_idx == 0),
-                "sample_id": sample_data["sample_id"] if row_idx == 0 else "",
-                "item": items[0] if items else {},
+                "sample_id": block_data["sample_id"] if row_idx == 0 else "",
+                "item": item,
             }
-            # Copy core fields from the first item (only on first row)
+            # Copy core fields from this block's analysis (only on first row)
             if row_idx == 0 and items:
-                it = items[0]
+                it = item
                 for key in ("Pos", "Result", "DetectionLimitOperand",
                             "Uncertainty", "Specification", "Method",
                             "Instrument", "state_title", "state_class",
@@ -614,25 +645,28 @@ class GroupedRenderingMixin(object):
             # of the analysis that owns it plus its editability, so the
             # template can emit the data-uid/data-keyword pairs the save
             # queue needs without guessing.
+            #
+            # A "first value wins" guard used to sit here, back when a block
+            # could hold several analyses.  One analysis per block makes the
+            # owner unambiguous -- and that is precisely what puts a retest's
+            # own UID on its cells instead of the retracted original's, so
+            # editing them saves to the retest.
             row["interim"] = {}
             row["interim_uid"] = {}
             row["interim_editable"] = {}
-            for item in items:
-                for col in columns:
-                    kw = col["keyword"]
-                    if kw in row["interim"]:
-                        continue  # already set from another item
-                    if col["is_list"]:
-                        # One list element per row; the spare trailing row (see
-                        # above) stays empty so a new element can be typed in.
-                        arr = self._get_list_array(item, kw)
-                        row["interim"][kw] = arr[row_idx] if row_idx < len(arr) else ""
-                    else:
-                        val = self._get_item_field_value(item, kw)
-                        row["interim"][kw] = val if row_idx == 0 else ""
-                    row["interim_uid"][kw] = item.get("uid", "")
-                    row["interim_editable"][kw] = self._is_interim_editable(
-                        item, col)
+            for col in columns:
+                kw = col["keyword"]
+                if col["is_list"]:
+                    # One list element per row; the spare trailing row (see
+                    # above) stays empty so a new element can be typed in.
+                    arr = self._get_list_array(item, kw)
+                    row["interim"][kw] = arr[row_idx] if row_idx < len(arr) else ""
+                else:
+                    val = self._get_item_field_value(item, kw)
+                    row["interim"][kw] = val if row_idx == 0 else ""
+                row["interim_uid"][kw] = item.get("uid", "")
+                row["interim_editable"][kw] = self._is_interim_editable(
+                    item, col)
 
             display_rows.append(row)
 
@@ -642,18 +676,24 @@ class GroupedRenderingMixin(object):
         }
 
     def _group_analyses_by_as(self, items):
-        """Group flat analysis items by AS Keyword, then by sample.
+        """Group flat analysis items by AS Keyword, then one block per analysis.
 
         Returns list of AS group dicts, each containing:
           - keyword (str)
           - title (str)
           - sort_key (int)
+          - sample_count (int): distinct samples, for the group header
           - interim_columns (list): visible interim column definitions
-          - samples (list): list of {
-              sample_id (str),
+          - samples (list): one entry per ANALYSIS, in the order
+            folderitems() returned them (creation order, so a retracted
+            original comes before its retest -- same as Classic):
+              sample_id (str): repeated when a sample has several blocks,
+              block_key (str): the analysis UID; see _resolve_block_key(),
               row_count (int): for rowspan,
               display_rows (list): pre-expanded rows
-            }
+
+        The key is "samples" for template compatibility, but an entry is a
+        block, not a sample.
         """
         if not items:
             return []
@@ -699,17 +739,30 @@ class GroupedRenderingMixin(object):
             if keyword not in grouped:
                 continue
             sample_id = self._resolve_sample_id(item)
+            block_key = self._resolve_block_key(item, sample_id)
 
             od = grouped[keyword]["samples"]
-            if sample_id not in od:
-                od[sample_id] = {"sample_id": sample_id, "items": []}
-            od[sample_id]["items"].append(item)
+            if block_key not in od:
+                od[block_key] = {
+                    "sample_id": sample_id,
+                    "block_key": block_key,
+                    "items": [],
+                }
+            od[block_key]["items"].append(item)
 
         # --- Third pass: build columns + expand display rows ---
         result = []
         for kw, grp in grouped.items():
             samples_raw = list(grp["samples"].values())
             grp["samples"] = []
+
+            # What the group header counts.  It has to be the number of
+            # distinct SAMPLES, not the number of blocks: one sample with a
+            # retracted analysis plus its retest is two blocks but still one
+            # sample, and "2 sample(s)" would just trade one wrong number
+            # for another.
+            grp["sample_count"] = len(
+                set([s["sample_id"] for s in samples_raw]))
 
             # Build interim columns from all items in this AS
             all_items = []
@@ -721,13 +774,18 @@ class GroupedRenderingMixin(object):
             for s in samples_raw:
                 expanded = self._expand_sample_rows(s, grp["interim_columns"])
                 expanded["sample_id"] = s["sample_id"]
-                # Identifies the rows belonging to one sample within a group,
-                # so the client can tell which row is the last of its block.
+                # Identifies the rows belonging to one analysis within a
+                # group, so the client can tell which row is the last of its
+                # block.  The analysis key is part of it: without it a
+                # retracted analysis and its retest produced the very same
+                # block_id, and as_grouped.js walks siblings comparing that
+                # string to find "the last row of this block".
                 # Built here rather than in the template: a `string:` TALES
                 # expression is an awkward place to join two values, since
                 # Chameleon reads a top-level "|" as its fallback operator and
                 # would silently keep only the first half.
-                expanded["block_id"] = u"{}::{}".format(kw, s["sample_id"])
+                expanded["block_id"] = u"{}::{}::{}".format(
+                    kw, s["sample_id"], s["block_key"])
                 grp["samples"].append(expanded)
 
             result.append(grp)

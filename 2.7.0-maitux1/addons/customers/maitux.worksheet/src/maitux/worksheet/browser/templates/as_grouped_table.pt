@@ -55,7 +55,10 @@
           <span class="as-group-keyword" tal:content="group/keyword">KW</span>
           <span class="as-group-title" tal:content="group/title">AS Title</span>
           <small class="text-muted as-group-meta">
-            <span tal:replace="python:len(group['samples'])">0</span>
+            <!-- Distinct samples, not blocks: group['samples'] holds one
+                 entry per analysis, and a sample with a retracted analysis
+                 plus its retest contributes two of them. -->
+            <span tal:replace="group/sample_count">0</span>
             <span i18n:translate="">sample(s)</span>
           </small>
         </div>
