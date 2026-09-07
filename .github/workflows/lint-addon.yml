@@ -1,5 +1,8 @@
 name: lint-addon
 
+# 门禁语义由 lint_addon.py 决定，是「不新增 ERROR」：基线
+# （lint_baseline.json）里的既有欠账不拦，只有本次新增的 ERROR
+# 才让 job 变红。
 # 现在只要 PR 上出现红叉就够用 —— 合并闸口先靠人工审批。
 # 以后要收紧成"不通过不能合并"：Settings → Rules → master‑protect
 # → Require status checks to pass → 选 lint（先让本 workflow 跑过一次，
@@ -46,6 +49,18 @@ jobs:
         # E06（PEP 263 缺 coding 声明）只有宿主侧这条规则能抓 ——
         # py2 的 py_compile / compileall 都不做编码声明检查，
         # 反而会生成 .pyc 把 SyntaxError 永久盖住。
+
+      # lint 自己也会坏。上游随 lint_addon.py 一起提供了这两份自检，
+      # 覆盖门禁语义（基线 / 新增判定）和 R14 的收窄条件 —— 改规则最容易
+      # 踩坏的正是这两处。合起来 1.8 秒，没有不跑的理由。
+      - name: lint 自身的自检
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          cd 2.7.0-maitux1/addons/customers
+          python selftest_gate.py
+          python selftest_r14.py
 
       - name: 结论写进 run summary
         if: always()
