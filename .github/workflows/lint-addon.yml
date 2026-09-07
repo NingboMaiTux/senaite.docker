@@ -1,0 +1,66 @@
+name: lint-addon
+
+# 现在只要 PR 上出现红叉就够用 —— 合并闸口先靠人工审批。
+# 以后要收紧成"不通过不能合并"：Settings → Rules → master‑protect
+# → Require status checks to pass → 选 lint（先让本 workflow 跑过一次，
+# 否则下拉框里搜不到这个名字，手输拼错会让 PR 永久卡在 pending）。
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# ★ 故意不加 paths 过滤。
+# 直觉上想只在 addons/** 变动时跑，但一旦把 lint 设成 required status check，
+# 没触发的 PR 会停在 pending 而不是 skipped，直接卡死合并。
+# 全量扫 23 个 addon 本来也只要 1 秒左右，省不出什么。
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # 钉死版本：脚本走 ast.Constant，py3.14 已移除 ast.Str 系旧 API。
+          # 不钉的话，哪天 ubuntu-latest 默认 python 滚版本，CI 会在一个
+          # 跟本次改动毫无关系的早上突然变红。
+          python-version: '3.12'
+
+      - name: senaite addon 静态检查
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          # pipefail 是必须的：GitHub 默认 `bash -e` 不含 pipefail，
+          # 走 tee 之后退出码会变成 tee 的 0 —— 门就永远是绿的。
+          set -o pipefail
+          python 2.7.0-maitux1/addons/customers/lint_addon.py \
+            --json lint-report.json | tee lint.log
+        # --in-container 在 CI 里跑不了（要先建镜像）。也不需要：
+        # E06（PEP 263 缺 coding 声明）只有宿主侧这条规则能抓 ——
+        # py2 的 py_compile / compileall 都不做编码声明检查，
+        # 反而会生成 .pyc 把 SyntaxError 永久盖住。
+
+      - name: 结论写进 run summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '### lint_addon 结果'
+            echo '```'
+            cat lint.log || echo '(没有输出，脚本可能在启动阶段就失败了)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lint-report
+          path: lint-report.json
+          if-no-files-found: warn

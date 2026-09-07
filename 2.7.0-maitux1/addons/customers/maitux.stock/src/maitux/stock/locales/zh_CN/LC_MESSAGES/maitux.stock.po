@@ -158,6 +158,9 @@ msgstr "采购订单"
 msgid "Quantity"
 msgstr "数量"
 
+msgid "Quantity Ordered must be a number (decimals allowed)"
+msgstr "Quantity Ordered 必须是数字（可含小数点）"
+
 msgid "Remarks"
 msgstr "备注"
 
