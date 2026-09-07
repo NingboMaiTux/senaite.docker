@@ -387,12 +387,38 @@ def _patch_folder_item():
                     # Parse and ensure valid JSON array for MultiValue display
                     value = item[keyword].get("value", "")
                     if value:
+                        # [PY2-UNICODE] _safe_text, not str().  This branch used
+                        # to read `json.loads(str(value))` with
+                        # `except (ValueError, TypeError)` around it, and the
+                        # handler then repeated `str(value)` -- i.e. the
+                        # recovery path re-ran the very call that had just
+                        # failed, and that second one had nobody to catch it.
+                        #
+                        # It is reachable as soon as an analysis stops being
+                        # editable.  core then replaces the interim value with
+                        # its formatted display text:
+                        #
+                        #     # bika/lims/browser/analyses/view.py
+                        #     if not is_editable:
+                        #         interim_field["value"] = interim_formatted
+                        #
+                        # and that text is NOT json.  For a RESULT_STATUS
+                        # column it is u"—<br/>—" (our own em-dash
+                        # placeholder); for a substance-name column it is CJK.
+                        # str() on either raises UnicodeEncodeError -> caught
+                        # -> raised again -> the whole manage_results page
+                        # 500s, in both the AS-Grouped and the Classic layout.
+                        #
+                        # Same family as the two [PY2-UNICODE] patches further
+                        # down (get_formatted_interim and format_interim): a
+                        # value that is legitimately text reaching a str().
+                        text = _safe_text(value)
                         try:
-                            parsed = json.loads(str(value))
+                            parsed = json.loads(text)
                             if not isinstance(parsed, list):
-                                value = json.dumps([str(value)])
+                                value = json.dumps([text])
                         except (ValueError, TypeError):
-                            value = json.dumps([str(value)])
+                            value = json.dumps([text])
                     item[keyword]["value"] = value
                     item[keyword]["result_type"] = "multivalue"
                     item[keyword]["_orig_result_type"] = "calculatedlist"
