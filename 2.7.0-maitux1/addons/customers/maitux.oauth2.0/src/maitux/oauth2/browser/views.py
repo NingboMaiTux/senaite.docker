@@ -340,8 +340,15 @@ class LogoutView(BaseView):
         state_util.clear_cookie(response, state_util.STATE_COOKIE)
         state_util.clear_cookie(response, state_util.BYPASS_COOKIE)
 
-        target = u"%s/logged_out" % self.portal_url
+        # Same two steps as CMFPlone's own LogoutView: honour ``next`` when it
+        # stays inside the portal, otherwise fall back to the stock landing
+        # page -- which is spelled ``logged-out``, with a hyphen; ``logged_out``
+        # is a 404.  The idle session timeout passes the login form as
+        # ``next``, so an expiry lands where it did before SSO was in play.
+        target = self.safe_came_from(self.request.form.get("next")) \
+            or u"%s/logged-out" % self.portal_url
         if config.is_enabled() and config.get("sso_logout"):
+            # Go via the IdP, and have it send the browser on to ``target``.
             idp_url = BCastleClient().logout_url(target)
             if idp_url:
                 target = idp_url

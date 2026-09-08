@@ -78,9 +78,16 @@
        FormWrapper is the one change that could lock every administrator out,
        so the "send /login to 竹云 as well" option is implemented as a
        traversal-time redirect in maitux.oauth2.subscribers instead. -->
+  <!-- `for` must match CMFPlone's own registration, which is on
+       INavigationRoot rather than `*`.  A multi-adapter lookup weighs the
+       context before the request, so `for="*"` loses to CMFPlone even with a
+       browser layer on our side: this override silently never ran, and with it
+       neither `sso_logout` nor the state-cookie cleanup below.
+       (`require_login` above is registered `for="*"` by CMFPlone too, so
+       there the layer does decide it, which is why that one always worked.) -->
   <browser:page
       name="logout"
-      for="*"
+      for="plone.app.layout.navigation.interfaces.INavigationRoot"
       class=".views.LogoutView"
       permission="zope2.Public"
       layer="maitux.oauth2.interfaces.IMaituxOAuth2Layer"
