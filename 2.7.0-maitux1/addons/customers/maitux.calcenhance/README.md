@@ -1045,6 +1045,62 @@ imp_total = GROUP_SUMlist(GATE([imp_pct], 0.05, 0), [imp_sample_id])
 > 分支也算一遍，那一支报错就毁掉整条公式）。`BAND` / `GATE` 把判断放在 Python
 > 函数**内部**，不引入 `IF` 语法，与这个原则一致。
 
+### ⚠️ 边界可以写成字段引用，但**同一公式里不能混 array 函数**
+
+把边界做成字段（而不是字面量）是推荐做法 —— 0.9/1.1 是某个产品的判据，
+写进公式就把公式绑死在那个产品上：
+
+```python
+imp_cf_gated = BAND([imp_cf_lookup], [imp_cf_gate_low], [imp_cf_gate_high], 1.0)
+#                                     ↑ numeric 字段，每个产品自己填
+```
+
+**但这只在公式不含 array 函数时成立。** `calculatedlist` 的求值有两条路径，
+分叉条件是公式里有没有出现下面任一个：
+
+```
+GROUP_*  |  *_ROWS  |  RESULT_STATUS  |  TIME_ELAPSED_HOURS  |  COALESCE  |  SHIFT
+```
+
+| 路径 | 触发条件 | `[标量字段]` 被替换成 |
+| ---- | -------- | -------------------- |
+| **整数组** | 公式**含**上面任一函数 | 整个数组的字面量；标量被 pad 成 `[v, v, …]`，**是列表** |
+| **逐行** | **不含** | 该字段的**裸标量值** |
+
+`RESULT_STATUS` 的 `loq`/`lod` 两条路都能接字段，因为它**在函数内部解包了列表**
+（`if isinstance(loq, list): loq = loq[0]`）。
+**`BAND` / `GATE` 没有这一步** —— 它们的边界只接受数字，收到列表就抛错。
+
+```python
+# ✅ 不含 array 函数 → 逐行路径 → [low] 是裸标量
+BAND([imp_cf_lookup], [imp_cf_gate_low], [imp_cf_gate_high], 1.0)
+
+# ❌ 混了 GROUP_AVGlist → 整数组路径 → [imp_cf_gate_low] 变成 [0.9, 0.9, …]
+#    → _gate_operand 抛错 → 整列 "---"
+BAND(GROUP_AVGlist([x],[k]), [imp_cf_gate_low], [imp_cf_gate_high], 1.0)
+```
+
+**要在一条链里同时用两者，拆成两个字段**：先用一个字段做 array 运算，
+再用另一个字段做 `BAND`/`GATE`。
+
+> 这条对**每个函数、每个参数位**都要单独看：能不能接字段引用，
+> 取决于该函数有没有自己解包列表，不是全引擎统一的性质。
+
+### ⚠️ 用作边界的字段必须是 `numeric`，**不能是 `calculated`**
+
+同一个"字段留空"，两种 `result_type` 的下场相反：
+
+| 被引用字段的类型 | 留空时绑定到的值 | 传给 `BAND` / `GATE` 边界后 |
+| ---------------- | ---------------- | --------------------------- |
+| `numeric` | 该键**不进标量表** → `None` | 抛错 → 整列 `---`，**看得见** |
+| `calculated` | `float(值 or 0)` → **`0`** | `BAND(x, 0, 0, 1.0)` → 空区间 → **门控静默失效** |
+
+第二行**不符合本引擎"算不出来就输出 `---`、不编造"的统一口径** ——
+它算得出来，只是算错了，而且没有任何提示。
+`BAND` 自带的 `low > high` 抛错也拦不住它（`0 > 0` 为假）。
+
+**所以阈值 / 边界这类手填字段一律用 `numeric`。**
+
 ---
 
 ## STDEV_ROWS / RSD_ROWS — 逐行精密度统计
