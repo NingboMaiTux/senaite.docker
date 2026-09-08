@@ -3,7 +3,13 @@
 本目录存放「仅部分客户需要」的 SENAITE / Plone add-on，通过 compose 挂载到容器的
 `/opt/addons/customers`。
 
+## 常用文档
+
+- `SENAITE-Addon开发规则.md`：本项目的 addon 开发约束与踩坑总结
+- `Git操作速查表.md`：本项目常用 Git 命令与提交流程
+
 ## 部署人员只需要做一件事
+
 
 **把 add-on 源码目录放进本目录（或从本目录删掉），然后重启容器。**
 

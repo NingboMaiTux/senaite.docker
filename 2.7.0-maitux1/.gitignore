@@ -6,3 +6,6 @@ postgres-data/
 blobstorage/
 # 容器启动时由 /gen-custom-addon.sh 自动生成，不要提交
 addons/customers/custom-addon.cfg
+# 本地 Trae 项目规则与技能，不进入 Git
+.trae/rules/
+.trae/skills/
