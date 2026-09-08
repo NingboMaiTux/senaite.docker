@@ -9,3 +9,5 @@ addons/customers/custom-addon.cfg
 # 本地 Trae 项目规则与技能，不进入 Git
 .trae/rules/
 .trae/skills/
+# 打包产物（打包.ps1 的输出），不进版本库
+dist/
