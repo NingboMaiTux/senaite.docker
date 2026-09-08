@@ -39,6 +39,30 @@
     <input type="hidden" name="uids"
            tal:attributes="value view/get_all_uids" />
 
+    <!-- ====================== Review state filters ======================= -->
+    <!--
+      The Valid / Invalid / All tabs of the listing.  The ReactJS listing draws
+      these itself from the view's review_states; this layout replaces it, so
+      without them a non-default filter would be unreachable.  Plain links, no
+      ajax: switching filter re-runs the catalog query, which is a page load.
+
+      Deliberately ABOVE the "no analyses found" branch below: a filter that
+      matches nothing must still show the tabs, or there is no way back.
+
+      Note for editors: chameleon rejects a bare "- -" (without the space)
+      inside an HTML comment, so do not use it as a dash here.  It is a
+      compile error, and it takes the whole manage_results page down.
+    -->
+    <tal:filters define="filters view/get_state_filters">
+      <ul class="nav nav-tabs as-grouped-filters" tal:condition="filters">
+        <li class="nav-item" tal:repeat="state_filter filters">
+          <a tal:attributes="href state_filter/url;
+                             class python:'nav-link active' if state_filter['selected'] else 'nav-link'"
+             tal:content="state_filter/title">Valid</a>
+        </li>
+      </ul>
+    </tal:filters>
+
     <tal:empty condition="not: view/get_as_groups">
       <div class="alert alert-warning">
         <i class="fas fa-info-circle"></i>
@@ -55,7 +79,10 @@
           <span class="as-group-keyword" tal:content="group/keyword">KW</span>
           <span class="as-group-title" tal:content="group/title">AS Title</span>
           <small class="text-muted as-group-meta">
-            <span tal:replace="python:len(group['samples'])">0</span>
+            <!-- Distinct samples, not blocks: group['samples'] holds one
+                 entry per analysis, and a sample with a retracted analysis
+                 plus its retest contributes two of them. -->
+            <span tal:replace="group/sample_count">0</span>
             <span i18n:translate="">sample(s)</span>
           </small>
         </div>
@@ -272,6 +299,7 @@
                       <tal:interims repeat="col group/interim_columns">
                         <tal:cell define="kw col/keyword;
                                           is_list col/is_list;
+                                          is_select python:col['render_type'] == 'select';
                                           val python:row['interim'].get(kw, '');
                                           cell_uid python:row['interim_uid'].get(kw, '');
                                           editable python:row['interim_editable'].get(kw, False);
@@ -281,19 +309,40 @@
                           <td tal:condition="python:is_list or row['_is_first']"
                               tal:attributes="class python:is_list and css or (css + ' as-span-cell');
                                               rowspan python:None if is_list else sample['row_count']">
-                            <input tal:condition="editable"
+
+                            <!-- A select-type interim.  The whole option list
+                                 including the leading blank one is prepared in
+                                 _build_interim_columns / _with_blank_choice,
+                                 so nothing is hardcoded here (the Method
+                                 column above hardcodes its blank option; doing
+                                 that here would duplicate the one core already
+                                 supplies while the field is empty). -->
+                            <select tal:condition="python:is_select and editable"
+                                    class="as-select"
+                                    tal:attributes="data-uid cell_uid;
+                                                    data-keyword kw;">
+                              <option tal:repeat="ic col/choices"
+                                      tal:attributes="value ic/ResultValue;
+                                                      selected python:val == ic['ResultValue'] and 'selected' or None;"
+                                      tal:content="ic/ResultText">&mdash;</option>
+                            </select>
+
+                            <input tal:condition="python:not is_select and editable"
                                    type="text"
                                    class="as-input as-input-numeric"
                                    tal:attributes="value val;
                                                    data-uid cell_uid;
                                                    data-keyword kw;
                                                    data-row-index row_index;" />
+
+                            <!-- Read-only: a select shows its LABEL, not the
+                                 stored key (see choices_label). -->
                             <span tal:condition="not: editable"
                                   class="as-readonly"
                                   tal:attributes="data-uid cell_uid;
                                                   data-keyword kw;
                                                   data-row-index row_index;"
-                                  tal:content="val">&mdash;</span>
+                                  tal:content="python:view.choices_label(col, val) if is_select else val">&mdash;</span>
                           </td>
 
                         </tal:cell>

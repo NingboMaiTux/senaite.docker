@@ -158,6 +158,9 @@ msgstr "Purchase Orders"
 msgid "Quantity"
 msgstr "Quantity"
 
+msgid "Quantity Ordered must be a number (decimals allowed)"
+msgstr "Quantity Ordered must be a number (decimals allowed)"
+
 msgid "Remarks"
 msgstr "Remarks"
 

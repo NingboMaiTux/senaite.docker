@@ -6,6 +6,7 @@ import json
 
 from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
 from bika.lims import api
+from bika.lims import senaiteMessageFactory as _
 from bika.lims.api.analysis import is_out_of_range
 from senaite.core.browser.worksheets.worksheet.analyses_listing import (
     AnalysesView as WorksheetAnalysesView,
@@ -14,6 +15,27 @@ from senaite.core.i18n import translate
 
 # Sentinel: tells "decoded to None" apart from "could not be decoded".
 _UNPARSEABLE = object()
+
+# Review states of the "Valid" / "Invalid" listing filters.  Copied verbatim
+# from senaite.core's AnalysesView.review_states
+# (bika/lims/browser/analyses/view.py) -- the sample view's own filters, whose
+# default is "Valid" and therefore leaves retracted analyses out.  Written out
+# here rather than read off the base class because the base builds them in
+# __init__ and the worksheet listing then throws them away; see
+# AnalysesGroupedView._restore_state_filters().
+VALID_ANALYSES_STATES = (
+    "registered",
+    "unassigned",
+    "assigned",
+    "to_be_verified",
+    "verified",
+    "published",
+)
+INVALID_ANALYSES_STATES = (
+    "cancelled",
+    "retracted",
+    "rejected",
+)
 
 # Guards the unwrapping below against pathological data.  Real values are one
 # level deep; anything past a handful of levels is corruption, not data.
@@ -193,6 +215,7 @@ class GroupedRenderingMixin(object):
 
         Possible values:
           - "numeric"   : editable number input
+          - "select"    : editable dropdown, options from the field's choices
           - "multivalue": editable list (MultiValue)
           - "readonly"  : calculated scalar (ReadonlyField)
           - "readonlylist": calculated list (readonly MultiValue)
@@ -203,6 +226,9 @@ class GroupedRenderingMixin(object):
         # A locked interim (instrument-acquired data) is never hand-editable.
         # maitux.calcenhance refuses the write server-side anyway; rendering it
         # read-only keeps the form honest about it.
+        #
+        # This stays FIRST on purpose: a locked select must fall through to the
+        # read-only branch below, not to the new "select" one.
         if AnalysesGroupedView._is_locked(ifield):
             base = orig or rt
             if base in ("list", "calculatedlist", "multivalue"):
@@ -223,6 +249,16 @@ class GroupedRenderingMixin(object):
             return "multivalue"
         if rt == "readonly":
             return "readonly"
+        # `select` is a CORE result type (senaite.core's RESULT_TYPES), not one
+        # of maitux.calcenhance's additions, which is exactly why it was missed:
+        # calcenhance's _folder_item_calculation patch rewrites only its own
+        # three types and leaves select alone, and everything left over used to
+        # land on "numeric" below.  A select rendered as a free-text box is the
+        # worst possible failure for these fields -- imp_cf_source holds an AS
+        # KEYWORD that a LOOKUP resolves, so a typo or a hand-typed label makes
+        # the whole correction-factor chain read '---' with no error anywhere.
+        if rt == "select":
+            return "select"
         return "numeric"
 
     @staticmethod
@@ -248,6 +284,72 @@ class GroupedRenderingMixin(object):
     def _is_list_render_type(rt):
         """Return True if render_type is list-like (multi-row)."""
         return rt in ("multivalue", "readonlylist")
+
+    # Label of the blank option, matching the Method / Instrument columns of
+    # the same table so "no selection" reads the same way everywhere.
+    _BLANK_CHOICE_LABEL = u"—"          # em dash
+
+    @classmethod
+    def _with_blank_choice(cls, choices):
+        """Guarantee a blank first option, without duplicating core's.
+
+        Why this is needed at all: core only prepends the blank option while
+        the field is still EMPTY --
+
+            # bika/lims/browser/analyses/view.py, _folder_item_calculation
+            if not interim_value and not multi:
+                interim_allow_empty = True
+
+        -- so once a value has been saved the blank option disappears and the
+        analyst can set the field but never unset it.  Measured on Care: empty
+        field -> 3 options, after saving `imp_linearity` -> 2.  That is a
+        capability this view USED to have, because before the select was
+        rendered the cell was a free-text input you could just clear; shipping
+        the dropdown without this would trade one silent trap for another.
+
+        The Method column two blocks up in as_grouped_table.pt hardcodes its
+        blank option unconditionally for the same reason, which is why the
+        blank is normalised to the same em dash rather than to "" -- an
+        empty-labelled option is a blank line nobody can see is clickable.
+        """
+        # Copy rather than mutate: these dicts are the ones core put on the
+        # item, and other columns of the same item read them too.
+        out = []
+        seen_blank = False
+        for choice in (choices or []):
+            if choice.get("ResultValue") in (None, u"", ""):
+                seen_blank = True
+                # core already supplied one; only fix the invisible label
+                choice = dict(choice)
+                if not choice.get("ResultText"):
+                    choice["ResultText"] = cls._BLANK_CHOICE_LABEL
+            out.append(choice)
+        if seen_blank:
+            return out
+        return [{"ResultValue": u"",
+                 "ResultText": cls._BLANK_CHOICE_LABEL}] + out
+
+    @staticmethod
+    def choices_label(column, value):
+        """The display label of a select value, falling back to the value.
+
+        A select stores a KEY (`imp_linearity`) and shows a label
+        (`情况1 各浓度点单独称量`).  Read-only cells must show the label, the
+        same way the native get_formatted_interim() does -- the key is an
+        internal identifier and means nothing on a report.  Falling back to the
+        raw value rather than to "" is deliberate: a stored value that is not
+        among the choices any more is a data problem worth SEEING, not hiding.
+
+        Public name on purpose: the template calls it, and ZPT refuses to
+        traverse an attribute whose name starts with an underscore -- which is
+        also why get_method_choices/get_instrument_choices are named that way.
+        """
+        if value in (None, ""):
+            return ""
+        for choice in column.get("choices") or []:
+            if choice.get("ResultValue") == value:
+                return choice.get("ResultText") or value
+        return value
 
     @staticmethod
     def _to_array(value):
@@ -353,6 +455,30 @@ class GroupedRenderingMixin(object):
             return "Slot {}".format(pos)
         return "unknown"
 
+    @staticmethod
+    def _resolve_block_key(item, sample_id):
+        """Identity of one row block: the analysis itself.
+
+        Blocks used to be keyed by (AS keyword, sample id), which silently
+        assumed a sample never carries two analyses of the same service.
+        It does:
+
+          * `retract` keeps the original (-> retracted) and adds a retest of
+            the same service on the same sample -- both in the register;
+          * a duplicate (DuplicateAnalysis) reports the source sample's ID;
+          * two blanks/controls sharing a slot resolve to the same "Slot N".
+
+        Any of those put two analyses in one block, and only `items[0]` was
+        ever rendered.  Worst case observed: a retest whose original was
+        retracted first got no cell at all, so the repeat results could not
+        be entered -- and nothing failed loudly, because the surviving row
+        looked like a perfectly reasonable read-only retracted record.
+
+        The UID is the identity.  Empty worksheet slots carry no UID, so
+        they fall back to the sample id and keep grouping as before.
+        """
+        return item.get("uid") or sample_id
+
     # ------------------------------------------------------------------
     # Grouping
     # ------------------------------------------------------------------
@@ -379,6 +505,18 @@ class GroupedRenderingMixin(object):
                     # Precomputed so the template does not have to reach for
                     # the view's helpers inside a repeat loop.
                     "is_list": self._is_list_render_type(render_type),
+                    # Options for a select column, already normalised to
+                    # [{"ResultValue":..., "ResultText":...}].  Taken from the
+                    # item rather than parsed out of the interim's `choices`
+                    # string: the native _folder_item_calculation has already
+                    # split it, so re-parsing here would give this view a
+                    # second, silently divergent semantics.  The blank option
+                    # is the one thing core cannot be trusted with -- it drops
+                    # it as soon as the field has a value; see
+                    # _with_blank_choice.
+                    "choices": self._with_blank_choice(
+                        self._choices_to_list(
+                            (item.get("choices") or {}).get(kw))),
                 }
         return list(cols.values())
 
@@ -410,29 +548,39 @@ class GroupedRenderingMixin(object):
             return result
         return []
 
-    def _expand_sample_rows(self, sample_data, columns):
-        """Expand a sample's items into display rows.
+    def _expand_sample_rows(self, block_data, columns):
+        """Expand ONE analysis into display rows.
 
         Handles list-type interim fields by expanding them into multiple
         sub-rows. Scalar fields use rowspan in the template.
 
-        :param sample_data: dict with sample_id and items list
+        One block is one analysis, never several.  It used to be one block per
+        (AS, sample) on the premise that a sample carries a single analysis of
+        any given Analysis Service -- and that premise is wrong: `retract`
+        keeps the original (-> retracted) *and* adds a retest of the same
+        service on the same sample, so both sit in the register at once.
+        Everything below then read `items[0]`, the retracted original won on
+        creation order, and the retest was rendered nowhere at all: no cell,
+        no state, no input, no way to enter the repeat results.  Full account
+        in `_resolve_block_key()`.
+
+        :param block_data: dict with sample_id, block_key and its items list
         :param columns: list of interim column dicts
         :returns: {
             "display_rows": [list of row dicts],
             "row_count": int (for rowspan),
         }
         """
-        items = sample_data["items"]
+        items = block_data["items"]
+        item = items[0] if items else {}
 
-        # Longest list that actually holds data across this sample's analyses.
+        # Longest list that actually holds data on this analysis.
         max_len = 0
-        for item in items:
-            for col in columns:
-                if not col["is_list"]:
-                    continue
-                max_len = max(
-                    max_len, len(self._get_list_array(item, col["keyword"])))
+        for col in columns:
+            if not col["is_list"]:
+                continue
+            max_len = max(
+                max_len, len(self._get_list_array(item, col["keyword"])))
 
         max_rows = max(1, max_len)
 
@@ -442,11 +590,8 @@ class GroupedRenderingMixin(object):
             # (calculatedlist) has as many elements as the engine produced.
             if col["render_type"] != "multivalue":
                 continue
-            for item in items:
-                if self._is_interim_editable(item, col):
-                    has_editable_list = True
-                    break
-            if has_editable_list:
+            if self._is_interim_editable(item, col):
+                has_editable_list = True
                 break
 
         # Mirror the native MultiValue widget, which keeps one empty input at
@@ -464,12 +609,12 @@ class GroupedRenderingMixin(object):
             row = {
                 "_row_idx": row_idx,
                 "_is_first": (row_idx == 0),
-                "sample_id": sample_data["sample_id"] if row_idx == 0 else "",
-                "item": items[0] if items else {},
+                "sample_id": block_data["sample_id"] if row_idx == 0 else "",
+                "item": item,
             }
-            # Copy core fields from the first item (only on first row)
+            # Copy core fields from this block's analysis (only on first row)
             if row_idx == 0 and items:
-                it = items[0]
+                it = item
                 for key in ("Pos", "Result", "DetectionLimitOperand",
                             "Uncertainty", "Specification", "Method",
                             "Instrument", "state_title", "state_class",
@@ -522,25 +667,28 @@ class GroupedRenderingMixin(object):
             # of the analysis that owns it plus its editability, so the
             # template can emit the data-uid/data-keyword pairs the save
             # queue needs without guessing.
+            #
+            # A "first value wins" guard used to sit here, back when a block
+            # could hold several analyses.  One analysis per block makes the
+            # owner unambiguous -- and that is precisely what puts a retest's
+            # own UID on its cells instead of the retracted original's, so
+            # editing them saves to the retest.
             row["interim"] = {}
             row["interim_uid"] = {}
             row["interim_editable"] = {}
-            for item in items:
-                for col in columns:
-                    kw = col["keyword"]
-                    if kw in row["interim"]:
-                        continue  # already set from another item
-                    if col["is_list"]:
-                        # One list element per row; the spare trailing row (see
-                        # above) stays empty so a new element can be typed in.
-                        arr = self._get_list_array(item, kw)
-                        row["interim"][kw] = arr[row_idx] if row_idx < len(arr) else ""
-                    else:
-                        val = self._get_item_field_value(item, kw)
-                        row["interim"][kw] = val if row_idx == 0 else ""
-                    row["interim_uid"][kw] = item.get("uid", "")
-                    row["interim_editable"][kw] = self._is_interim_editable(
-                        item, col)
+            for col in columns:
+                kw = col["keyword"]
+                if col["is_list"]:
+                    # One list element per row; the spare trailing row (see
+                    # above) stays empty so a new element can be typed in.
+                    arr = self._get_list_array(item, kw)
+                    row["interim"][kw] = arr[row_idx] if row_idx < len(arr) else ""
+                else:
+                    val = self._get_item_field_value(item, kw)
+                    row["interim"][kw] = val if row_idx == 0 else ""
+                row["interim_uid"][kw] = item.get("uid", "")
+                row["interim_editable"][kw] = self._is_interim_editable(
+                    item, col)
 
             display_rows.append(row)
 
@@ -550,18 +698,24 @@ class GroupedRenderingMixin(object):
         }
 
     def _group_analyses_by_as(self, items):
-        """Group flat analysis items by AS Keyword, then by sample.
+        """Group flat analysis items by AS Keyword, then one block per analysis.
 
         Returns list of AS group dicts, each containing:
           - keyword (str)
           - title (str)
           - sort_key (int)
+          - sample_count (int): distinct samples, for the group header
           - interim_columns (list): visible interim column definitions
-          - samples (list): list of {
-              sample_id (str),
+          - samples (list): one entry per ANALYSIS, in the order
+            folderitems() returned them (creation order, so a retracted
+            original comes before its retest -- same as Classic):
+              sample_id (str): repeated when a sample has several blocks,
+              block_key (str): the analysis UID; see _resolve_block_key(),
               row_count (int): for rowspan,
               display_rows (list): pre-expanded rows
-            }
+
+        The key is "samples" for template compatibility, but an entry is a
+        block, not a sample.
         """
         if not items:
             return []
@@ -607,17 +761,30 @@ class GroupedRenderingMixin(object):
             if keyword not in grouped:
                 continue
             sample_id = self._resolve_sample_id(item)
+            block_key = self._resolve_block_key(item, sample_id)
 
             od = grouped[keyword]["samples"]
-            if sample_id not in od:
-                od[sample_id] = {"sample_id": sample_id, "items": []}
-            od[sample_id]["items"].append(item)
+            if block_key not in od:
+                od[block_key] = {
+                    "sample_id": sample_id,
+                    "block_key": block_key,
+                    "items": [],
+                }
+            od[block_key]["items"].append(item)
 
         # --- Third pass: build columns + expand display rows ---
         result = []
         for kw, grp in grouped.items():
             samples_raw = list(grp["samples"].values())
             grp["samples"] = []
+
+            # What the group header counts.  It has to be the number of
+            # distinct SAMPLES, not the number of blocks: one sample with a
+            # retracted analysis plus its retest is two blocks but still one
+            # sample, and "2 sample(s)" would just trade one wrong number
+            # for another.
+            grp["sample_count"] = len(
+                set([s["sample_id"] for s in samples_raw]))
 
             # Build interim columns from all items in this AS
             all_items = []
@@ -629,13 +796,18 @@ class GroupedRenderingMixin(object):
             for s in samples_raw:
                 expanded = self._expand_sample_rows(s, grp["interim_columns"])
                 expanded["sample_id"] = s["sample_id"]
-                # Identifies the rows belonging to one sample within a group,
-                # so the client can tell which row is the last of its block.
+                # Identifies the rows belonging to one analysis within a
+                # group, so the client can tell which row is the last of its
+                # block.  The analysis key is part of it: without it a
+                # retracted analysis and its retest produced the very same
+                # block_id, and as_grouped.js walks siblings comparing that
+                # string to find "the last row of this block".
                 # Built here rather than in the template: a `string:` TALES
                 # expression is an awkward place to join two values, since
                 # Chameleon reads a top-level "|" as its fallback operator and
                 # would silently keep only the first half.
-                expanded["block_id"] = u"{}::{}".format(kw, s["sample_id"])
+                expanded["block_id"] = u"{}::{}::{}".format(
+                    kw, s["sample_id"], s["block_key"])
                 grp["samples"].append(expanded)
 
             result.append(grp)
@@ -746,9 +918,73 @@ class GroupedRenderingMixin(object):
             translated[tid] = api.safe_unicode(translate(message))
         return json.dumps(translated)
 
-    def get_redirect_url(self):
-        """Where workflow_action returns to once it is done."""
+    def get_page_url(self):
+        """URL of the page this listing is embedded in.
+
+        Not the view's own URL: both concrete views render as a fragment of
+        something else (a sample view, or the worksheet's manage_results), and
+        reloading the fragment on its own would lose the whole shell.  Used
+        both by the review-state filter links and as the workflow_action
+        redirect target.
+        """
         return self.context.absolute_url()
+
+    def get_state_filter_key(self):
+        """Request key that selects the active review state.
+
+        Mirrors ListingView.review_state (senaite.app.listing/view.py), which
+        reads `<form_id>_review_state` off the request form and falls back to
+        `default_review_state`.  The form_id differs per listing -- the
+        worksheet keeps senaite.core's "analyses_form", the sample listings
+        build their own -- so it has to be derived, not hardcoded.
+        """
+        return "{}_review_state".format(self.form_id)
+
+    def get_state_filters(self):
+        """Review-state filter tabs, for the template.
+
+        The ReactJS listing renders these itself from the view's
+        `review_states`; this layout replaces the listing, so the tabs have to
+        be emitted by our own template or the user has no way to reach a
+        non-default filter.  Returns [] for a single-state listing so the
+        template renders no tab bar at all.
+
+        Each entry: {id, title, url, selected}.  Titles are translated here
+        rather than in the template: they are senaite.core i18n messages, and
+        this template's i18n domain is maitux.worksheet.  Same reason
+        get_confirm_messages() translates server-side.
+        """
+        states = self.review_states or []
+        if len(states) < 2:
+            return []
+        current = (self.review_state or {}).get("id", self.default_review_state)
+        key = self.get_state_filter_key()
+        base = self.get_page_url()
+        filters = []
+        for state in states:
+            state_id = state.get("id", "")
+            if not state_id:
+                continue
+            title = state.get("title") or state_id
+            filters.append({
+                "id": state_id,
+                "title": api.safe_unicode(translate(title)),
+                "url": u"{}?{}={}".format(base, key, state_id),
+                "selected": state_id == current,
+            })
+        return filters
+
+    def get_redirect_url(self):
+        """Where workflow_action returns to once it is done.
+
+        Carries the active filter, so unassigning one of several retracted
+        analyses from the "Invalid" tab comes back to that tab instead of
+        silently dropping the user on "Valid".
+        """
+        return u"{}?{}={}".format(
+            self.get_page_url(),
+            self.get_state_filter_key(),
+            (self.review_state or {}).get("id", self.default_review_state))
 
     def get_all_uids(self):
         """Return comma-separated UIDs of all analyses in this worksheet.
@@ -807,6 +1043,71 @@ class AnalysesGroupedView(GroupedRenderingMixin, WorksheetAnalysesView):
 
     view_name = "as_grouped"
 
+    def __init__(self, context, request):
+        super(AnalysesGroupedView, self).__init__(context, request)
+        self.review_states = self._restore_state_filters()
+
+    def _restore_state_filters(self):
+        """Put back the Valid / Invalid / All filters on a worksheet listing.
+
+        senaite.core's AnalysesView declares those three for the sample view
+        (bika/lims/browser/analyses/view.py), where "Valid" is a whitelist of
+        review states that deliberately leaves retracted, rejected and
+        cancelled out -- which is why a sample shows no retracted analyses
+        until the user asks for them.
+
+        The worksheet listing then replaces the whole list with a single
+        state titled "All" and an empty contentFilter
+        (senaite/core/browser/worksheets/worksheet/analyses_listing.py), so
+        the catalog query stops filtering by state and every retracted
+        analysis is rendered next to its retest.  Restoring the three states
+        moves the filtering back into the catalog query
+        (ListingView.get_catalog_query merges the active state's
+        contentFilter) instead of hiding rows afterwards, and keeps the
+        "Invalid" tab as the way to reach a retracted analysis -- it still has
+        one transition left, `unassign`, and no other way to be selected.
+
+        Retract chains need no special handling: every historical copy stays
+        in `retracted` however many times an analysis is retracted, and the
+        live one is always in one of the valid states.
+
+        The single state core leaves behind is the base of all three: it
+        carries the `reject` confirmation message and the custom transitions,
+        and get_confirm_messages() reads them off whichever state is active.
+        """
+        base = self.review_states[0] if self.review_states else {}
+        return [
+            self._state_filter(base, "default", _("Valid"),
+                               VALID_ANALYSES_STATES),
+            self._state_filter(base, "invalid", _("Invalid"),
+                               INVALID_ANALYSES_STATES),
+            self._state_filter(base, "all", _("All"), None),
+        ]
+
+    def _state_filter(self, base, state_id, title, review_states):
+        """One review state derived from `base`.
+
+        `review_states=None` means "do not filter by state" (the All tab).
+
+        Every mutable value is copied, not shared: folderitems() walks
+        `self.review_states` and inserts the interim columns it discovered
+        into each state's `columns` list, so a list shared between the three
+        would collect the same columns three times over.
+        """
+        state = base.copy()
+        state["id"] = state_id
+        state["title"] = title
+        state["columns"] = list(base.get("columns") or self.columns.keys())
+        state["custom_transitions"] = list(base.get("custom_transitions") or [])
+        state["confirm_messages"] = dict(base.get("confirm_messages") or {})
+        content_filter = dict(base.get("contentFilter") or {})
+        if review_states is None:
+            content_filter.pop("review_state", None)
+        else:
+            content_filter["review_state"] = list(review_states)
+        state["contentFilter"] = content_filter
+        return state
+
     def __call__(self):
         """Redirect direct visits back to manage_results.
 
@@ -832,6 +1133,7 @@ class AnalysesGroupedView(GroupedRenderingMixin, WorksheetAnalysesView):
         """Return the manage_results URL (used for redirect after save)."""
         return "{}/manage_results".format(self.context.absolute_url())
 
-    def get_redirect_url(self):
-        # Back to the results form, not to the bare worksheet view.
+    def get_page_url(self):
+        # The results form, not the bare worksheet view: this layout only
+        # ever renders inside manage_results.
         return self.get_manage_results_url()

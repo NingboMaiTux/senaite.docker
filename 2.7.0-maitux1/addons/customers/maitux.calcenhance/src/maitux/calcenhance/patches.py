@@ -94,6 +94,12 @@ def apply_patches():
     _patch_set_interim_fields()
     _patch_calculate_result()
     _patch_validator_interimfields_unicode()
+    # Same class of problem as the line above, kept next to it on purpose.
+    # Deliberately NOT inside one of the try/except blocks further down: those
+    # exist for patches whose imports can fail during ZCML bootstrap, and this
+    # one imports at function scope.  Swallowing a failure here would mean the
+    # patch silently does not apply -- the startup marker is what proves it did.
+    _patch_validator_choices_syntax_unicode()
 
     # senaite.app.listing.ajax imports senaite.core at module scope, so
     # on a cold start this can fail here; an IDatabaseOpenedWithRoot
@@ -387,12 +393,51 @@ def _patch_folder_item():
                     # Parse and ensure valid JSON array for MultiValue display
                     value = item[keyword].get("value", "")
                     if value:
+                        # [PY2-UNICODE] _safe_text, not str().  This branch used
+                        # to read `json.loads(str(value))` with
+                        # `except (ValueError, TypeError)` around it, and the
+                        # handler then repeated `str(value)` -- i.e. the
+                        # recovery path re-ran the very call that had just
+                        # failed, and that second one had nobody to catch it.
+                        #
+                        # It is reachable as soon as an analysis stops being
+                        # editable.  core then replaces the interim value with
+                        # its formatted display text:
+                        #
+                        #     # bika/lims/browser/analyses/view.py
+                        #     if not is_editable:
+                        #         interim_field["value"] = interim_formatted
+                        #
+                        # and that text is NOT json.  For a RESULT_STATUS
+                        # column it is u"—<br/>—" (our own em-dash
+                        # placeholder); for a substance-name column it is CJK.
+                        # str() on either raises UnicodeEncodeError -> caught
+                        # -> raised again -> the whole manage_results page
+                        # 500s, in both the AS-Grouped and the Classic layout.
+                        #
+                        # Same family as the two [PY2-UNICODE] patches further
+                        # down (get_formatted_interim and format_interim): a
+                        # value that is legitimately text reaching a str().
+                        #
+                        # And do NOT re-wrap text that failed to parse.  A
+                        # calculatedlist whose value is not json is the
+                        # not-editable case above: it is already DISPLAY TEXT,
+                        # newline-joined by patched_get_formatted_interim.
+                        # Wrapping it produced a bogus single-element array
+                        # that the MultiValue widget then showed verbatim --
+                        # a retracted analysis rendered its computed columns as
+                        # one quoted string with an escaped newline inside
+                        # instead of the two values it holds.  The `list`
+                        # branch above already gets this right ("Already
+                        # formatted display text - keep as-is"); the two
+                        # branches disagreed on the same situation.
+                        text = _safe_text(value)
                         try:
-                            parsed = json.loads(str(value))
+                            parsed = json.loads(text)
                             if not isinstance(parsed, list):
-                                value = json.dumps([str(value)])
+                                value = json.dumps([text])
                         except (ValueError, TypeError):
-                            value = json.dumps([str(value)])
+                            pass
                     item[keyword]["value"] = value
                     item[keyword]["result_type"] = "multivalue"
                     item[keyword]["_orig_result_type"] = "calculatedlist"
@@ -482,6 +527,114 @@ def _patch_validator_interimfields_unicode():
 
     InterimFieldsValidator.__call__ = _patched_call
     _sys.stderr.write("maitux: InterimFieldsValidator unicode patch done\n")
+    _sys.stderr.flush()
+
+
+# ==============================================================================
+# CHOICES SYNTAX VALIDATOR PATCH — a Chinese label must not read as bad syntax
+# ==============================================================================
+
+def _to_unicode_safe(value):
+    """UTF-8 bytes -> unicode; anything else handed back unchanged.
+
+    Same shape as the _uni() inside _patch_validator_interimfields_unicode.
+    Kept at module scope so tests/ can exercise it without a Zope instance.
+    """
+    if isinstance(value, str):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.decode("utf-8", "replace")
+    return value
+
+
+def _parse_choices_unicode_safe(value):
+    """Parse a ``k:v|k:v`` choices string into a dict, unicode-safe.
+
+    Raises ValueError on a malformed string, exactly like the core code this
+    replaces -- the caller turns that into the "No valid format in choices
+    field" message, so genuinely bad syntax still gets rejected.
+
+    What core does and why it breaks (senaite.core 2.x,
+    senaite/core/validators/interimfields.py, choices_syntax_validator):
+
+        dict(map(lambda ch: map(str.strip, str(ch).split(":")), choices))
+
+    Calculation is Dexterity, so z3c.form hands the field over as *unicode*.
+    ``str(u'imp_linearity:...中文...')`` raises UnicodeEncodeError on Python 2,
+    and UnicodeEncodeError is a subclass of ValueError -- so the very ``except
+    ValueError`` a few lines below catches it and reports a *syntax* error for
+    a string whose syntax is perfectly fine.  The label is Chinese; that is
+    all.  Nothing is logged either, because the exception never leaves that
+    inner try, so the only clue on screen points the wrong way.
+
+    ★ BOTH conversions have to go, not just the first one.  Swap only
+    ``str(ch)`` and ``map(str.strip, ...)`` is next in line:
+
+        TypeError: descriptor 'strip' requires a 'str' object
+                   but received a 'unicode'
+
+    TypeError is not a ValueError, so it escapes to the outer
+    ``except Exception`` in InterimFieldsValidator.validate() and comes back as
+    "Validation chain internal error" -- a different wrong answer.  Half-fixing
+    this trades one misleading message for another.
+    """
+    raw = _to_unicode_safe(value) or u""
+    chunks = raw.split(u"|") if raw else []
+    pairs = []
+    for chunk in chunks:
+        chunk = _to_unicode_safe(chunk)
+        # A chunk that is not exactly "<value>:<text>" yields a sequence of
+        # length != 2, and dict() rejects it with ValueError -- which is the
+        # behaviour the caller relies on.
+        pairs.append([piece.strip() for piece in chunk.split(u":")])
+    return dict(pairs)
+
+
+def _patch_validator_choices_syntax_unicode():
+    """Make the Dexterity choices validator unicode-safe.
+
+    Only the parsing changes.  The three nested checks (empty keys, unique
+    keys, at least two options) run exactly as before and the failure message
+    keeps core's msgid, so a real syntax error still reads the same in every
+    language.  See _parse_choices_unicode_safe for the full account.
+    """
+    import sys as _sys
+    _sys.stderr.write(
+        "maitux: patching choices_syntax_validator for unicode safety\n")
+    _sys.stderr.flush()
+
+    from senaite.core.validators import interimfields as _if
+
+    def _choices_syntax_validator():
+        def validate(field):
+            k, v = next(iter(field.items()))
+            try:
+                choices = _parse_choices_unicode_safe(v)
+            except ValueError:
+                # Same msgid as core, so the zh_CN catalogue still resolves it.
+                return _if.fail(k, _if.translate(_if._(
+                    u"choice_syntax_validation_error",
+                    default=u"No valid format in choices field. "
+                            u"Supported format is: "
+                            u"<value-0>:<text>|<value-1>:<text>|"
+                            u"<value-n>:<text>")))
+            nested = [
+                _if.choices_empty_keys_validator(),
+                _if.choices_unique_keys_validator(),
+                _if.choices_min_items_validator(),
+            ]
+            result = _if.ValidatedData(choices).run(*nested)
+            if len(result["errors"]) > 0:
+                return _if.fail("choices", result["errors"])
+            return _if.success(field)
+        return validate
+
+    # The call site is inside InterimFieldsValidator.validate(), so the name is
+    # looked up in module globals every time the form is submitted -- replacing
+    # the module attribute is enough, no need to touch the validator class.
+    _if.choices_syntax_validator = _choices_syntax_validator
+    _sys.stderr.write("maitux: choices_syntax_validator unicode patch done\n")
     _sys.stderr.flush()
 
 
@@ -1505,7 +1658,16 @@ def _collect_cross_referenceable_data(analysis):
                     continue
                 if rt in ("list", "calculatedlist") and val:
                     try:
-                        arr = _jj.loads(str(val))
+                        # [PY2-UNICODE] _safe_text, not str().  See R13 in
+                        # SENAITE-Addon开发规则.md.  A stored value holding
+                        # LITERAL CJK (rather than backslash-uXXXX escapes) makes
+                        # str() raise UnicodeEncodeError; the handler below only
+                        # passes, so the column would vanish from sibling_data
+                        # and every downstream LOOKUP against it would read
+                        # '---' with no error anywhere.  Reachable through XLSX
+                        # import, which writes an interim's DEFAULT value
+                        # verbatim without going through _normalize_list_value.
+                        arr = _jj.loads(_safe_text(val))
                         if isinstance(arr, list):
                             # Convert floatable string elements to float
                             # (frontend MultiValue submits text inputs → JSON strings)
@@ -3489,7 +3651,11 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
             # Auto-average for bare [KW] references (backward compat)
             # Also preserve raw array for sum([KW]) / max([KW]) / ...
             try:
-                arr = _jj2.loads(str(val))
+                # [PY2-UNICODE] _safe_text, not str() -- see R13.  On literal
+                # CJK, str() raises, the handler swallows it, and this column
+                # never reaches value_map / str_arrays: INDEX_BY cannot match
+                # its key and the field silently reads '---'.
+                arr = _jj2.loads(_safe_text(val))
                 if isinstance(arr, list) and arr:
                     nums = []
                     str_vals = []
@@ -3960,7 +4126,10 @@ def _evaluate_calculatedlist_interims(self, only=None):
 
         if rt in ("list", "calculatedlist"):
             try:
-                arr = _jj.loads(str(val))
+                # [PY2-UNICODE] _safe_text, not str() -- see R13.  This is the
+                # calculatedlist engine's own collector: a dropped column here
+                # takes every formula that references it down to '---'.
+                arr = _jj.loads(_safe_text(val))
                 if isinstance(arr, list) and arr:
                     def _to_unicode(v):
                         if v is None:
