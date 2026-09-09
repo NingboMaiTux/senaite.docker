@@ -674,7 +674,7 @@ function Get-LimsReadme([object[]]$Addons) {
 | `nginx/certificate/` | HTTPS 证书与私钥，**含私钥，注意交付渠道** |
 | `addons/customers/` | 客户 add-on，共 {{ADDON_COUNT}} 个，清单见 版本信息.txt |
 | `addons/common/` | 刻意留空：通用 add-on 已编进镜像 |
-| `data/ blobstorage/ postgres-data/` | 运行时数据目录（空目录占位） |
+| `data/ data2/ blobstorage/ postgres-data/` | 运行时数据目录（空目录占位） |
 | `一键启动.sh` | 补可执行位 + docker compose up -d |
 | `版本信息.txt` | 版本号、git 提交、add-on 清单 |
 
@@ -964,9 +964,9 @@ function New-LimsPackage {
     New-Item -ItemType Directory -Force -Path (Join-Path $stage 'addons\common') | Out-Null
     Write-DocFile (Join-Path $stage 'addons\common\说明.txt') (Get-CommonDirNote)
 
-    # compose 里这三个是宿主目录挂载。先建好空目录，省得 docker 自己建出 root
-    # 属主的目录。
-    foreach ($d in @('data', 'blobstorage', 'postgres-data')) {
+    # compose 里这几个是宿主目录挂载。先建好空目录，省得 docker 自己建出 root
+    # 属主的目录。data2 是第二个 Zope 实例的 var 目录。
+    foreach ($d in @('data', 'data2', 'blobstorage', 'postgres-data')) {
         $p = Join-Path $stage $d
         New-Item -ItemType Directory -Force -Path $p | Out-Null
         Write-DocFile (Join-Path $p '.keep') "运行时数据目录，占位用，勿删本目录。`r`n"

@@ -21,6 +21,10 @@ services:
     container_name: maitux-lims-postgres
     restart: unless-stopped
     shm_size: 1gb
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
     environment:
       TZ: Asia/Shanghai
       POSTGRES_DB: lims_db
@@ -66,8 +70,18 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 1024MB
+          cpus: "2"
+          memory: 2048MB
+    # entrypoint 是先跑完 buildout（首次部署时的建站也在这一步）才 exec
+    # bin/instance console，所以"8080 能连上"就等于"站点已经建好"。
+    # 这个探针只用于 docker compose ps / --wait 的就绪显示：instance2 不等它，
+    # 两个实例并行启动（各自都要跑一遍 buildout，串行等于白白翻倍）。
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 5).close()"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 600s
     environment:
       TZ: Asia/Shanghai
       SITE: MaiLIMS
@@ -91,15 +105,54 @@ services:
     networks:
       - maitux_lims_backend
 
+  instance2:
+    image: crpi-z99l88o2fu3lae8l.cn-hangzhou.personal.cr.aliyuncs.com/maitux/maitux-lims:latest
+    container_name: maitux-lims-2
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      instance:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2048MB
+    environment:
+      TZ: Asia/Shanghai
+      PASSWORD: Maitux=123456
+      PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+      PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      PYTHONIOENCODING: utf-8
+      CHAMELEON_CACHE: /data/cache
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./data2:/data
+      - ./blobstorage:/data/blobstorage
+      - ./addons/customers:/opt/addons/customers
+      - ./docker-entrypoint.sh:/docker-entrypoint.sh:ro
+      - ./gen-custom-addon.sh:/gen-custom-addon.sh:ro
+    networks:
+      - maitux_lims_backend
+
   nginx:
     image: nginx:1.30.4
     container_name: maitux-lims-nginx
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256MB
     ports:
       - 80:80
       - 443:443
     depends_on:
       - instance
+      - instance2
     environment:
       TZ: Asia/Shanghai
     volumes:
