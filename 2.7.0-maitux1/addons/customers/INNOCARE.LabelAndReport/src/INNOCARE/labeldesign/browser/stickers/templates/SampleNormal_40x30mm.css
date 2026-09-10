@@ -24,37 +24,51 @@
   height: 30mm !important;
   border: 0.4pt solid #444 !important;
   border-radius: 1.5mm !important;
-  padding: 1mm !important;
+  padding: 0.75mm 0.9mm !important;
   display: block !important;
-  position: relative !important;
   box-sizing: border-box !important;
   background: #fff !important;
   overflow: hidden !important;
+  font-family: Arial, "Microsoft YaHei", sans-serif !important;
+  color: #000 !important;
+}
+
+.sticker .label-top {
+  display: table !important;
+  margin: 0 auto !important;
+  min-height: 10.2mm !important;
 }
 
 .sticker .label-content {
-  margin-left: 9mm !important;
-  width: 29mm !important;
+  width: 100% !important;
+  margin-top: 0.45mm !important;
 }
 
 .sticker .label-header {
-  border-bottom: 0.6pt solid #2f8f44 !important;
-  padding-bottom: 0.5mm !important;
-  margin-bottom: 1mm !important;
-  margin-left: 9mm !important;
-  display: block !important;
-  line-height: 1.2 !important;
+  display: table-cell !important;
+  vertical-align: middle !important;
+  padding-left: 1.35mm !important;
+  min-height: 9.2mm !important;
+  text-align: center !important;
+}
+
+.sticker .label-separator {
+  width: 100% !important;
+  border-bottom: 0.8pt solid #2f8f44 !important;
+  margin-top: 0.3mm !important;
+  margin-bottom: 0.35mm !important;
 }
 
 .sticker .label-title {
   display: inline-block !important;
-  font-size: 6.5pt !important;
+  font-size: 7.4pt !important;
   font-weight: bold !important;
   color: #fff !important;
   background: #2f8f44 !important;
-  padding: 0.3mm 1.5mm !important;
+  padding: 0.55mm 2.1mm !important;
   border-radius: 1mm !important;
   white-space: nowrap !important;
+  text-align: center !important;
 }
 
 .sticker .label-table {
@@ -64,32 +78,34 @@
 }
 
 .sticker .label-table td {
-  font-size: 5.5pt !important;
-  padding: 0.4mm 0 !important;
+  font-size: 6.55pt !important;
+  padding: 0.6mm 0 !important;
   vertical-align: top !important;
-  line-height: 1.2 !important;
+  line-height: 1.12 !important;
 }
 
 .sticker .lbl-label {
-  color: #666 !important;
-  width: 10mm !important;
+  color: #000 !important;
+  width: 11.3mm !important;
+  font-weight: 700 !important;
   white-space: nowrap !important;
+  letter-spacing: 0 !important;
 }
 
 .sticker .lbl-value {
   font-weight: 700 !important;
   color: #000 !important;
   word-break: break-all !important;
+  font-size: 7.2pt !important;
 }
 
 .sticker .qrcode {
-  position: absolute !important;
-  top: 1.5mm !important;
-  left: 1.5mm !important;
-  width: 8.5mm !important;
-  height: 8.5mm !important;
+  display: table-cell !important;
+  vertical-align: middle !important;
+  width: 9.6mm !important;
+  height: 9.6mm !important;
   overflow: hidden !important;
-  border: 0.1pt solid #eee !important;
+  border: 0.2pt solid #d9d9d9 !important;
   padding: 0 !important;
   background: #fff !important;
 }
@@ -99,4 +115,31 @@
   width: 100% !important;
   height: 100% !important;
   display: block !important;
+}
+
+/* 打印适配：锁定纸张尺寸为 40x30mm，避免浏览器/PDF 默认 A4 导致缩放 */
+@page {
+  size: 40mm 30mm;
+  margin: 0;
+}
+
+@media print {
+  html,
+  body {
+    width: 40mm;
+    height: 30mm;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* 预览用的居中与留白，打印时去掉 */
+  .stickers {
+    padding: 0 !important;
+    align-items: flex-start !important;
+  }
+
+  .sticker {
+    margin: 0 !important;
+    page-break-after: always;
+  }
 }
