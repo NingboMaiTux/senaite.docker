@@ -112,8 +112,14 @@ python lint_addon.py --summary
   责任推给下一个人。本次新增的 ERROR 就该修。
 - 基线里每条的 `note` 不许留空（为什么还欠着 / 谁负责）。
 - 修掉一条基线里的问题后，重写基线把它剔掉：
-  `python lint_addon.py --write-baseline`（必须全量扫描，带 `--addon` 会被拒绝）。
-  lint 会主动提醒你哪些条目"已经不再出现"。
+  `python lint_addon.py --write-baseline`（必须全量扫描，范围不全会被拒绝）。
+  lint 会主动提醒你哪些条目"已经不再出现"，但**只在本次扫描范围内判** ——
+  `--addon X` 只扫 1 个包，别的包这次压根没跑过检查，它们的基线条目
+  "这次没出现"是必然的，跟"修好了"毫无关系（2026-09-10 踩过：单包扫
+  `maitux.calcenhance`，工具把 `maitux.instrument_acquisition` 的 E17
+  报成已修好，而那条 R14 泄漏一直都在）。范围外的条目现在既不判「已修好」
+  也不建议重写；`--write-baseline` 即便全量也只覆盖扫到的包，
+  范围外的既有条目、逐条 `note`、顶层 `_纪律` 都原样保留。
 - 想看**总欠账**（无视基线）：`python lint_addon.py --no-baseline`
 
 > `lint_addon.py` 和两个 `selftest_*.py` 各有两份（另一份在维护者的技能目录里），

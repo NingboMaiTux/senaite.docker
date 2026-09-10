@@ -1004,6 +1004,22 @@ def finding_key(f):
     return (f.addon, f.code, (f.path or u"").replace("\\", "/"))
 
 
+def _addon_parts(addon):
+    """把 addon 字段拆回真实包名。
+
+    E11_DUP_REGISTRATION 的 addon 是 " + ".join(names) 这种合成名
+    （见 check_cross_addon），不拆开就判不出它落在谁的范围里。
+    """
+    return [p for p in (addon or u"").split(u" + ") if p]
+
+
+def in_scan_scope(addon, scope):
+    """addon（可能是合成名）是否落在本次扫描范围内。scope=None ＝ 全量。"""
+    if scope is None:
+        return True
+    return any(p in scope for p in _addon_parts(addon))
+
+
 def _counted(findings):
     out = {}
     for f in findings:
@@ -1032,31 +1048,78 @@ def load_baseline(path):
     return counts, data, None
 
 
-def write_baseline(path, findings, only_levels=(LEVEL_ERROR,)):
-    """把当前结果写成基线。默认只记 ERROR —— WARN 不参与门禁，记它没意义。"""
+def _read_baseline_raw(path):
+    """读原始基线，返回 (entries, 其他顶层 _ 字段)。读不动 → ([], {})。
+
+    重写基线时得把人手写的东西带回去：逐条的 note，以及 `_纪律` 这类
+    只存在于文件里、write_baseline 自己不生成的顶层说明字段
+    —— 否则一次重写就把它们静默抹掉了。
+    """
+    if not os.path.isfile(path):
+        return [], {}
+    try:
+        with io.open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return [], {}
+    if not isinstance(data, dict):
+        return [], {}
+    entries = [e for e in data.get("entries", [])
+               if isinstance(e, dict) and "addon" in e and "code" in e]
+    extras = dict((k, v) for k, v in data.items()
+                  if k.startswith(u"_") and k not in (u"_说明", u"_重写命令"))
+    return entries, extras
+
+
+def write_baseline(path, findings, only_levels=(LEVEL_ERROR,), scope=None):
+    """把当前结果写成基线。默认只记 ERROR —— WARN 不参与门禁，记它没意义。
+
+    ★ 只覆盖 **scope 之内** 的包，范围外的既有条目原样保留。
+      道理跟 split_by_baseline 的 stale 判定同源：范围外的包这次压根没扫，
+      "没扫到" 不等于 "修好了"，整份覆盖等于替别人把欠账抹了。
+      main() 已经在范围小于全量时直接拒绝写基线；这里再兜一层，是因为
+      有些"不全量"探测不到 —— 比如只 clone 了 customers 没有 common 层，
+      scope 天然缺一整层，工具却看不出来。
+
+    返回 (范围内写入的条目数, 范围外保留的条目数)。
+    """
     keep = [f for f in findings if f.level in only_levels]
+    old_entries, extras = _read_baseline_raw(path)
+    old_notes = {}
+    for e in old_entries:
+        k = (e["addon"], e["code"], (e.get("path") or u"").replace("\\", "/"))
+        if e.get("note"):
+            old_notes[k] = e["note"]
+    kept = [e for e in old_entries if not in_scan_scope(e["addon"], scope)]
+    levels = {}
+    for f in keep:
+        levels.setdefault(finding_key(f), f.level)
     entries = []
-    for (addon, code, p), n in sorted(_counted(keep).items()):
-        lvl = next((f.level for f in keep if finding_key(f) == (addon, code, p)),
-                   LEVEL_ERROR)
+    for k, n in sorted(_counted(keep).items()):
+        addon, code, p = k
         entries.append({
             "addon": addon, "code": code, "path": p, "count": n,
-            "level": lvl,
-            "note": u"",       # ← 人工填：为什么还欠着、谁负责、什么时候还
+            "level": levels.get(k, LEVEL_ERROR),
+            # note 人工填：为什么还欠着、谁负责、什么时候还。原来填过的带过来。
+            "note": old_notes.get(k, u""),
         })
-    payload = {
-        "_说明": u"lint 门禁基线：这里列的是**已知欠账**，门禁只拦不在本表里的 "
-                 u"ERROR（政策见 Docs/SENAITE-Addon流水线.md「不新增 ERROR」）。"
-                 u"基线不是永久豁免 —— 修掉一条就重写本表把它剔掉；"
-                 u"lint 会把「基线里已消失」的条目报出来提醒你重写。",
-        "_重写命令": u"python lint_addon.py --write-baseline "
-                     u"<addons>/customers/" + BASELINE_FILENAME,
-        "recorded": _today(),
-        "entries": entries,
-    }
+    merged = entries + kept
+    merged.sort(key=lambda e: (e["addon"], e["code"], e.get("path") or u""))
+    payload = {}
+    payload[u"_说明"] = (
+        u"lint 门禁基线：这里列的是**已知欠账**，门禁只拦不在本表里的 "
+        u"ERROR（政策见 Docs/SENAITE-Addon流水线.md「不新增 ERROR」）。"
+        u"基线不是永久豁免 —— 修掉一条就重写本表把它剔掉；"
+        u"lint 会把「基线里已消失」的条目报出来提醒你重写。")
+    payload[u"_重写命令"] = (u"python lint_addon.py --write-baseline "
+                             u"<addons>/customers/" + BASELINE_FILENAME)
+    for k in sorted(extras):
+        payload[k] = extras[k]
+    payload["recorded"] = _today()
+    payload["entries"] = merged
     with io.open(path, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(payload, ensure_ascii=False, indent=2))
-    return len(entries)
+    return len(entries), len(kept)
 
 
 def _today():
@@ -1064,8 +1127,20 @@ def _today():
     return datetime.date.today().isoformat()
 
 
-def split_by_baseline(findings, baseline):
-    """按基线切三份：new（要拦）、suppressed（已知欠账）、stale（基线里已消失）。"""
+def split_by_baseline(findings, baseline, scope=None):
+    """按基线切四份：new（要拦）、suppressed（已知欠账）、
+    stale（范围内、基线里已消失）、out_of_scope（本次没扫到的包的条目）。
+
+    scope ＝ 本次真的扫了的包名集合（None ＝ 全量，一切都算范围内）。
+
+    ★ stale 只能在范围内判。`--addon X` 只扫 1 个包，别的包这次根本没跑过
+      检查，它们的基线条目"这次没出现"是必然的，跟"修好了"毫无关系。
+      2026-09-10 实测踩到过：单包扫 maitux.calcenhance，工具把
+      maitux.instrument_acquisition 的 E17 报成「已经不再出现，请重写基线」，
+      而同一时刻全量扫描里那条 R14 泄漏一直都在（configure.zcml 的
+      subscriber for= 里仍然没有 layer）。照那句提示重写就会把别人的欠账
+      一起抹掉 —— 正是提示自己警告的"基线烂成免死金牌"。
+    """
     seen = _counted(findings)
     new, suppressed = [], []
     used = {}
@@ -1077,9 +1152,13 @@ def split_by_baseline(findings, baseline):
             suppressed.append(f)
         else:
             new.append(f)
-    stale = [(k, n) for k, n in sorted(baseline.items())
-             if seen.get(k, 0) < n]
-    return new, suppressed, stale
+    stale, out_of_scope = [], []
+    for k, n in sorted(baseline.items()):
+        if not in_scan_scope(k[0], scope):
+            out_of_scope.append((k, n))
+        elif seen.get(k, 0) < n:
+            stale.append((k, n))
+    return new, suppressed, stale, out_of_scope
 
 
 # --------------------------------------------------------------------------
@@ -1117,12 +1196,16 @@ def check_self_copies(addons_root):
 # 哪些包干净、哪些包欠账、欠的是哪一类。**干净的包也必须列出来**，
 # 否则看不出"扫到了但没问题"和"压根没扫到"的区别（后者是 R5d 的经典坑：
 # 目录缺 setup.py 被生成器整包跳过，部署上等于不存在）。
-def print_rollup(scanned, findings, baseline):
+def print_rollup(scanned, findings, baseline, new):
+    """new 由调用方传进来 —— 别在这儿重算。
+
+    重算就得再传一遍 scope，而漏传 scope 正是这套逻辑的老毛病
+    （见 split_by_baseline）：多一个算口就多一处会漂的地方。
+    """
     per = {}
     for a in scanned:
         per[a.dir_name] = {"layer": a.layer, LEVEL_ERROR: 0,
                            LEVEL_WARN: 0, LEVEL_INFO: 0, "new_err": 0}
-    new, _sup, _stale = split_by_baseline(findings, baseline)
     new_keys = _counted([f for f in new if f.level == LEVEL_ERROR])
     for f in findings:
         row = per.get(f.addon)
@@ -1196,6 +1279,12 @@ def main(argv=None):
         print(u"没找到 addon：%s" % args.addon)
         return 2
 
+    # 本次扫描范围 —— 基线差异判断只能在这个范围内做（见 split_by_baseline）。
+    # partial_scope：加载了但没报告的包（--addon 会这样），即范围小于全量。
+    scanned = [a for a in addons if not a._muted]
+    scope = set(a.dir_name for a in scanned)
+    partial_scope = len(scanned) < len(addons)
+
     findings = []
     for a in addons:
         sub = []
@@ -1205,7 +1294,10 @@ def main(argv=None):
     cross = []
     check_cross_addon(addons, cross)
     for f in cross:
-        if not args.addon or args.addon in f.addon:
+        # E11 的 addon 是 "a + b" 合成名，按成分判范围。
+        # （原来是子串匹配：--addon maitux.stock 会误配上
+        #  "maitux.stockroom + x"，跟基线的范围判定还会打架。）
+        if in_scan_scope(f.addon, scope):
             findings.append(f)
     if args.in_container:
         targets = [a for a in addons if not a._muted]
@@ -1215,20 +1307,22 @@ def main(argv=None):
     warns = [f for f in findings if f.level == LEVEL_WARN]
     infos = [f for f in findings if f.level == LEVEL_INFO]
 
-    scanned = [a for a in addons if not a._muted]
-
     # --- 写基线后退出 ------------------------------------------------------
     if args.write_baseline is not None:
         target = args.write_baseline or default_baseline_path(root)
-        if args.addon:
-            print(u"拒绝执行：--write-baseline 必须全量扫描后再写，"
-                  u"否则会把没扫到的包当成「已修好」从基线里抹掉。"
-                  u"去掉 --addon 重跑。")
+        if partial_scope:
+            print(u"拒绝执行：--write-baseline 必须全量扫描后再写 —— "
+                  u"本次只报告了 %d/%d 个包，没扫到的包的欠账会被当成"
+                  u"「已修好」从基线里抹掉。去掉 --addon 重跑。"
+                  % (len(scanned), len(addons)))
             return 2
-        n = write_baseline(target, findings)
-        print(u"已把 %d 条 ERROR 写成基线：%s\n"
-              u"→ 请逐条填上 note（为什么还欠着 / 谁负责），再提交。"
-              % (n, target))
+        n, kept = write_baseline(target, findings, scope=scope)
+        print(u"已把 %d 条 ERROR 写成基线：%s" % (n, target))
+        if kept:
+            print(u"另原样保留 %d 条范围外的既有条目（本次没扫到那些包，"
+                  u"不当成已修好）—— 若确认包真的删了，手工删掉那几条。"
+                  % kept)
+        print(u"→ 请逐条填上 note（为什么还欠着 / 谁负责），再提交。")
         return 0
 
     # --- 基线 --------------------------------------------------------------
@@ -1239,7 +1333,8 @@ def main(argv=None):
         if berr:
             print(u"⚠ %s\n  本次按严格模式（有 ERROR 即拦）判定。\n" % berr)
 
-    new, suppressed, stale = split_by_baseline(findings, baseline)
+    new, suppressed, stale, out_of_scope = split_by_baseline(
+        findings, baseline, scope)
     new_errors = [f for f in new if f.level == LEVEL_ERROR]
 
     print(u"扫描 %d 个 addon（%s）" % (len(scanned), root))
@@ -1247,6 +1342,14 @@ def main(argv=None):
         print(u"基线：%s（%d 条已知欠账，recorded=%s）"
               % (bpath, sum(baseline.values()),
                  (bmeta or {}).get("recorded", u"?")))
+        if partial_scope:
+            # 说清范围，否则读者会把"基线 N 条"跟本次判定混起来。
+            print(u"  本次只报告 %d/%d 个包 —— 基线差异只在范围内的 %d 条上判；"
+                  u"另 %d 条属于没扫到的包，既不算「已修好」也不建议重写。"
+                  % (len(scanned), len(addons),
+                     sum(baseline.values())
+                     - sum(n for k, n in out_of_scope),
+                     sum(n for k, n in out_of_scope)))
     elif not args.no_baseline:
         print(u"基线：无（%s 不存在）—— 按「有 ERROR 即拦」判定。"
               u"要把现存欠账固化成基线：--write-baseline" % bpath)
@@ -1269,7 +1372,7 @@ def main(argv=None):
 
     # --- 按包汇总表：批量看的主视图 ---------------------------------------
     if len(scanned) > 1:
-        print(print_rollup(scanned, findings, baseline))
+        print(print_rollup(scanned, findings, baseline, new))
 
     # --- 基线账目 ----------------------------------------------------------
     if suppressed:
@@ -1286,8 +1389,24 @@ def main(argv=None):
               u"请重写基线把它们剔掉（否则基线会烂成免死金牌）：" % len(stale))
         for (addon, code, p), n in stale:
             print(u"  · %s %s %s" % (addon, code, p))
-        print(u"  重写：python %s --write-baseline\n"
-              % os.path.basename(__file__))
+        if partial_scope:
+            # 单包扫描下不能在这儿重写：那会把范围外的欠账一起抹掉。
+            print(u"  重写要全量扫描（本次范围不全，--write-baseline 会被拒）："
+                  u"python %s --write-baseline\n"
+                  % os.path.basename(__file__))
+        else:
+            print(u"  重写：python %s --write-baseline\n"
+                  % os.path.basename(__file__))
+    if out_of_scope and not partial_scope:
+        # 全量扫描下"范围外"是另一回事：包本身不在树里了。跟"修好了"
+        # 不能混着说 —— 尤其不能顺口建议重写基线。
+        print(u"⚠ 基线里有 %d 条对应的包本次压根没扫到（包删了？还是缺 "
+              u"setup.py 被整包跳过 —— 后者是 R5d 的坑，部署上等于不存在）："
+              % sum(n for k, n in out_of_scope))
+        for (addon, code, p), n in out_of_scope:
+            print(u"  · %s %s %s" % (addon, code, p))
+        print(u"  先确认是哪一种再动手：包真删了就手工删条目，"
+              u"目录还在就先修目录 —— 重写基线不会替你删这几条。\n")
 
     # --- 判定 --------------------------------------------------------------
     print(u"合计：%d ERROR / %d WARN / %d INFO"
@@ -1314,13 +1433,18 @@ def main(argv=None):
         payload = {
             "addons_root": root,
             "scanned": [a.dir_name for a in scanned],
+            "partial_scope": partial_scope,
             "errors": len(errors), "warnings": len(warns),
             "baseline_path": bpath if baseline else None,
             "new_errors": len(new_errors),
             "suppressed": len(suppressed),
+            # stale 只含范围内的；范围外的单列，别让消费者把两者当一回事
             "stale_baseline": [
                 {"addon": k[0], "code": k[1], "path": k[2], "count": n}
                 for k, n in stale],
+            "out_of_scope_baseline": [
+                {"addon": k[0], "code": k[1], "path": k[2], "count": n}
+                for k, n in out_of_scope],
             "gate": "pass" if not new_errors else "fail",
             "findings": [f.as_dict() for f in findings],
             "new_findings": [f.as_dict() for f in new],
