@@ -1,0 +1,25 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser">
+
+  <!-- Expose short template names in both the impress settings page and
+       the AR publish screen, while keeping old template keys resolvable. -->
+  <utility
+      provides="senaite.impress.interfaces.ITemplateFinder"
+      factory="INNOCARE.reportdesign.browser.templatefinder.INNOCARETemplateFinder"
+      />
+
+  <utility
+      name="senaite.impress.vocabularies.Templates"
+      component="INNOCARE.reportdesign.browser.vocabularies.TemplateVocabularyFactory"
+      />
+
+  <browser:page
+      for="*"
+      name="ajax_publish"
+      class="INNOCARE.reportdesign.browser.ajax.INNOCAREAjaxPublishView"
+      permission="zope.Public"
+      layer="senaite.impress.interfaces.ISenaiteImpressLayer"
+      />
+
+</configure>
