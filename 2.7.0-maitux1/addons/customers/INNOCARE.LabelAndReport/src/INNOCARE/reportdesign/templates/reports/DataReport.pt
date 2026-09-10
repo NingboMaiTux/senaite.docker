@@ -4,22 +4,22 @@
               T                python:lambda o,d=u'': (d if o is None else (lambda vv,dd=u'': (dd if (vv is None or vv==u'' or vv=='') else (vv if isinstance(vv,unicode) else (vv.decode('utf-8','ignore') if isinstance(vv,str) else unicode(vv)))))(((o.Title() if (hasattr(o,'Title') and callable(o.Title) and o.Title()) else getattr(o,'title',None)) if (hasattr(o,'Title') and callable(o.Title)) else getattr(o,'title',None)),d));
               FMTDT            python:lambda d,fmt,dflt=u'': (dflt if d is None else (unicode(d.strftime(fmt)) if (hasattr(d,'strftime') and callable(d.strftime)) else (lambda vv,dd=u'': (dd if (vv is None or vv==u'' or vv=='') else (vv if isinstance(vv,unicode) else (vv.decode('utf-8','ignore') if isinstance(vv,str) else unicode(vv)))))(d,dflt)));
               VG_NORM          python:lambda v: ([] if not v else (list(v) if isinstance(v,(list,tuple)) else ([v] if isinstance(v,(str,unicode)) and (v is not None and v!=u'' and v!='') else [])));
-CTX              python:context;
+CTX              python:(getattr(getattr(view, 'model', None), 'instance', None) or context);
               cmf_mod          python:__import__('Products.CMFCore.utils', fromlist=['getToolByName']);
               dt_mod           python:__import__('DateTime');
+              pkg_mod          python:__import__('pkg_resources', fromlist=['resource_string']);
               is_ar            python:(True if (hasattr(CTX,'getAnalyses') and callable(CTX.getAnalyses) and hasattr(CTX,'getClientReference') and callable(CTX.getClientReference)) else False);
               ar               python:(CTX if is_ar else None);
               portal           python:CTX.portal_url.getPortalObject();
               portal_url       python:portal.absolute_url();
               pm               python:cmf_mod.getToolByName(CTX, 'portal_membership');
+              inline_css       python:pkg_mod.resource_string('INNOCARE.reportdesign', 'templates/reports/datareport.css').decode('utf-8', 'ignore');
 
               ar_id_raw        python:((ar.getId() if (ar is not None and hasattr(ar,'getId') and callable(ar.getId)) else getattr(ar,'id',u'')) or u'') if ar else u'';
               ar_id            python:S(ar_id_raw, u'N/A');
-              client_ref_raw   python:(((ar.getClientReference() if (ar is not None and hasattr(ar,'getClientReference') and callable(ar.getClientReference)) else u'') or ar_id) if ar else u'');
-              client_ref       python:S(client_ref_raw, u'N/A');
-              ar_title         python:(client_ref or ar_id);
+              ar_title         python:ar_id;
               ar_url           python:((ar.absolute_url() if (ar is not None and hasattr(ar,'absolute_url') and callable(ar.absolute_url)) else u'') if ar else portal_url);
-              logo_url         python:portal_url + '/maitu-logo-png';
+              logo_url         python:view.get_report_logo_url();
               portal_title     python:T(portal, u'Laboratory');
 
               creator_id_raw   python:(((ar.Creator() if (ar is not None and hasattr(ar,'Creator') and callable(ar.Creator)) else getattr(ar,'Creator',u'')) or u'') if ar else u'');
@@ -61,7 +61,7 @@ CTX              python:context;
               ADICT            python:lambda a,i: {'obj':a,'position':i,'title':(S(a.Title() if (hasattr(a,'Title') and callable(a.Title)) else getattr(a,'title',u'Unnamed')) or u'Unnamed'),'keyword':S(a.getKeyword() if (hasattr(a,'getKeyword') and callable(a.getKeyword)) else getattr(a,'keyword',u'')),'formatted_result':(S(a.getFormattedResult() if (hasattr(a,'getFormattedResult') and callable(a.getFormattedResult)) else u'') or S((unicode(a.getResult()) if (hasattr(a,'getResult') and callable(a.getResult) and a.getResult() is not None) else u'')) or u''),'formatted_unit':(S(a.getFormattedUnit() if (hasattr(a,'getFormattedUnit') and callable(a.getFormattedUnit)) else u'') or S((unicode(a.getUnit()) if (hasattr(a,'getUnit') and callable(a.getUnit()) and a.getUnit() is not None) else u''))),'formatted_specs':(S(a.getFormattedSpecs() if (hasattr(a,'getFormattedSpecs') and callable(a.getFormattedSpecs)) else u'') or S((unicode(a.getSpecification()) if (hasattr(a,'getSpecification') and callable(a.getSpecification()) and a.getSpecification() is not None) else u'')) or u''),'formatted_uncertainty':S(a.getFormattedUncertainty() if (hasattr(a,'getFormattedUncertainty') and callable(a.getFormattedUncertainty)) else u''),'review_state':(S(a.getReviewState() if (hasattr(a,'getReviewState') and callable(a.getReviewState)) else getattr(a,'review_state',u'assigned')) or u'assigned'),'remarks':S(a.getRemarks() if (hasattr(a,'getRemarks') and callable(a.getRemarks)) else u''),'retested':(True if (getattr(a,'retested',False) in (True,1,'1','true','True')) else False)};
               analyses_dicts   python:[ADICT(a, i+1) for i, a in enumerate(analyses_objects)];
               ws_creator_fn    python:(creator_fn or printedby_fn);
-              pseudo_obj       python:{'id':ar_title,'url':ar_url,'laboratory':{'url':portal_url,'title':portal_title},'portal':{'url':portal_url},'obj':(ar if ar else CTX),'date_created':created_str,'createdby':{'email':(creator_em or printedby_em),'fullname':ws_creator_fn},'date_printed':printed_str,'printedby':{'email':printedby_em,'fullname':printedby_fn},'analyst':{'email':analyst_em,'fullname':analyst_fn},'remarks':u'','ars':[{'position':1,'id':ar_title,'obj':(ar if ar else CTX),'analyses':analyses_dicts}]};
+              pseudo_obj       python:{'id':ar_id,'url':ar_url,'laboratory':{'url':portal_url,'title':portal_title},'portal':{'url':portal_url},'obj':(ar if ar else CTX),'date_created':created_str,'createdby':{'email':(creator_em or printedby_em),'fullname':ws_creator_fn},'date_printed':printed_str,'printedby':{'email':printedby_em,'fullname':printedby_fn},'analyst':{'email':analyst_em,'fullname':analyst_fn},'remarks':u'','ars':[{'position':1,'id':ar_id,'obj':(ar if ar else CTX),'analyses':analyses_dicts}]};
               ws_candidates    python:[w for a in (analyses_objects or []) for w in WLIST(a) if w is not None];
               ws_index         python:dict([(WSUID(w), w) for w in ws_candidates if w is not None]);
               ws_pairs         python:[(((w.created() if (hasattr(w,'created') and callable(w.created)) else None) or getattr(w,'creation_date',None)), w) for w in ws_index.values()];
@@ -89,23 +89,27 @@ CTX              python:context;
               ws_ar_list       python:((list(ws_obj.getAnalysisRequests()) if (ws_obj is not None and hasattr(ws_obj,'getAnalysisRequests') and callable(ws_obj.getAnalysisRequests)) else []) if ws_obj is not None else []);
               ws_ar_ids        python:[S((x.getId() if (hasattr(x,'getId') and callable(x.getId)) else getattr(x,'id',u''))) for x in ws_ar_list];
               ws_position      python:((ws_ar_ids.index(ar_id) + 1) if (ar_id in ws_ar_ids) else 1);
-              worksheet        python:{'id':ws_id,'url':ws_url,'laboratory':{'url':ws_lab_url,'title':ws_lab_title},'portal':{'url':portal_url},'obj':(ws_obj if ws_obj is not None else (ar if ar else CTX)),'date_created':ws_created_str,'createdby':{'email':ws_creator_mail,'fullname':ws_creator_name},'date_printed':printed_str,'printedby':{'email':printedby_em,'fullname':printedby_fn},'analyst':{'email':ws_analyst_mail,'fullname':ws_analyst_name},'remarks':ws_remarks,'ars':[{'position':ws_position,'id':ar_title,'obj':(ar if ar else CTX),'analyses':analyses_dicts}]};
+              worksheet        python:{'id':ar_id,'url':ar_url,'laboratory':{'url':ws_lab_url,'title':ws_lab_title},'portal':{'url':portal_url},'obj':(ws_obj if ws_obj is not None else (ar if ar else CTX)),'date_created':ws_created_str,'createdby':{'email':ws_creator_mail,'fullname':ws_creator_name},'date_printed':printed_str,'printedby':{'email':printedby_em,'fullname':printedby_fn},'analyst':{'email':ws_analyst_mail,'fullname':ws_analyst_name},'remarks':ws_remarks,'ars':[{'position':ws_position,'id':ar_id,'obj':(ar if ar else CTX),'analyses':analyses_dicts}]};
               laboratory       python:worksheet['laboratory'];
               ars              python:worksheet['ars'];">
+  <style type="text/css" tal:content="structure inline_css"></style>
+
   <div id="header">
-    <div class="barcode-container">
-      <div class="report-qrcode"
-           data-size="128"
-           data-render="image"
-           data-quiet="4"
-           tal:attributes="data-text python:worksheet['id']"></div>
+    <div class="header-main">
+      <div class="lab-logo">
+        <a tal:attributes="href python:laboratory['url']">
+          <img height="25" tal:attributes="src python:logo_url"/>
+        </a>
+      </div>
+      <div class="barcode-container">
+        <div class="report-qrcode"
+             data-size="128"
+             data-render="image"
+             data-quiet="4"
+             tal:attributes="data-text python:worksheet['id']"></div>
+      </div>
     </div>
-    <div class="lab-logo">
-      <a tal:attributes="href python:laboratory['url']">
-        <img height="25" tal:attributes="src python:logo_url"/>
-      </a>
-    </div>
-    <h1>
+    <h1 class="report-id">
       <a tal:attributes="href python:worksheet['url']"
          tal:content="python:worksheet['id']"></a>
     </h1>

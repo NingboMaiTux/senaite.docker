@@ -15,30 +15,21 @@ body {
     margin: 0 auto !important;
     overflow-x: hidden !important;
 }
-/* Top header: flex three columns.
-   Left: lab logo (40-50mm, never oversized)
-   Middle: worksheet ID (h1, flex grow, aligned center-top)
-   Right: qr code (40mm x 40mm box)
-   Old: barcode-container 100% wide + qrcode float right —> that caused logo to stack
-   under qrcode in portrait mode and also allowed lab-logo img to stretch to
-   viewport width if no max-size constraint is set. */
+/* Stable header layout for impress preview/PDF:
+   row 1 = logo left / QR right, row 2 = AR number left aligned. */
 #header {
-    display: -webkit-flex !important;
-    display: flex !important;
-    flex-direction: row !important;
-    -webkit-flex-direction: row !important;
-    justify-content: space-between !important;
-    -webkit-justify-content: space-between !important;
-    align-items: flex-start !important;
-    -webkit-align-items: flex-start !important;
+    display: block !important;
     width: 100% !important;
     margin-bottom: 4mm !important;
 }
+#header .header-main {
+    display: table !important;
+    width: 100% !important;
+    table-layout: fixed !important;
+}
 .barcode-container {
-    order: 3 !important;
-    -webkit-order: 3 !important;
-    flex: 0 0 40mm !important;
-    -webkit-flex: 0 0 40mm !important;
+    display: table-cell !important;
+    vertical-align: top !important;
     width: 40mm !important;
     text-align: right !important;
 }
@@ -46,13 +37,12 @@ body {
     float: none !important;
     width: 32mm !important;
     height: 32mm !important;
-    display: inline-block !important;
+    display: block !important;
+    margin-left: auto !important;
 }
 .lab-logo {
-    order: 1 !important;
-    -webkit-order: 1 !important;
-    flex: 0 0 80mm !important;
-    -webkit-flex: 0 0 80mm !important;
+    display: table-cell !important;
+    vertical-align: top !important;
     width: 80mm !important;
     text-align: left !important;
 }
@@ -65,13 +55,11 @@ body {
     display: inline-block !important;
     page-break-inside: avoid !important;
 }
-div#header h1 {
-    order: 2 !important;
-    -webkit-order: 2 !important;
-    flex: 1 1 auto !important;
-    -webkit-flex: 1 1 auto !important;
-    text-align: center !important;
-    margin: 0 8mm !important;
+div#header h1,
+div#header h1.report-id {
+    display: block !important;
+    text-align: left !important;
+    margin: 3mm 0 0 0 !important;
     padding-top: 0 !important;
     font-size: 1.7em;
     line-height: 1.2 !important;

@@ -22,53 +22,55 @@
 .sticker .label {
   width: 40mm !important;
   height: 30mm !important;
-  border: 0.4pt solid #444 !important;
+  border: 0.5pt solid #222 !important;
   border-radius: 1.5mm !important;
-  padding: 0.75mm 0.9mm !important;
+  padding: 0.6mm 0.82mm !important;
   display: block !important;
   box-sizing: border-box !important;
   background: #fff !important;
   overflow: hidden !important;
-  font-family: Arial, "Microsoft YaHei", sans-serif !important;
+  font-family: "SimHei", "Microsoft YaHei UI", "Microsoft JhengHei", "Microsoft YaHei", "PMingLiU", Arial, sans-serif !important;
   color: #000 !important;
+  text-rendering: geometricPrecision !important;
 }
 
 .sticker .label-top {
   display: table !important;
   margin: 0 auto !important;
-  min-height: 10mm !important;
+  min-height: 7.95mm !important;
 }
 
 .sticker .label-content {
   width: 100% !important;
-  margin-top: 0.3mm !important;
+  margin-top: 0 !important;
 }
 
 .sticker .label-header {
   display: table-cell !important;
   vertical-align: middle !important;
-  padding-left: 1.35mm !important;
-  min-height: 9mm !important;
+  padding-left: 0.45mm !important;
+  min-height: 7.35mm !important;
   text-align: center !important;
 }
 
 .sticker .label-separator {
   width: 100% !important;
-  border-bottom: 0.8pt solid #2f8f44 !important;
-  margin-top: 0.25mm !important;
-  margin-bottom: 0.25mm !important;
+  border-bottom: 0.95pt solid #000 !important;
+  margin-top: 0.08mm !important;
+  margin-bottom: 0.08mm !important;
 }
 
 .sticker .label-title {
   display: inline-block !important;
-  font-size: 7.1pt !important;
-  font-weight: bold !important;
-  color: #fff !important;
-  background: #2f8f44 !important;
-  padding: 0.5mm 2mm !important;
-  border-radius: 1mm !important;
+  font-size: 7.15pt !important;
+  font-weight: 900 !important;
+  color: #000 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
   white-space: nowrap !important;
   text-align: center !important;
+  letter-spacing: 0.03mm !important;
 }
 
 .sticker .label-table {
@@ -78,33 +80,35 @@
 }
 
 .sticker .label-table td {
-  font-size: 5.95pt !important;
-  padding: 0.28mm 0 !important;
+  font-size: 5.4pt !important;
+  padding: 0.06mm 0 !important;
   vertical-align: top !important;
-  line-height: 1.06 !important;
+  line-height: 1.02 !important;
 }
 
 .sticker .lbl-label {
   color: #000 !important;
-  width: 11.3mm !important;
-  font-weight: 700 !important;
+  width: 9.95mm !important;
+  font-weight: 900 !important;
   white-space: nowrap !important;
+  letter-spacing: 0 !important;
 }
 
 .sticker .lbl-value {
-  font-weight: 700 !important;
+  font-weight: 900 !important;
   color: #000 !important;
-  word-break: break-all !important;
-  font-size: 6.25pt !important;
+  word-break: break-word !important;
+  font-size: 5.8pt !important;
+  letter-spacing: 0.01mm !important;
 }
 
 .sticker .qrcode {
   display: table-cell !important;
   vertical-align: middle !important;
-  width: 9.4mm !important;
-  height: 9.4mm !important;
+  width: 8.1mm !important;
+  height: 8.1mm !important;
   overflow: hidden !important;
-  border: 0.2pt solid #d9d9d9 !important;
+  border: 0.35pt solid #000 !important;
   padding: 0 !important;
   background: #fff !important;
 }

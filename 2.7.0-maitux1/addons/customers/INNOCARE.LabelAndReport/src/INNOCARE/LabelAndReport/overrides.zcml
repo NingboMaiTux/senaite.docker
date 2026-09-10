@@ -3,5 +3,6 @@
     i18n_domain="INNOCARE.LabelAndReport">
 
   <include package="INNOCARE.labeldesign" file="overrides.zcml" />
+  <include package="INNOCARE.reportdesign" file="overrides.zcml" />
 
 </configure>

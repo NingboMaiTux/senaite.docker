@@ -1,6 +1,16 @@
 <tal:sticker define="item python:view.current_item;
-                     sample_id python:getattr(item, 'getId', lambda: '')() or '';
-                     batch_title python:(getattr(item, 'getBatch', None) and getattr(item.getBatch(), 'Title', lambda: '')()) or '';">
+                     S python:lambda v,d=u'': (d if v in (None, u'', '') else (v if isinstance(v, unicode) else (v.decode('utf-8', 'ignore') if isinstance(v, str) else unicode(v))));
+                     CALL python:lambda o,a,d=None: (d if o is None else (lambda vv: vv() if callable(vv) else vv)(getattr(o, a, d)));
+                     FMTDATE python:lambda v: (u'' if not v else (unicode(v.strftime('%Y-%m-%d')) if hasattr(v, 'strftime') else ((S(v.ISO(), u'').split(' ')[0]) if hasattr(v, 'ISO') and callable(v.ISO) else S(v, u''))));
+                     ar python:(item if callable(getattr(item, 'getDateReceived', None)) else (CALL(item, 'getAnalysisRequest') or CALL(item, 'getRequest') or CALL(item, 'getRequestInstance') or item));
+                     sample_id python:CALL(item, 'getId', u'') or u'';
+                     batch python:CALL(item, 'getBatch');
+                     batch_title python:(CALL(batch, 'Title', u'') or CALL(batch, 'getId', u'') or u'');
+                     schema python:CALL(ar, 'Schema');
+                     project_field python:(schema.getField('ProjectNo') if schema is not None and hasattr(schema, 'getField') and callable(schema.getField) else None);
+                     project_obj python:((project_field.getRaw(ar) if project_field is not None and hasattr(project_field, 'getRaw') and callable(project_field.getRaw) else None) or CALL(ar, 'getProject'));
+                     project_no python:(CALL(project_obj, 'getId', u'') or CALL(project_obj, 'Title', u'') or u'');
+                     sent_sample_time python:FMTDATE(CALL(ar, 'getDateReceived') or getattr(ar, 'DateReceived', None));">
   <div class="label sample-normal">
     <div class="label-top">
       <div class="qrcode"
@@ -26,6 +36,14 @@
         <tr>
           <td class="lbl-label">物料名称</td>
           <td class="lbl-value" tal:content="python:getattr(item, 'MaterialName', '') or ''">材料</td>
+        </tr>
+        <tr>
+          <td class="lbl-label">项目号</td>
+          <td class="lbl-value" tal:content="project_no">PRJ-001</td>
+        </tr>
+        <tr>
+          <td class="lbl-label">送样时间</td>
+          <td class="lbl-value" tal:content="sent_sample_time">2026-09-10</td>
         </tr>
         <tr>
           <td class="lbl-label">厂家批号</td>
