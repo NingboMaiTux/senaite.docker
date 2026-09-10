@@ -468,7 +468,9 @@ def _patch_is_multi_interim():
             raw = interim.get("value", "")
             if raw:
                 try:
-                    parsed = json.loads(str(raw))
+                    # [PY2-UNICODE] json.loads takes unicode directly in Py2,
+                    # so the str() was a no-op for ASCII and a crash for CJK.
+                    parsed = json.loads(_safe_text(raw))
                     if isinstance(parsed, list):
                         return True
                 except (ValueError, TypeError):
@@ -661,7 +663,10 @@ def _patch_get_formatted_interim():
         if rt == "multivalue" and interim.get("_orig_result_type") == "list":
             try:
                 import json
-                arr = json.loads(str(raw_value))
+                # [PY2-UNICODE] see _safe_text; str() crashes on CJK and the
+                # handler below only passes, so the column silently fell back
+                # to the raw JSON text instead of the joined names.
+                arr = json.loads(_safe_text(raw_value))
                 if isinstance(arr, list):
                     if arr and isinstance(arr[0], basestring):
                         return u", ".join([unicode(v) for v in arr])
@@ -674,7 +679,7 @@ def _patch_get_formatted_interim():
                 return u""
             try:
                 import json
-                arr = json.loads(str(raw_value))
+                arr = json.loads(_safe_text(raw_value))     # [PY2-UNICODE]
                 if isinstance(arr, list):
                     if arr and isinstance(arr[0], basestring):
                         return u", ".join([unicode(v) for v in arr])
@@ -689,7 +694,7 @@ def _patch_get_formatted_interim():
             try:
                 import json
                 from bika.lims.browser.analyses.view import formatDecimalMark
-                arr = json.loads(str(raw_value))
+                arr = json.loads(_safe_text(raw_value))     # [PY2-UNICODE]
                 if isinstance(arr, list):
                     formatted = []
                     for v in arr:
@@ -1694,9 +1699,42 @@ def _collect_cross_referenceable_data(analysis):
                         if _api.is_floatable(val):
                             scalar = float(val)
                         else:
-                            scalar = str(val) if val else ""
+                            # [PY2-UNICODE] _safe_text, not str().  See R13.
+                            # RecordsField stores string subfields as unicode
+                            # (senaite/core/browser/fields/records.py), so a
+                            # text interim holding CJK comes back as unicode
+                            # and str() raises UnicodeEncodeError.  The old
+                            # `except` below repeated the very same str(), so
+                            # the recovery path raised again -- and that second
+                            # exception was swallowed by the per-sibling
+                            # `except Exception: pass` at the bottom of the
+                            # loop, which means the WHOLE source analysis was
+                            # dropped from sibling_data.  Every LOOKUP against
+                            # it then reported "source service not found" and
+                            # rendered "---": no traceback, no log line, and
+                            # the field looks like missing data rather than a
+                            # crash.  Live shape it applies to: the Related
+                            # Substances config keeps 主成分名称 in
+                            # imp_sys_suit.imp_main_name (result_type "string",
+                            # cross_referenceable), and eight Calculations read
+                            # it back with
+                            # LOOKUP("imp_sys_suit","imp_main_name",...).
+                            # It only escapes the defect while the substance
+                            # happens to carry an ASCII name.
+                            #
+                            # Same defect, same reasoning as the list branch
+                            # above (which already uses _safe_text).  The two
+                            # branches simply disagreed on the same situation.
+                            #
+                            # No numeric behaviour changes: for a bytes str or
+                            # a number, _safe_text returns the same characters
+                            # as str() did, only as unicode -- and the two
+                            # places that compare these values normalise first
+                            # anyway (_make_lookup's _safe_str on both key
+                            # columns, _same_value's _safe_text on both sides).
+                            scalar = _safe_text(val) if val else ""
                     except Exception:
-                        scalar = str(val) if val else ""
+                        scalar = _safe_text(val) if val else ""
                     if svc_kw not in sibling_data:
                         sibling_data[svc_kw] = {}
                     sibling_data[svc_kw][kw] = scalar
@@ -1813,6 +1851,33 @@ def _is_missing(value):
         return _safe_text(value) == _PLACEHOLDER
     except Exception:
         return False
+
+
+def _stringify_result(result):
+    """Text form of a computed result, without the Py2 `str(unicode)` crash.
+
+    The two scalar-engine write-backs used to spell this `str(result)`, which
+    raises UnicodeEncodeError as soon as the result is CJK text -- and since
+    both sites sit inside a `try` whose handler writes the "---" placeholder,
+    a perfectly good Chinese value came out as "---" with only a stderr line
+    to show for it.  Reachable through any LOOKUP whose target column holds
+    names rather than numbers (a solvent, an impurity, a substance).
+
+    The unicode case is passed through untouched rather than encoded: the
+    interim value is stored through Archetypes, whose RecordField.set()
+    decodes string subfields to unicode anyway (Products/Archetypes/Field.py,
+    decode() -- "ensure value is an unicode string").
+
+    Every other type keeps the previous behaviour byte for byte -- this is a
+    crash fix, not a value change.  Do NOT "simplify" it to
+    _safe_text(result): that would turn every numeric result into unicode as
+    well, which is a far wider change than the defect being fixed.
+    """
+    if _is_missing(result):
+        return _PLACEHOLDER
+    if isinstance(result, unicode):
+        return result
+    return str(result)
 
 
 def _num_or_none(v):
@@ -2213,7 +2278,13 @@ def _make_lookup(sibling_data):
         # 2) key_val is a JSON array string (from [keyword] substitution)
         elif isinstance(key_val, basestring):
             try:
-                parsed = _lookup_json.loads(str(key_val))
+                # [PY2-UNICODE] str() here was the worst of the family: a key
+                # array holding CJK ('["甲醇","乙酸乙酯"]') raised, the handler
+                # below only passes, so key_values stayed None and the call
+                # silently fell through to the SCALAR lookup -- matching on the
+                # whole JSON text instead of element by element.  That yields a
+                # wrong row or a KeyError, with no log line anywhere.
+                parsed = _lookup_json.loads(_safe_text(key_val))
                 if isinstance(parsed, list):
                     key_values = parsed
             except Exception:
@@ -3953,8 +4024,7 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
         if not variables:
             try:
                 result = eval(expr, safe_globals, {})
-                new_value = (_PLACEHOLDER if _is_missing(result)
-                             else str(result))
+                new_value = _stringify_result(result)
             except Exception as _nv_err:
                 _eci_sys.stderr.write(
                     "maitux: [%s] literal-only eval FAILED: %s expr=%s\n"
@@ -3977,7 +4047,7 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
 
         try:
             result = eval(expr, safe_globals, variables)
-            new_value = _PLACEHOLDER if _is_missing(result) else str(result)
+            new_value = _stringify_result(result)
 
         except Exception as _eval_err:
             _eci_sys.stderr.write("maitux: [%s] eval FAILED: %s expr=%s vars=%s\n" % (
