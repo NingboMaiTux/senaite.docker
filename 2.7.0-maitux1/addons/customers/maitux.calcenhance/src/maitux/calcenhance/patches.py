@@ -188,6 +188,36 @@ def _patch_interimfields_schema():
     props.setdefault("subfield_types", {})["locked"] = "boolean"
     props.setdefault("subfield_sizes", {})["locked"] = 1
 
+    # Add the two instrument-acquisition marks.  They describe HOW the
+    # acquisition screen should lay a field out, nothing else: `role` says
+    # whether the slot is the name box or the weight receiver, `group` ties
+    # the fields of one weighing together.  Row-vs-column layout is NOT
+    # expressed here -- result_type already settles it (scalar = one row,
+    # list = many), which is why two marks are enough.
+    #
+    # Neither mark takes part in formula evaluation: they are pure metadata,
+    # read by maitux.instrument_acquisition when it builds the target slots.
+    if "acquisition_role" not in subfields:
+        subfields.append("acquisition_role")
+        _sys.stderr.write("maitux: acquisition_role added to subfields\n")
+    props.setdefault("subfield_labels", {})["acquisition_role"] = _(
+        u"采集角色")
+    props.setdefault("subfield_types", {})["acquisition_role"] = "string"
+    props.setdefault("subfield_sizes", {})["acquisition_role"] = 10
+
+    # `int`, not `boolean` and not `string`: 0 is the "does not take part in
+    # acquisition" sentinel and >=1 is the group number, so the importer has
+    # to parse it as a number (see _read_interim).  Spelling it `string` here
+    # would let "0" and 0 both reach the acquisition screen and compare
+    # unequal.
+    if "acquisition_group" not in subfields:
+        subfields.append("acquisition_group")
+        _sys.stderr.write("maitux: acquisition_group added to subfields\n")
+    props.setdefault("subfield_labels", {})["acquisition_group"] = _(
+        u"分组号")
+    props.setdefault("subfield_types", {})["acquisition_group"] = "int"
+    props.setdefault("subfield_sizes", {})["acquisition_group"] = 4
+
     props["subfields"] = tuple(subfields)
 
     # Patch getSubfields to always include formula
@@ -198,7 +228,13 @@ def _patch_interimfields_schema():
 
     def patched_getSubfields(self):
         subfields = list(_original_getSubfields(self))
-        for extra in ("formula", "cross_referenceable", "locked"):
+        # ★ Every subfield added above must be listed here too.  Archetypes
+        # copies _properties from the class to the instance at init time, so
+        # an instance created before the patch ran has none of our additions;
+        # this is what backfills them.  Forget one and the Archetypes form
+        # (the AS side) simply does not render that column -- no error.
+        for extra in ("formula", "cross_referenceable", "locked",
+                      "acquisition_role", "acquisition_group"):
             if extra not in subfields:
                 subfields.append(extra)
         return tuple(subfields)
@@ -311,6 +347,38 @@ def _patch_dexterity_interimfields_schema():
             ),
             required=False,
             default=False
+        )
+        # ★ The two acquisition marks must be declared on BOTH sides.  This is
+        # the Dexterity side, which drives the Calculation edit form; the
+        # Archetypes side (_patch_interimfields_schema) drives the AS form.
+        # Declaring only one of them produces the single most misleading state
+        # this feature can be in: the column shows up on one form and not the
+        # other, which reads as "the patch did not run".
+        acquisition_role = _schema.TextLine(
+            title=_dx(
+                u"label_interim_acquisition_role",
+                default=u"采集角色"
+            ),
+            description=_dx(
+                u"description_interim_acquisition_role",
+                default=u"name = the substance-name box, weight = the weight "
+                        u"receiver; empty = does not take part in acquisition"
+            ),
+            required=False,
+            default=u""
+        )
+        acquisition_group = _schema.Int(
+            title=_dx(
+                u"label_interim_acquisition_group",
+                default=u"分组号"
+            ),
+            description=_dx(
+                u"description_interim_acquisition_group",
+                default=u"0 = does not take part in acquisition; >=1 ties the "
+                        u"fields of one weighing together"
+            ),
+            required=False,
+            default=0
         )
 
     # Replace the value_type with new schema
@@ -1853,6 +1921,78 @@ def _is_missing(value):
         return False
 
 
+# The z3c.form marker the Dexterity Calculation edit form leaves behind in
+# empty TextLine / Int subfields.  Module level because two unrelated places
+# have to agree on it: the importer (_read_interim, which normalises it away)
+# and _acquisition_marks_of below.  They disagreed once, and the result was a
+# warning that named 13 fields as "losing their marks" when none of them had
+# a mark to begin with.
+_NO_VALUE_MARKER = u"<NO_VALUE>"
+
+
+def _acquisition_marks_of(interims):
+    """`{keyword: (role, group)}` for the interims that carry a mark.
+
+    A mark counts as carried only when it is actually set: an empty role and
+    a zero group both mean "does not take part in acquisition", and so does a
+    missing key -- and so does `<NO_VALUE>`, which is a non-empty string and
+    would otherwise read as a configured role.
+    """
+    marks = {}
+    for interim in interims or []:
+        keyword = interim.get("keyword")
+        if not keyword:
+            continue
+        role = _safe_text(interim.get("acquisition_role", u"")).strip()
+        if role == _NO_VALUE_MARKER:
+            role = u""
+        raw_group = interim.get("acquisition_group")
+        if _safe_text(raw_group).strip() == _NO_VALUE_MARKER:
+            raw_group = 0
+        try:
+            group = int(raw_group or 0)
+        except (ValueError, TypeError):
+            group = 0
+        if role or group:
+            marks[keyword] = (role, group)
+    return marks
+
+
+def _warn_dropped_acquisition_marks(obj, new_interims, calc_title):
+    """Log the acquisition marks an import is about to drop.
+
+    Called just before setInterimFields() during a Calculation upsert.  The
+    sheet is authoritative, so this does NOT prevent the loss -- it only makes
+    it visible, which is the whole difference between "the source table won"
+    and "the instrument acquisition layout vanished and nobody noticed".
+    """
+    from bika.lims import logger
+    try:
+        before = _acquisition_marks_of(obj.getInterimFields())
+    except Exception:
+        return
+    if not before:
+        return
+    after = _acquisition_marks_of(new_interims)
+    dropped = sorted(kw for kw in before if kw not in after)
+    if not dropped:
+        return
+    # [PY2-UNICODE] Build the whole message as unicode and encode ONCE at the
+    # end.  Interpolating an already-encoded utf-8 `str` next to a unicode
+    # argument (the keywords come back from Archetypes as unicode) promotes
+    # the format string to unicode, which then decodes the encoded half as
+    # ASCII and raises UnicodeDecodeError.  That is exactly what happened the
+    # first time this ran against a Chinese calculation title -- R13.
+    message = (
+        u"maitux.calcenhance: import of calculation '%s' drops the "
+        u"acquisition marks of %s -- the sheet has no acquisition_role / "
+        u"acquisition_group column for them.  Add the two columns to the "
+        u"source table and re-import, or re-enter the marks by hand."
+        % (_safe_text(calc_title),
+           u", ".join(_safe_text(kw) for kw in dropped)))
+    logger.warn(message.encode("utf-8"))
+
+
 def _stringify_result(result):
     """Text form of a computed result, without the Py2 `str(unicode)` crash.
 
@@ -2809,6 +2949,60 @@ def _patch_setupdata_import():
         return _u(value).strip().lower() in (u"true", u"1", u"yes", u"x",
                                              u"y")
 
+    # The z3c.form marker the Dexterity Calculation edit form leaves behind in
+    # empty TextLine / Int subfields.  It reaches a spreadsheet as soon as
+    # someone exports a Calculation that has ever been saved through the web
+    # form, and it is a non-empty STRING -- so it is TRUTHY.  Letting it
+    # through would make every untouched field look like a configured
+    # acquisition slot, and `int()` on it raises.  Normalised away on the way
+    # in, for both marks.
+    #
+    # Shared with _acquisition_marks_of through the module-level constant on
+    # purpose: the two had their own copies once, drifted, and the mismatch
+    # produced a warning naming 13 fields as losing marks they never had.
+    _NO_VALUE_TEXT = _NO_VALUE_MARKER
+
+    def _acq_role(value):
+        """Acquisition role: `name`, `weight`, or `""` (does not take part)."""
+        text = _u(value).strip()
+        if text == _NO_VALUE_TEXT:
+            return u""
+        return text
+
+    def _acq_group(value):
+        """Acquisition group as an int.  0 means "does not take part".
+
+        openpyxl hands a number back as int OR float depending on how the cell
+        was written, and a hand-edited sheet gives a string.  All three have to
+        land on the same int: the acquisition screen groups fields by this
+        value, and 1 / 1.0 / "1" comparing unequal would split one weighing
+        into three groups.
+
+        An unparseable value falls back to 0 (= not acquired) but says so in
+        the log -- R9: a silent 0 here would quietly drop a field out of the
+        target list with nothing to show why.
+        """
+        if value is None:
+            return 0
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, long)):
+            return int(value)
+        if isinstance(value, float):
+            return int(value)
+        text = _u(value).strip()
+        if not text or text == _NO_VALUE_TEXT:
+            return 0
+        try:
+            return int(float(text))
+        except (ValueError, TypeError):
+            from bika.lims import logger
+            logger.warn(
+                "maitux.calcenhance: acquisition_group %r is not a number, "
+                "read as 0 (field will not take part in acquisition)"
+                % (value,))
+            return 0
+
     def _read_interim(row, owner_column):
         """One interim-field dict from one spreadsheet row.
 
@@ -2844,6 +3038,25 @@ def _patch_setupdata_import():
                     "allow_empty"):
             if col in row:
                 interim[col] = _to_bool(row[col])
+        # ★ The two acquisition marks: written whenever the sheet carries the
+        # column, EVEN WHEN THE CELL IS EMPTY.  Note the difference from the
+        # string columns above (`formula`, `choices`), which are written only
+        # when truthy -- for those an absent key renders as an empty widget and
+        # is harmless.  Here it is not: the acquisition screen has to decide
+        # "does this field take part at all", and it must not be forced to tell
+        # "key missing" apart from "0".  Same reasoning as the boolean block,
+        # and the same lesson as senaite-setup-xlsx-full/SKILL.md:166 -- a
+        # missing key is not the default, it is an unknown.
+        #
+        # Gated on `col in row` on purpose: a source table that predates these
+        # two columns must not be able to write anything here.  What that means
+        # for such a table is decided in S3 (the importer rebuilds the whole
+        # interim dict, so a column the sheet does not have is a column the
+        # object loses) -- see the Backlog.
+        for col, parse in (("acquisition_role", _acq_role),
+                           ("acquisition_group", _acq_group)):
+            if col in row:
+                interim[col] = parse(row[col])
         return interim
 
     def _match(container, portal_type, title=None, keyword=None):
@@ -3195,6 +3408,15 @@ def _patch_setupdata_import():
                              ("title", "title", None),
                              ("description", "description", None),
                          ]))
+                # ★ Say it out loud when a sheet without the acquisition
+                # columns is about to drop marks that are already configured.
+                # The source table is the single source of truth here (the
+                # importer rebuilds the whole interim dict, so a column the
+                # sheet does not carry is a column the object loses), and that
+                # is the intended semantics -- but losing an instrument
+                # acquisition layout without a word is exactly the silent
+                # failure R9 is about.  One line per Calculation, naming it.
+                _warn_dropped_acquisition_marks(obj, calc_interims, calc_title)
                 obj.setInterimFields(calc_interims)
                 obj.setFormula(formula)
 

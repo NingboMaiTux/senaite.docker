@@ -1893,6 +1893,59 @@ imp_pct = [imp_area]/[F_main_lookup]/[imp_weight_lookup]*[imp_dilution]*100
 
 ---
 
+
+## 仪器采集标记 —— `acquisition_role` / `acquisition_group`
+
+Interim Fields 表格里的两个附加列（1.6.0 起），**纯元数据，不参与任何公式求值**。
+它们描述的是「串口采集界面该怎么摆这个字段」，由 `maitux.instrument_acquisition`
+在生成待分批目标位时读取。
+
+| 列 | 类型 | 取值 | 含义 |
+|---|---|---|---|
+| 采集角色 `acquisition_role` | string | `name` / `weight` / 空 | 槽位角色：`name` = 名称录入框，`weight` = 重量接收区；空 = 不参与采集 |
+| 分组号 `acquisition_group` | int | `0` = 不参与；`≥1` = 组号 | 同组字段绑同一行 / 同一块 |
+
+**行还是列不由标记表达** —— `result_type` 已经决定了：标量（`numeric` /
+`calculated`）是单行，数组（`list` / `calculatedlist`）是多行。所以两个标记就够，
+不需要第三个描述布局。
+
+两侧 schema 都注册了：Archetypes（AS 编辑表单）与 Dexterity（Calculation 编辑表单）。
+★ 只加一侧是本功能最容易误判的中间状态 —— 在 Calculation 里看不见，就会以为补丁没生效。
+
+### 导入：两列**无条件写键**
+
+XLSX 导入器只要看到这两列，**空单元格也会落库**（写 `""` / `0`），不是「有值才写」。
+理由是配置线的实测教训：**列留空的后果不是取默认值，而是该键根本不写进对象**，
+而缺键会被编辑界面渲染成勾选，下次有人保存就把假勾落成真值。
+
+⚠️ **源表没有这两列时，导入会把已配置的标记冲掉。** 这是有意的 ——
+导入器用 `_read_interim` 重建整份 interim dict，源表是唯一真源；
+但它**不会静默**：每个受影响的 Calculation 留一行 warn，点名 Calculation 与 keyword：
+
+```
+maitux.calcenhance: import of calculation '...' drops the acquisition marks of ...
+```
+
+### ★ `<NO_VALUE>` 必须当成缺失
+
+Dexterity 编辑表单会把**空的** TextLine / Int 子字段存成字符串 `"<NO_VALUE>"`
+（z3c.form 的 marker，`formula` 列早就这样，不是本功能引入的）。
+任何人打开一个 Calculation 点一下「保存」就会产生它。
+
+**消费端一律把它当成缺失**（role → `""`，group → `0`）：它是**非空字符串、因而是真值**，
+用 `if group:` 判断会把「不参与采集」当成参与，直接数值比较则抛异常。
+导入器（`_read_interim`）与 `_acquisition_marks_of` 共用模块级常量 `_NO_VALUE_MARKER`
+就是为此 —— 这两处曾各存一份拷贝并漂移，后果是一条警告点名 13 个字段「即将丢失标记」，
+而它们本来就没有标记。
+
+### ⚠️ 窗口期：现在不要给机器采集字段标 `locked`
+
+`allow_locked_writes()` 这个逃生阀**当前在 21 个 addon 里调用点为 0**。
+在采集侧（`writeback.write_interim`）真正包上它之前，给机器写入的字段标 `locked`
+= **写一次就改不了了**：Worksheet 侧一律只读、采集侧第二次写入会被
+`_preserve_locked_interims` 还原、也还没有人工补录入口。峰面积那条通道同理。
+
+
 ## 文件结构
 
 ```
