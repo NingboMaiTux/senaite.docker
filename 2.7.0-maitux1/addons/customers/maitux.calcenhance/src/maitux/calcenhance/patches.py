@@ -188,6 +188,36 @@ def _patch_interimfields_schema():
     props.setdefault("subfield_types", {})["locked"] = "boolean"
     props.setdefault("subfield_sizes", {})["locked"] = 1
 
+    # Add the two instrument-acquisition marks.  They describe HOW the
+    # acquisition screen should lay a field out, nothing else: `role` says
+    # whether the slot is the name box or the weight receiver, `group` ties
+    # the fields of one weighing together.  Row-vs-column layout is NOT
+    # expressed here -- result_type already settles it (scalar = one row,
+    # list = many), which is why two marks are enough.
+    #
+    # Neither mark takes part in formula evaluation: they are pure metadata,
+    # read by maitux.instrument_acquisition when it builds the target slots.
+    if "acquisition_role" not in subfields:
+        subfields.append("acquisition_role")
+        _sys.stderr.write("maitux: acquisition_role added to subfields\n")
+    props.setdefault("subfield_labels", {})["acquisition_role"] = _(
+        u"采集角色")
+    props.setdefault("subfield_types", {})["acquisition_role"] = "string"
+    props.setdefault("subfield_sizes", {})["acquisition_role"] = 10
+
+    # `int`, not `boolean` and not `string`: 0 is the "does not take part in
+    # acquisition" sentinel and >=1 is the group number, so the importer has
+    # to parse it as a number (see _read_interim).  Spelling it `string` here
+    # would let "0" and 0 both reach the acquisition screen and compare
+    # unequal.
+    if "acquisition_group" not in subfields:
+        subfields.append("acquisition_group")
+        _sys.stderr.write("maitux: acquisition_group added to subfields\n")
+    props.setdefault("subfield_labels", {})["acquisition_group"] = _(
+        u"分组号")
+    props.setdefault("subfield_types", {})["acquisition_group"] = "int"
+    props.setdefault("subfield_sizes", {})["acquisition_group"] = 4
+
     props["subfields"] = tuple(subfields)
 
     # Patch getSubfields to always include formula
@@ -198,7 +228,13 @@ def _patch_interimfields_schema():
 
     def patched_getSubfields(self):
         subfields = list(_original_getSubfields(self))
-        for extra in ("formula", "cross_referenceable", "locked"):
+        # ★ Every subfield added above must be listed here too.  Archetypes
+        # copies _properties from the class to the instance at init time, so
+        # an instance created before the patch ran has none of our additions;
+        # this is what backfills them.  Forget one and the Archetypes form
+        # (the AS side) simply does not render that column -- no error.
+        for extra in ("formula", "cross_referenceable", "locked",
+                      "acquisition_role", "acquisition_group"):
             if extra not in subfields:
                 subfields.append(extra)
         return tuple(subfields)
@@ -311,6 +347,38 @@ def _patch_dexterity_interimfields_schema():
             ),
             required=False,
             default=False
+        )
+        # ★ The two acquisition marks must be declared on BOTH sides.  This is
+        # the Dexterity side, which drives the Calculation edit form; the
+        # Archetypes side (_patch_interimfields_schema) drives the AS form.
+        # Declaring only one of them produces the single most misleading state
+        # this feature can be in: the column shows up on one form and not the
+        # other, which reads as "the patch did not run".
+        acquisition_role = _schema.TextLine(
+            title=_dx(
+                u"label_interim_acquisition_role",
+                default=u"采集角色"
+            ),
+            description=_dx(
+                u"description_interim_acquisition_role",
+                default=u"name = the substance-name box, weight = the weight "
+                        u"receiver; empty = does not take part in acquisition"
+            ),
+            required=False,
+            default=u""
+        )
+        acquisition_group = _schema.Int(
+            title=_dx(
+                u"label_interim_acquisition_group",
+                default=u"分组号"
+            ),
+            description=_dx(
+                u"description_interim_acquisition_group",
+                default=u"0 = does not take part in acquisition; >=1 ties the "
+                        u"fields of one weighing together"
+            ),
+            required=False,
+            default=0
         )
 
     # Replace the value_type with new schema
