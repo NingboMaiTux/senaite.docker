@@ -1,0 +1,2 @@
+<script type="text/javascript"
+        tal:attributes="src view/get_script_url"></script>

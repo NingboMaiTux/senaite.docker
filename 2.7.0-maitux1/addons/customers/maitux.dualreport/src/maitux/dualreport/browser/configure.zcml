@@ -1,0 +1,23 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    i18n_domain="maitux.dualreport">
+
+  <!--
+       Injects the dual-format JS (<script src>) into the <head> of the
+       senaite.impress publish page via its custom-head viewlet manager
+       (publish.pt line 13: provider:senaite.impress.publishcustomhead).
+
+       zope2.View is a Zope built-in permission, safe in configure.zcml (R1).
+       This is a NEW viewlet name (not an override), so configure.zcml is the
+       right place (R5 does not apply).
+  -->
+  <browser:viewlet
+      name="maitux.dualreport.format_js"
+      manager="senaite.impress.browser.viewlets.interfaces.IPublishCustomHtmlHeadViewlets"
+      class=".head.PublishFormatResourcesViewlet"
+      permission="zope2.View"
+      layer="senaite.impress.interfaces.ISenaiteImpressLayer"
+      />
+
+</configure>
