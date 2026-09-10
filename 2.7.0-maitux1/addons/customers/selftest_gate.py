@@ -10,12 +10,22 @@
   1  无基线                       → 拦（exit 1）
   2  基线只盖住一部分             → 仍拦剩下那部分
   3  基线盖住全部                 → 通过（exit 0）
-  4  基线条目已不再出现           → 报「已消失」，提示重写
+  4  基线条目已不再出现（包还在）  → 报「已消失」，提示重写
+ 4c  基线条目对应的包整个没扫到    → 单独报，**不**说成「修好了」
   5  --no-baseline（严格模式）    → 无视基线，照拦
   6  --write-baseline 后重跑      → 通过
   7  --write-baseline 带 --addon  → 拒绝执行（exit 2）
   8  基线只记 ERROR，不记 WARN    → WARN 不影响门禁
   9  同一 (包,码,路径) 出现两次而基线只记 1 次 → 多出来的那次仍拦
+ 10  单包扫描 + 全量基线           → **不许**出现任何「已修好」建议
+ 11  单包扫描、范围内真修好了       → 仍要报「已消失」（别一刀切屏蔽掉）
+ 12  重写基线                       → 范围外条目、note、`_纪律` 都保住
+
+第 10 条是 2026-09-10 的实测事故：`--addon maitux.calcenhance` 只扫 1 个包，
+却拿全量基线做差异判断，于是把 maitux.instrument_acquisition 的 E17
+（那条 R14 泄漏其实一直在）报成「说明修好了，请重写基线把它剔掉」。
+照那句提示重写，就会把别人的既有欠账一起抹掉 —— 正是提示自己警告的
+"基线烂成免死金牌"。所以"范围"这一层必须有自测钉住。
 
 跑法（宿主 Python 3）：
     python selftest_gate.py
@@ -115,14 +125,16 @@ def run(root, extra=None, baseline=None):
     return p.returncode, out.decode("utf-8", "replace")
 
 
-def make_baseline(path, entries):
-    """entries: [(addon, code, path)]"""
-    write(path, json.dumps({
+def make_baseline(path, entries, extras=None):
+    """entries: [(addon, code, path)]；extras: 额外的顶层字段"""
+    data = {
         "recorded": "2026-01-01",
         "entries": [{"addon": a, "code": c, "path": p,
                      "count": 1, "level": "ERROR", "note": "selftest"}
                     for a, c, p in entries],
-    }, ensure_ascii=False, indent=2))
+    }
+    data.update(extras or {})
+    write(path, json.dumps(data, ensure_ascii=False, indent=2))
 
 
 P_DEBT = "pkg.debt"
@@ -170,14 +182,26 @@ def main():
         check(u"3b 通过时仍列出 2 条欠账",
               u"基线抑制了 2 条既有 ERROR" in out)
 
-        # 4 基线条目已消失 → 报「已消失」
+        # 4 基线条目已消失（包在扫描范围内、那一条没了）→ 报「已消失」
+        make_baseline(bl, [DEBT_KEY, NEW_KEY,
+                           (P_DEBT, "E06_PY2_MISSING_CODING",
+                            "src/pkg/debt/vanished.py")])
+        rc, out = run(root, baseline=bl)
+        check(u"4 基线里已消失的条目被报出来",
+              u"已经不再出现" in out and u"vanished.py" in out)
+        check(u"4b 已消失的条目不影响判定", rc == 0, u"exit=%d" % rc)
+
+        # 4c 包整个没扫到是另一回事，措辞不能混成"修好了"：
+        #    真实成因往往是 R5d —— 目录缺 setup.py 被整包跳过，
+        #    那时候包还在、问题也还在，只是工具看不见它。
         make_baseline(bl, [DEBT_KEY, NEW_KEY,
                            ("pkg.gone", "E06_PY2_MISSING_CODING",
                             "src/pkg/gone/x.py")])
         rc, out = run(root, baseline=bl)
-        check(u"4 基线里已消失的条目被报出来",
-              u"已经不再出现" in out and u"pkg.gone" in out)
-        check(u"4b 已消失的条目不影响判定", rc == 0, u"exit=%d" % rc)
+        check(u"4c 包没扫到时单独报，不说成「修好了」",
+              u"压根没扫到" in out and u"pkg.gone" in out
+              and u"已经不再出现" not in out, u"输出：\n%s" % out)
+        check(u"4d 没扫到的条目也不影响判定", rc == 0, u"exit=%d" % rc)
 
         # 5 --no-baseline 严格模式 → 无视基线照拦
         rc, out = run(root, extra=["--no-baseline"], baseline=bl)
@@ -221,6 +245,55 @@ def main():
         rc, out = run(root, baseline=bl)
         check(u"9 同码不同文件各自独立计数（bad2.py 仍被拦）",
               rc == 1, u"exit=%d" % rc)
+
+        # 10 单包扫描 + 全量基线 → 一条「已修好」都不许有
+        #    这是本自测最要紧的一条：范围外的包这次压根没跑过检查，
+        #    "没扫到" 不等于 "修好了"。
+        make_baseline(bl, [DEBT_KEY, NEW_KEY])
+        rc, out = run(root, extra=["--addon", P_CLEAN], baseline=bl)
+        check(u"10 单包扫描不产生任何「已修好」建议",
+              u"已经不再出现" not in out,
+              u"输出里仍有「已经不再出现」：\n%s" % out)
+        check(u"10b 范围外的包名不出现在建议里",
+              P_DEBT not in out and P_NEW not in out,
+              u"范围外的包被点名了")
+        check(u"10c 明确交代范围外的条目没参与判断",
+              u"既不算「已修好」也不建议重写" in out)
+        check(u"10d 单包扫描仍照常判定", rc == 0, u"exit=%d" % rc)
+
+        # 11 反向：范围**内**真修好了，还得照报 —— 别用"一律不报"糊过去
+        make_baseline(bl, [(P_CLEAN, "E06_PY2_MISSING_CODING",
+                            "src/pkg/clean/gone.py")])
+        rc, out = run(root, extra=["--addon", P_CLEAN], baseline=bl)
+        check(u"11 范围内已修好的条目仍报「已消失」",
+              u"已经不再出现" in out and u"gone.py" in out,
+              u"范围过滤把该报的也吃掉了")
+        check(u"11b 单包扫描下不再叫人就地重写基线",
+              u"重写要全量扫描" in out)
+
+        # 12 重写基线：范围外条目 / note / 顶层 _纪律 都得留住
+        bl3 = os.path.join(root, "merge.json")
+        make_baseline(bl3, [DEBT_KEY,
+                            ("pkg.gone", "E06_PY2_MISSING_CODING",
+                             "src/pkg/gone/x.py")],
+                      extras={"_纪律": "别把这段冲掉"})
+        rc, out = run(root, extra=["--write-baseline", bl3])
+        data = json.load(io.open(bl3, encoding="utf-8"))
+        keys = set((e["addon"], e["code"], e["path"]) for e in data["entries"])
+        check(u"12 重写基线保留范围外的既有条目",
+              ("pkg.gone", "E06_PY2_MISSING_CODING",
+               "src/pkg/gone/x.py") in keys,
+              u"pkg.gone 被抹了：%s" % sorted(keys))
+        check(u"12b 重写时点明保留了几条", u"保留 1 条范围外" in out)
+        notes = dict(((e["addon"], e["code"], e["path"]), e.get("note"))
+                     for e in data["entries"])
+        check(u"12c 人工填的 note 被带过来", notes.get(DEBT_KEY) == "selftest",
+              u"note 丢了：%r" % (notes.get(DEBT_KEY),))
+        check(u"12d 顶层 _纪律 没被冲掉",
+              data.get("_纪律") == "别把这段冲掉")
+        check(u"12e 范围内的包照常重写（twice 的两条都在）",
+              len([1 for a, c, p in keys if a == "pkg.twice"]) == 2,
+              u"范围内条目没写全：%s" % sorted(keys))
 
         ok = sum(1 for _n, c, _d in RESULTS if c)
         print(u"\n%d/%d passed" % (ok, len(RESULTS)))
