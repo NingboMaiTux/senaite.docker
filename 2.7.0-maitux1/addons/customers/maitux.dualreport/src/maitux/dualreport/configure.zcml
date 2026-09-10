@@ -1,0 +1,62 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:plone="http://namespaces.plone.org/plone"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    i18n_domain="maitux.dualreport">
+
+  <!--
+       maitux.dualreport
+
+       No senaite.custom permissions are registered here and no same-name
+       components are overridden via ZCML: all core integration is done by
+       import-time monkey-patches (maitux.dualreport.patches), the same
+       approach as maitux.calcenhance. Therefore no overrides.zcml and no
+       package-includes overrides slug are needed (R1/R2/R5).
+
+       The monkey-patches are applied when this package is imported, which
+       happens as soon as any ZCML of this package is loaded.
+  -->
+
+  <!-- GenericSetup meta (registerProfile) -->
+  <include package="Products.GenericSetup" file="meta.zcml" />
+
+  <!-- Browser viewlet that injects the dual-format JS into the publish head -->
+  <include package=".browser" />
+
+  <!--
+       Static JS resource for the senaite.impress publish page.
+
+       IMPORTANT: we deliberately do NOT register this directory under the
+       resource type "senaite.impress.js". publish.pt inlines those files with
+       tal:content (escaped), which corrupts any JS containing '&', '<' or '>'
+       (e.g. "&&" becomes "&amp;&amp;" -> SyntaxError in the browser).
+
+       Instead the file is served as a normal ++plone++ static resource and
+       included by the PublishFormatResourcesViewlet in the
+       "senaite.impress.publishcustomhead" viewlet manager.
+  -->
+  <plone:static
+      directory="resources/js"
+      type="plone"
+      name="maitux.dualreport"
+      />
+
+  <!-- Install profile -->
+  <genericsetup:registerProfile
+      name="default"
+      title="Maitux Dual Report (PDF + Word)"
+      directory="profiles/default"
+      description="PDF + Word dual report output for senaite.impress"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <!-- Uninstall profile -->
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="Maitux Dual Report (PDF + Word) uninstall"
+      directory="profiles/uninstall"
+      description="Removes maitux.dualreport profile registrations"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+</configure>
