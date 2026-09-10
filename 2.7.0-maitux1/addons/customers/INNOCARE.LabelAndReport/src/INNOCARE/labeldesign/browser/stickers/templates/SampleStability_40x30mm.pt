@@ -2,9 +2,20 @@
                      sample_id python:getattr(item, 'getId', lambda: '')() or '';
                      batch_title python:(getattr(item, 'getBatch', None) and getattr(item.getBatch(), 'Title', lambda: '')()) or '';">
   <div class="label sample-stability">
-    <div class="label-header sample-stability">
-      <span class="label-title">稳定性标签</span>
+    <div class="label-top">
+      <div class="qrcode"
+           data-size="32"
+           data-render="image"
+           data-quiet="0"
+           tal:attributes="data-text python:sample_id">
+      </div>
+
+      <div class="label-header sample-stability">
+        <span class="label-title">稳定性标签</span>
+      </div>
     </div>
+
+    <div class="label-separator"></div>
 
     <div class="label-content">
       <table class="label-table" cellpadding="0" cellspacing="0" border="0">
@@ -33,13 +44,6 @@
           <td class="lbl-value" tal:content="python:getattr(item, 'placement_condition', '') or ''">Upright</td>
         </tr>
       </table>
-    </div>
-
-    <div class="qrcode"
-         data-size="32"
-         data-render="image"
-         data-quiet="0"
-         tal:attributes="data-text python:sample_id">
     </div>
   </div>
 </tal:sticker>
