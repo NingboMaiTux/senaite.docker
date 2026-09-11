@@ -677,7 +677,14 @@ def flush_relay_readings(worksheet):
     instrument_code = session.get("instrument_code")
 
     count = 0
-    failed = 0
+    dropped = 0
+    # ★ 失败的读数先攒在这里，**等本轮排空队列之后**再 requeue。
+    # 原实现在循环体里直接 requeue，而 requeue 是放回**同一个队列**的，
+    # 下一轮 while 立刻又把它 pop 出来 —— 于是 5 次重试在**同一次
+    # flush 里烧光**，读数当场丢失，而 docstring 承诺的是"下个轮询周期重试"。
+    # 后果是真丢数：一次瞬时性拒绝（切会话、ZODB 冲突）就能把一次称量
+    # 在一个轮询周期内静默抹掉。
+    retry_items = []
     while True:
         item = relay.pop_queue_item(session_id)
         if item is None:
@@ -704,17 +711,21 @@ def flush_relay_readings(worksheet):
 
         # 写入失败：记录并重试（有上限）
         retries = item.get("retries", 0)
-        failed += 1
         if retries >= RELAY_FLUSH_MAX_RETRIES:
+            dropped += 1
             logger.warning(
                 "Relay flush: dropping reading after %s retries: %r",
                 retries, item.get("raw_text", u""))
             continue
+        retry_items.append(item)
+
+    for item in retry_items:
         relay.requeue(session_id, item)
 
-    if failed:
-        logger.warning("Relay flush: %s ingested, %s failed/retrying "
-                       "(session %s)", count, failed, session_id)
+    if retry_items or dropped:
+        logger.warning("Relay flush: %s ingested, %s retrying, %s dropped "
+                       "(session %s)", count, len(retry_items), dropped,
+                       session_id)
     return count
 
 

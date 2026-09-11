@@ -48,6 +48,11 @@ try:
     TEST_NAME_KEYWORD = "t_name"
     TEST_WEIGHT_KEYWORD = "t_weight"
 
+    # zopepy 没有安全上下文，session_store._get_user_id() 恒为 u""。
+    # 各 setUp 把它打桩成这两个常量，断言才能落到具体的人身上。
+    TEST_USER_ID = u"tester"
+    TEST_USER_NAME = u"测试员"
+
     def _marked_interim(keyword, role, group, result_type="numeric"):
         return {
             "keyword": keyword,
@@ -155,18 +160,35 @@ class SessionStoreTest(unittest.TestCase):
         self._patch("get_title", lambda obj: getattr(
             obj, "title", getattr(obj, "code", obj.UID())))
         self._patch("get_path", lambda obj: obj.UID())
-        self._patch("is_object", lambda obj: True)
+        # ★ 2026-09-11 修：原先是 `lambda obj: True`，连 None 都认成对象。
+        # 真的 `api.is_object(None)` 是 False，`ensure_session` 正是靠它挡住
+        # "Worksheet 没分配仪器"；桩恒 True 让那道门形同虚设，
+        # `test_session_requires_instrument` 于是崩在后面的 `get_uid(None)`。
+        self._patch("is_object", lambda obj: obj is not None)
         # ★ uid → 分析对象：校验改成"按 (分析, keyword) 查标记"之后，
         # target_key 里的 uid 必须能解析回带 interim 快照的对象
         self.analyses = {
             "analysis-1": FakeAnalysis("analysis-1"),
             "analysis-2": FakeAnalysis("analysis-2"),
         }
-        self._patch("get_object", lambda uid: self.analyses.get(uid))
+        # ★ 2026-09-11 补：portal 会话索引里存的是 worksheet_uid，
+        # `resolve_worksheet_by_session_id` 要靠 `get_object` 把它变回
+        # Worksheet。原先这个桩只认分析，于是所有跨 Worksheet 反查
+        # 恒为 None —— 会话反查、占用互斥、force 挤占整条链路都没测到。
+        self.worksheets = {}
+        self._patch("get_object", lambda uid: (
+            self.analyses.get(uid) or self.worksheets.get(uid)))
         # portal 反查：直接返回 FakePortal（替代 api.get_portal）
         self._orig_portal = session_store._get_portal
         self.portal = FakePortal()
         session_store._get_portal = lambda context: self.portal
+
+        # ★ 2026-09-11 补：打桩当前用户。不打桩的话 `occupied_by`
+        # 恒为 u""，"开始采集要记录占用者"这条判据根本立不住。
+        self._orig_get_user_id = session_store._get_user_id
+        self._orig_get_user_name = session_store._get_user_name
+        session_store._get_user_id = lambda: TEST_USER_ID
+        session_store._get_user_name = lambda: TEST_USER_NAME
 
         # 中转站调用打桩：默认连接成功（真实 HTTP 连接在集成测试验证）
         self._orig_start_instrument = session_store.start_instrument
@@ -191,9 +213,16 @@ class SessionStoreTest(unittest.TestCase):
         self.worksheet2 = FakeWorksheet("ws-2", self.instrument)
         self.instrument2 = FakeInstrument("inst-2", "BALANCE-02", u"电子天平2")
         self.worksheet_other = FakeWorksheet("ws-3", self.instrument2)
+        self.worksheets.update({
+            "ws-1": self.worksheet,
+            "ws-2": self.worksheet2,
+            "ws-3": self.worksheet_other,
+        })
 
     def tearDown(self):
         session_store._get_portal = self._orig_portal
+        session_store._get_user_id = self._orig_get_user_id
+        session_store._get_user_name = self._orig_get_user_name
         session_store.start_instrument = self._orig_start_instrument
         session_store.stop_instrument = self._orig_stop_instrument
         session_store.relay.is_active = self._orig_relay_is_active
@@ -284,9 +313,10 @@ class SessionStoreTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(len(self.start_calls), 1)
         self.assertTrue(self.start_calls[0]["force"])
-        # 记录占用者
+        # 记录占用者（占用者写的是显示名，不是用户 id）
         data = session_store.get_session_data(self.worksheet)
-        self.assertTrue(data["active_session"].get("occupied_by"))
+        self.assertEqual(data["active_session"].get("occupied_by"),
+                         TEST_USER_NAME)
 
     def test_start_listening_default_no_force(self):
         session = self._start_session(self.worksheet)
@@ -298,7 +328,8 @@ class SessionStoreTest(unittest.TestCase):
         session = self._start_session(self.worksheet)
         session_store.start_listening(self.worksheet)
         data = session_store.get_session_data(self.worksheet)
-        self.assertTrue(data["active_session"].get("occupied_by"))
+        self.assertEqual(data["active_session"].get("occupied_by"),
+                         TEST_USER_NAME)
         session_store.stop_listening(self.worksheet)
         data = session_store.get_session_data(self.worksheet)
         self.assertEqual(data["active_session"].get("occupied_by"), u"")
@@ -486,6 +517,34 @@ class SessionStoreTest(unittest.TestCase):
         self.assertEqual(count, 0)
         self.assertEqual(conn.queue.qsize(), 1)
 
+    def test_flush_retry_budget_spans_poll_cycles(self):
+        """重试预算是**每个轮询周期一次**，不是一次 flush 里烧光
+
+        ★ 原实现在 while 循环体里直接 requeue，而 requeue 放回的是同一个
+        队列，下一轮立刻又 pop 出来 —— 5 次重试在一次 flush 内耗尽，
+        读数当场丢失。一次瞬时性拒绝就能静默抹掉一次称量。
+        """
+        session = self._start_session(self.worksheet)
+        session_store.start_listening(self.worksheet)
+        conn = self._seed_relay_queue(session["session_id"])
+        session_store.ingest_event = (
+            lambda *a, **k: ("rejected", None))
+
+        # 前 RELAY_FLUSH_MAX_RETRIES 个周期：每轮只消耗一次重试额度，读数还在
+        for expected_retries in range(1, session_store.
+                                      RELAY_FLUSH_MAX_RETRIES + 1):
+            self.assertEqual(
+                session_store.flush_relay_readings(self.worksheet), 0)
+            self.assertEqual(conn.queue.qsize(), 1)
+            item = conn.queue.get_nowait()
+            self.assertEqual(item["retries"], expected_retries)
+            conn.queue.put_nowait(item)
+
+        # 再一个周期才超上限丢弃
+        self.assertEqual(
+            session_store.flush_relay_readings(self.worksheet), 0)
+        self.assertEqual(conn.queue.qsize(), 0)
+
     def test_flush_ingests_successfully(self):
         session = self._start_session(self.worksheet)
         session_store.start_listening(self.worksheet)
@@ -544,7 +603,17 @@ class SessionStoreTest(unittest.TestCase):
         event = data["events"]["e-1"]
         self.assertEqual(event["status"], session_store.STATUS_PENDING)
         self.assertEqual(event["targets"], [])
-        self.assertNotIn(tk, data["assignments"])
+        # ★ 2026-09-11 改写：原断言是 `assertNotIn(tk, ...)`，它描述的是
+        # "撤销就把整条 assignment 删掉"的旧行为。现在是**只解绑、
+        # 不删行**（见 `unassign_reading` 与 `_build_slot` 的注释）：
+        #   - 数组字段的手动添加行靠 assignments 里的 ":seq" 键存在，
+        #     删整条那一行就从页面上消失了；
+        #   - `_build_slot` 只在 `not assignment` 时回显 interim 已保存值，
+        #     留一个空占位才能让行回到 pending 而不把旧值又显回来。
+        # 所以这里改成核"占位还在、绑定已清"。
+        assignment = data["assignments"][tk]
+        self.assertEqual(assignment["source"], "")
+        self.assertNotIn("event_id", assignment)
 
     def test_discard_is_terminal(self):
         session = self._start_session(self.worksheet)
@@ -707,17 +776,26 @@ class AgentModeSessionStoreTest(unittest.TestCase):
         self._patch("get_title", lambda obj: getattr(
             obj, "title", getattr(obj, "code", obj.UID())))
         self._patch("get_path", lambda obj: obj.UID())
-        self._patch("is_object", lambda obj: True)
+        # ★ 同 SessionStoreTest：桩不能把 None 也说成对象
+        self._patch("is_object", lambda obj: obj is not None)
         # ★ uid → 分析对象：校验改成"按 (分析, keyword) 查标记"之后，
         # target_key 里的 uid 必须能解析回带 interim 快照的对象
         self.analyses = {
             "analysis-1": FakeAnalysis("analysis-1"),
             "analysis-2": FakeAnalysis("analysis-2"),
         }
-        self._patch("get_object", lambda uid: self.analyses.get(uid))
+        # ★ agent 模式的占用互斥全靠 portal 会话索引 → worksheet_uid 反查，
+        # 桩里没登记 Worksheet 的话 `find_instrument_occupant` 永远找不到人。
+        self.worksheets = {}
+        self._patch("get_object", lambda uid: (
+            self.analyses.get(uid) or self.worksheets.get(uid)))
         self._orig_portal = session_store._get_portal
         self.portal = FakePortal()
         session_store._get_portal = lambda context: self.portal
+        self._orig_get_user_id = session_store._get_user_id
+        self._orig_get_user_name = session_store._get_user_name
+        session_store._get_user_id = lambda: TEST_USER_ID
+        session_store._get_user_name = lambda: TEST_USER_NAME
         session_store.relay.CONNECTIONS.clear()
         self._orig_agent_mode = phase1_targets.PHASE1_AGENT_MODE
         phase1_targets.PHASE1_AGENT_MODE = True
@@ -736,6 +814,8 @@ class AgentModeSessionStoreTest(unittest.TestCase):
         self.instrument = FakeInstrument("inst-1", "BALANCE-01", u"电子天平")
         self.worksheet = FakeWorksheet("ws-1", self.instrument)
         self.worksheet2 = FakeWorksheet("ws-2", self.instrument)
+        self.worksheets.update({"ws-1": self.worksheet,
+                                "ws-2": self.worksheet2})
 
     def _fake_template(self):
         template = type("FakeTemplate", (), {})()
@@ -753,6 +833,8 @@ class AgentModeSessionStoreTest(unittest.TestCase):
 
     def tearDown(self):
         session_store._get_portal = self._orig_portal
+        session_store._get_user_id = self._orig_get_user_id
+        session_store._get_user_name = self._orig_get_user_name
         session_store.relay.CONNECTIONS.clear()
         session_store._notify_agent = self._orig_notify_agent
         session_store.get_instrument_tcp_address = self._orig_get_tcp_addr
@@ -833,7 +915,12 @@ class AgentModeSessionStoreTest(unittest.TestCase):
         self.assertFalse(session_store.is_listening(self.worksheet))
         # 占用者信息同步
         data = session_store.get_session_data(self.worksheet2)
-        self.assertTrue(data["active_session"].get("occupied_by"))
+        self.assertEqual(data["active_session"].get("occupied_by"),
+                         TEST_USER_NAME)
+        # 被挤掉的一方占用者清空
+        self.assertEqual(
+            session_store.get_session_data(
+                self.worksheet)["active_session"].get("occupied_by"), u"")
 
     def test_resolve_listening_worksheet_by_instrument(self):
         self.assertIsNone(
@@ -866,7 +953,7 @@ class SyncSiblingsTest(unittest.TestCase):
         self._patch("get_title", lambda obj: getattr(
             obj, "title", obj.UID()))
         self._patch("get_path", lambda obj: obj.UID())
-        self._patch("is_object", lambda obj: True)
+        self._patch("is_object", lambda obj: obj is not None)
         self._patch("get_parent", lambda obj: obj)
 
         # 三个样品上的同一个 AS（as_keyword 相同），外加一个不同 AS 作对照
