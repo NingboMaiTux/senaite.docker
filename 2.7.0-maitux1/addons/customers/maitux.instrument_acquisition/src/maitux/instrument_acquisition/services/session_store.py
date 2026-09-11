@@ -31,9 +31,16 @@ from maitux.instrument_acquisition.services.phase1_targets import (
 from maitux.instrument_acquisition.services.phase1_targets import (
     PHASE1_SESSION_INDEX_KEY,
 )
-from maitux.instrument_acquisition.services.phase1_targets import PHASE1_KEYWORDS
+from maitux.instrument_acquisition.services.phase1_targets import ROLE_NAME
+from maitux.instrument_acquisition.services.phase1_targets import ROLE_WEIGHT
 from maitux.instrument_acquisition.services.phase1_targets import (
-    get_target_definitions,
+    build_target_definitions,
+)
+from maitux.instrument_acquisition.services.phase1_targets import (
+    get_marked_keywords,
+)
+from maitux.instrument_acquisition.services.phase1_targets import (
+    get_target_definition,
 )
 from maitux.instrument_acquisition.services.phase1_targets import make_target_key
 from maitux.instrument_acquisition.services.phase1_targets import parse_target_key
@@ -763,6 +770,31 @@ def ingest_event(worksheet, event_id, session_id, instrument_code,
     return "created", event
 
 
+def _resolve_marked_target(target_key):
+    """解析 target_key，并校验它**在那个分析行上真的被标成了采集目标**
+
+    ★ 取代原来的全局白名单 `keyword in PHASE1_KEYWORDS`。原先只要 keyword 是
+    那两个写死的值就放行，**不管它属于哪个分析、那个分析有没有这个字段**；
+    现在按 (分析, keyword) 查标记 —— 所以"把读数分配到一个没标记的字段上"
+    会被拒绝。这是本次改动**收紧**了的地方，不是等价替换。
+
+    :returns: (analysis, definition)；任一步不成立返回 (None, None)
+    """
+    analysis_uid, keyword = parse_target_key(target_key)
+    if not analysis_uid or not keyword:
+        return None, None
+    try:
+        analysis = api.get_object(analysis_uid)
+    except Exception:
+        return None, None
+    if not api.is_object(analysis):
+        return None, None
+    definition = get_target_definition(analysis, keyword)
+    if definition is None:
+        return None, None
+    return analysis, definition
+
+
 def assign_reading(worksheet, event_id, target_key):
     """将一条读数分配给一个目标位（一条读数可分配给多个目标位）
 
@@ -778,8 +810,8 @@ def assign_reading(worksheet, event_id, target_key):
     if event.get("status") == STATUS_SAVED:
         return False, u"已保存的读数不能重新分配，请先撤销对应目标位"
 
-    analysis_uid, keyword = parse_target_key(target_key)
-    if not keyword or keyword not in PHASE1_KEYWORDS:
+    _analysis, definition = _resolve_marked_target(target_key)
+    if definition is None:
         return False, u"无效的目标位：%s" % target_key
 
     assignments = data.setdefault("assignments", {})
@@ -806,13 +838,17 @@ def assign_reading(worksheet, event_id, target_key):
 
 
 def set_manual_value(worksheet, target_key, value):
-    """为目标位设置手工填写值（第一阶段用于 T_name 名称字段）
+    """为目标位设置手工填写值（主要用于 `role=name` 的名称字段）
+
+    ★ 不额外限制只有 `manual_input` 角色才能手填：UI 决定哪里出输入框
+    （名称格是输入框、重量格是绑定按钮），这里只把"不是采集目标"挡掉，
+    与原实现的宽严一致。
 
     :returns: (success, message)
     """
     data = get_session_data(worksheet)
-    analysis_uid, keyword = parse_target_key(target_key)
-    if not keyword or keyword not in PHASE1_KEYWORDS:
+    _analysis, definition = _resolve_marked_target(target_key)
+    if definition is None:
         return False, u"无效的目标位：%s" % target_key
 
     assignments = data.setdefault("assignments", {})
@@ -906,48 +942,54 @@ def discard_reading(worksheet, event_id):
     return True, u"已废弃"
 
 
-def build_target_slots(worksheet, data=None):
-    """生成第一阶段待分配目标位列表（target_key 抽象）
+def _log_invalid_mark(analysis_title):
+    """返回一个 `on_invalid` 回调，把配错的采集标记记进实例日志
 
-    目标位 = Worksheet 内所有分析行 × 该行支持的写死关键字（T_name/T_weight）。
-    仅渲染分析行上确实存在对应 Interim Field 的目标位。
+    ★ 配错标记（只配了一半 / 角色拼错）的后果是该字段**不出现**在采集页。
+    不留痕就是一个静默失败（R9「失败大多是静默的」）。
+    """
+    def _on_invalid(keyword, reason):
+        logger.warning(
+            u"仪器采集标记无效：分析「%s」字段「%s」—— %s",
+            analysis_title, keyword, reason)
+    return _on_invalid
+
+
+def build_target_slots(worksheet, data=None):
+    """生成待分配目标位列表（target_key 抽象）
+
+    目标位 = Worksheet 内每个分析行 × 该行**被标记为采集目标**的 interim
+    （`acquisition_role` + `acquisition_group`，读的是分析快照）。
+    没有标记的分析行不产生任何目标位。
 
     :returns: 目标位字典列表
     """
     data = data or get_session_data(worksheet)
     assignments = data.get("assignments", {})
     events = data.get("events", {})
-    definitions = get_target_definitions()
-    definitions = sorted(definitions, key=lambda d: d.get("sort_order", 0))
 
     slots = []
     analyses = worksheet.getAnalyses() or []
     for analysis in analyses:
         analysis_uid = api.get_uid(analysis)
         # py2 下 api.get_title 可能返回 str(bytes) 中文，模板渲染会崩溃，统一转 unicode
-        analysis_title = api.safe_unicode(
-            api.get_title(analysis) or api.get_id(analysis))
-        interims = analysis.getInterimFields() or []
-        keywords = set()
-        for interim in interims:
-            keyword = interim.get("keyword")
-            if keyword:
-                keywords.add(keyword)
-        # 各 interim 的 result_type（判断数组字段，支持添加行）
-        interim_types = dict(
-            (interim.get("keyword"), interim.get("result_type"))
-            for interim in interims if interim.get("keyword"))
+        analysis_title = analysis_title_of(analysis)
+        # ★ 按行推导目标位定义（原先是全局的 get_target_definitions()）。
+        # 定义已按 (角色次序, 快照出现序) 排好，下面的 [-1] 依赖这个次序。
+        definitions = build_target_definitions(
+            analysis, on_invalid=_log_invalid_mark(analysis_title))
+        if not definitions:
+            continue
 
-        # 先生成该分析项的所有行，再计算组锚点（"添加行"按钮位置）
+        # 先生成该分析项的所有行，再按**组**计算锚点（"添加行"按钮位置）
         analysis_slots = []
-        array_keywords = []
+        array_defs_by_group = {}
         for definition in definitions:
-            keyword = definition.get("interim_keyword")
-            if keyword not in keywords:
-                continue
-            is_array = is_array_result_type(interim_types.get(keyword))
+            keyword = definition["interim_keyword"]
+            group_no = definition["acquisition_group"]
+            is_array = is_array_result_type(definition.get("result_type"))
             if is_array:
-                array_keywords.append(keyword)
+                array_defs_by_group.setdefault(group_no, []).append(definition)
 
             # 基础行（seq=0）
             base_key = make_target_key(analysis_uid, keyword)
@@ -975,76 +1017,132 @@ def build_target_slots(worksheet, data=None):
                         definition, extra_key, seq, assignments, events,
                         is_array))
 
-        # 组锚点：数组字段组（如 T_name+T_weight）的最后一个字段的最后一行
-        if array_keywords:
-            # 组内定义顺序最后的字段（sort_order 最大）
-            last_kw = max(
-                array_keywords,
-                key=lambda kw: next(
-                    (d.get("sort_order", 0) for d in definitions
-                     if d.get("interim_keyword") == kw), 0))
+        # 组锚点：★ 按 acquisition_group 分别求，不是按整个分析求。
+        # 一个分析可以有多个组，锚点必须落在**本组**最后一个数组字段的最后一行；
+        # 按整个分析求会把锚点挂到别的组的行上（Backlog S5 事实④）。
+        for group_no, group_defs in array_defs_by_group.items():
+            # definitions 已按 (角色次序, 出现序) 排序，故取末项即"组内最后一个字段"
+            last_kw = group_defs[-1]["interim_keyword"]
+            group_slots = [s for s in analysis_slots
+                           if s.get("is_array")
+                           and s.get("acquisition_group") == group_no]
             # py2 的 max() 不支持 default 参数，手动求最大 seq
             max_seq = 0
-            for s in analysis_slots:
-                if s.get("is_array") and s.get("seq", 0) > max_seq:
+            for s in group_slots:
+                if s.get("seq", 0) > max_seq:
                     max_seq = s.get("seq", 0)
-            for s in analysis_slots:
-                if (s.get("is_array") and s.get("interim_keyword") == last_kw
+            for s in group_slots:
+                if (s.get("interim_keyword") == last_kw
                         and s.get("seq") == max_seq):
                     s["is_add_row_anchor"] = True
 
         slots.extend(analysis_slots)
 
-    slots.sort(key=lambda s: (s["sort_order"], s["analysis_title"],
-                              s.get("seq", 0)))
+    # 排序：同一分析的同一组连在一起，组内按角色次序（名称在前、重量在后）。
+    # ★ 原先首键是 sort_order，会把所有分析的"名称"排到所有"重量"之前 ——
+    # 有了分组之后那样排会让"分配目标"下拉里同一行的字段彼此隔很远。
+    slots.sort(key=lambda s: (s["analysis_title"],
+                              s.get("acquisition_group", 0),
+                              s.get("seq", 0),
+                              s.get("sort_order", 0),
+                              s.get("interim_index", 0)))
     return slots
 
 
 def build_target_groups(worksheet, data=None):
-    """目标位按组（seq）分组：同一组的 T_name/T_weight 归为一组
+    """目标位分组：同一分析、同一 `acquisition_group`、同一 seq 的字段归为一组
 
-    排版需求：T_name 与 T_weight 是绑定的 key-value 组，采集界面按组
-    显示（第 1 组：名称 + 重量 并排），而不是按字段类型分开排列。
+    ★ 分组键是**三元组** `(analysis_uid, acquisition_group, seq)`：
+    - `acquisition_group` 来自 interim 标记，表达"哪些字段绑同一行"
+    - `seq` 是数组字段的行号（第 1 组 / 第 2 组 数据）
+
+    原实现只用 `(analysis_uid, seq)`，把两个概念混成一个 —— 同一分析上
+    两个不同 `acquisition_group` 的字段会被塞进同一行（Backlog S5 事实②）。
+
+    ★ `weight_slots` 是**列表**，不是单数：一组里可以有任意多个 `weight`
+    角色的字段（情况1 就是 1 个名称 + 2 个重量）。模板固定 5 列，把它们在
+    「重量」单元格内纵向堆叠 —— 所以这里不能取 `[0]`，个数完全不设上限。
 
     :returns: 组列表，每组：
-        {"seq", "analysis_uid", "analysis_title", "is_extra",
-         "is_array", "is_add_row_anchor", "group_title",
-         "slots": {keyword: slot}, "name_slot", "weight_slot"}
+        {"seq", "acquisition_group", "analysis_uid", "analysis_title",
+         "is_extra", "is_array", "is_add_row_anchor", "group_title",
+         "slots": {keyword: slot}, "field_slots",
+         "name_slots", "weight_slots", "name_slot"}
     """
     slots = build_target_slots(worksheet, data)
     groups = {}
     for slot in slots:
-        key = (slot["analysis_uid"], slot.get("seq", 0))
+        group_no = slot.get("acquisition_group", 0)
+        seq = slot.get("seq", 0)
+        key = (slot["analysis_uid"], group_no, seq)
         group = groups.get(key)
         if group is None:
-            seq = slot.get("seq", 0)
             group = {
                 "seq": seq,
+                "acquisition_group": group_no,
                 "analysis_uid": slot["analysis_uid"],
                 "analysis_title": slot["analysis_title"],
                 "is_extra": seq > 0,
                 "is_array": slot.get("is_array", False),
                 "is_add_row_anchor": False,
-                "group_title": (u"第 %s 组" % (seq + 1) if seq
-                                else u"第 1 组"),
+                "group_title": _group_title(group_no, seq),
                 "slots": {},
             }
             groups[key] = group
         group["slots"][slot["interim_keyword"]] = slot
+        # 组内任一字段是数组 → 该组可添加行
+        if slot.get("is_array"):
+            group["is_array"] = True
         if slot.get("is_add_row_anchor"):
             group["is_add_row_anchor"] = True
 
     result = sorted(groups.values(),
-                    key=lambda g: (g["analysis_title"], g["seq"]))
+                    key=lambda g: (g["analysis_title"],
+                                   g["acquisition_group"], g["seq"]))
     for group in result:
-        slots_map = group["slots"]
-        group["name_slot"] = slots_map.get("T_name")
-        group["weight_slot"] = slots_map.get("T_weight")
-        # 供模板遍历：按定义顺序排列的字段行
+        # 供模板遍历：按 (角色次序, 快照出现序) 排列的字段行
         group["field_slots"] = sorted(
-            slots_map.values(),
-            key=lambda s: s.get("sort_order", 0))
+            group["slots"].values(),
+            key=lambda s: (s.get("sort_order", 0),
+                           s.get("interim_index", 0)))
+        group["name_slots"] = [s for s in group["field_slots"]
+                               if s.get("acquisition_role") == ROLE_NAME]
+        group["weight_slots"] = [s for s in group["field_slots"]
+                                 if s.get("acquisition_role") == ROLE_WEIGHT]
+        # 名称按语义每组至多一个（allow_multi_assign=False），给模板留个便捷键
+        group["name_slot"] = (group["name_slots"][0]
+                              if group["name_slots"] else None)
     return result
+
+
+def _group_title(group_no, seq):
+    """组标题：多个 acquisition_group 时要能区分是哪一组的第几行
+
+    单组（最常见）时保持原文案「第 N 组」不变，避免无谓的界面变化。
+    """
+    if group_no > 1:
+        return u"组%s · 第 %s 行" % (group_no, seq + 1)
+    return u"第 %s 组" % (seq + 1)
+
+
+def collect_readonly_keywords(worksheet):
+    """Worksheet 内**全部分析行**被标为采集目标的 keyword 并集
+
+    `manage_results.pt` 那段 JS 与 autofill 修复都要一个扁平的 keyword 数组，
+    所以这里按 worksheet 取并集；按行的精确集合见
+    `phase1_targets.get_readonly_keywords(analysis)`。
+    """
+    keywords = set()
+    try:
+        analyses = worksheet.getAnalyses() or []
+    except Exception:
+        return []
+    for analysis in analyses:
+        try:
+            keywords.update(get_marked_keywords(analysis))
+        except Exception:
+            continue
+    return sorted(keywords)
 
 
 def _interim_list_length(analysis, keyword):
@@ -1140,6 +1238,12 @@ def _build_slot(analysis, analysis_uid, analysis_title, keyword, definition,
         "value_type": definition.get("value_type", "string"),
         "allow_multi_assign": definition.get("allow_multi_assign", False),
         "sort_order": definition.get("sort_order", 0),
+        # 两个采集标记与角色元数据：模板按 role 决定渲染成录入框还是接收区，
+        # 按 acquisition_group 分组成行
+        "acquisition_role": definition.get("acquisition_role", u""),
+        "acquisition_group": definition.get("acquisition_group", 0),
+        "manual_input": definition.get("manual_input", False),
+        "interim_index": definition.get("interim_index", 0),
         "seq": seq,
         "is_extra": seq > 0,
         "is_array": bool(is_array),
@@ -1155,14 +1259,20 @@ def _build_slot(analysis, analysis_uid, analysis_title, keyword, definition,
     }
 
 
-def get_array_keywords(analysis):
-    """返回分析项的数组类型字段关键字（result_type 为 list/multiselect 等）"""
+def get_array_keywords(analysis, group=None):
+    """返回分析行上**被标为采集目标**且是数组类型的 keyword
+
+    :param group: 给定时只返回该 `acquisition_group` 的字段。
+        ★ 必须支持按组过滤：`add_target_row` / `remove_target_row` 用它决定
+        "一次给哪些字段加/删一行"。不按组过滤的话，给第 1 组加行会连带给
+        第 2 组也加一行（Backlog S5 裁决⑧ —— 这是写路径，比锚点错更严重）。
+    """
     keywords = []
-    for interim in (analysis.getInterimFields() or []):
-        keyword = interim.get("keyword")
-        if keyword in PHASE1_KEYWORDS and is_array_result_type(
-                interim.get("result_type")):
-            keywords.append(keyword)
+    for definition in build_target_definitions(analysis):
+        if group is not None and definition["acquisition_group"] != group:
+            continue
+        if is_array_result_type(definition.get("result_type")):
+            keywords.append(definition["interim_keyword"])
     return keywords
 
 
@@ -1196,8 +1306,13 @@ def _remove_saved_interim(analysis, keyword, seq):
     return False
 
 
-def add_target_row(worksheet, analysis_uid):
-    """数组字段手动添加一组目标位行（如 T_name + T_weight 同时加一行）
+def add_target_row(worksheet, analysis_uid, group=None):
+    """给某个采集组的数组字段手动添加一行（组内字段同时加，同一 seq）
+
+    :param group: `acquisition_group` 组号。★ 必须传：一个分析可以有多个组，
+        不限定组就会给**所有**组一起加行（Backlog S5 裁决⑧）。
+        为兼容旧的表单提交，None 时退回"该分析只有一个组"的场合；
+        真有多组而没传组号则拒绝，不猜。
 
     :returns: (success, message)
     """
@@ -1208,8 +1323,17 @@ def add_target_row(worksheet, analysis_uid):
     if not api.is_object(analysis):
         return False, u"无效的分析项"
 
-    # 该分析项的数组字段组（T_name + T_weight 等）
-    array_keywords = get_array_keywords(analysis)
+    if group is None:
+        # 没给组号：只有在该分析确实只有一个含数组字段的组时才能推断
+        groups = sorted(set(
+            d["acquisition_group"] for d in build_target_definitions(analysis)
+            if is_array_result_type(d.get("result_type"))))
+        if len(groups) > 1:
+            return False, u"该分析项有多个采集组，请指明要给哪一组添加行"
+        group = groups[0] if groups else None
+
+    # 该采集组内的数组字段（名称 + 重量 等）
+    array_keywords = get_array_keywords(analysis, group=group)
     if not array_keywords:
         return False, u"该分析项没有数组类型字段，无需添加行"
 
@@ -1255,7 +1379,7 @@ def analysis_title_of(analysis):
 
 
 def remove_target_row(worksheet, target_key):
-    """删除数组字段的手动添加行（按组删除：同序号的 T_name+T_weight 一起删）
+    """删除数组字段的手动添加行（按组删除：同采集组、同序号的字段一起删）
 
     兼容"已保存回显行"（无 assignment、值来自 analysis interim）：
     同时从 interim 数组移除对应元素，避免再次进入时回显恢复。
@@ -1272,11 +1396,16 @@ def remove_target_row(worksheet, target_key):
     assignments = data.get("assignments", {})
     events = data.setdefault("events", {})
 
-    # 该分析项的数组字段组，删除同 seq 的所有字段行
+    # 删除同 seq 的所有字段行，但**只在被删字段所属的采集组内**
+    # （裁决⑧：不限定组会连带删掉别的组的同序号行）
     try:
         analysis = api.get_object(analysis_uid)
         if api.is_object(analysis):
-            array_keywords = get_array_keywords(analysis)
+            definition = get_target_definition(analysis, keyword)
+            group = definition["acquisition_group"] if definition else None
+            array_keywords = get_array_keywords(analysis, group=group)
+            if not array_keywords:
+                array_keywords = [keyword]
         else:
             analysis = None
             array_keywords = [keyword]

@@ -5,8 +5,12 @@
 
   <!-- Worksheets 列表底部工具栏「仪器采集」按钮：
        通过官方 IListingViewAdapter 订阅者注入，
-       不覆盖视图、不声明 permission、不依赖 browser layer，
-       避免 Zope 4 的 ZCML 加载顺序 / 权限注册冲突问题 -->
+       不覆盖视图、不声明 permission，
+       避免 Zope 4 的 ZCML 加载顺序 / 权限注册冲突问题
+
+       ★ 这个签名**不含 request**，所以 ZCML 里插不了 layer=；
+       门控在工厂的 before_render() 里做（判 IInstrumentAcquisitionLayer）。
+       不判的话没装本 addon 的站点也会显示按钮 —— lint E17_UI_INJECTION_UNGATED。 -->
   <subscriber
       for="senaite.app.listing.interfaces.IListingView
            senaite.core.interfaces.IWorksheets"
@@ -15,11 +19,13 @@
       />
 
   <!-- 列表底部工具栏「仪器采集」动作：只能单选，进入采集页
-       （不依赖 browser layer，context 为 Worksheets 文件夹） -->
+       ★ for= 的第二项用本 addon 的 layer 而不是 IBrowserRequest：
+       原先把「外来内容 IWorksheets + 任意请求」这一对全局占了，
+       没装本 addon 的站点同样注册 —— lint W17_FOREIGN_ADAPTER_UNGATED。 -->
   <adapter
       name="workflow_action_instrument_acquisition"
       for="senaite.core.interfaces.IWorksheets
-           zope.publisher.interfaces.browser.IBrowserRequest"
+           maitux.instrument_acquisition.interfaces.IInstrumentAcquisitionLayer"
       factory="maitux.instrument_acquisition.browser.workflow.WorkflowActionInstrumentAcquisitionAdapter"
       provides="bika.lims.interfaces.IWorkflowActionAdapter"
       permission="zope.Public" />

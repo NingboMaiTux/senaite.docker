@@ -237,8 +237,13 @@
 
               <tal:empty condition="python:not view.get_targets()">
                 <div class="text-muted text-center py-4">
-                  当前 Worksheet 的分析行未包含仪器采集关键字
-                  （T_name / T_weight）。
+                  当前 Worksheet 的分析行没有被标记为仪器采集目标的字段。
+                  <div style="font-size:.8rem" class="mt-2">
+                    采集目标由 Calculation 的 interim 字段上的
+                    「采集角色」+「分组号」两列决定。<br/>
+                    ★ 这两个标记是建立分析时**快照**进分析行的：标记配好之后
+                    新建的样品才会出现在这里，已有的分析不会追溯。
+                  </div>
                 </div>
               </tal:empty>
 
@@ -254,17 +259,19 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <!-- 按组排版：同一组的 T_name + T_weight 并排（key-value）-->
+                  <!-- 按组排版：同一 acquisition_group 的字段并排（名称 + 重量）-->
                   <tal:group repeat="group view/get_target_groups">
-                    <tr tal:define="wt python:group['weight_slot'] or group['field_slots'][0]">
+                    <tr>
                       <td class="text-nowrap text-muted"
                           style="font-size:.8rem"
                           tal:content="group/group_title">第 1 组</td>
                       <td tal:content="group/analysis_title">分析</td>
-                      <!-- 名称（T_name）-->
+                      <!-- 名称（role=name，每组至多一个）-->
                       <td>
                         <tal:name condition="python:group['name_slot']"
                                   tal:define="target python:group['name_slot']">
+                          <div class="text-muted" style="font-size:.75rem"
+                               tal:content="target/display_title">字段</div>
                           <form class="form-inline" method="post">
                             <input type="hidden" name="action" value="set_name"/>
                             <input type="hidden" name="target_key"
@@ -283,10 +290,14 @@
                           </div>
                         </tal:name>
                       </td>
-                      <!-- 重量（T_weight）-->
+                      <!-- 重量（role=weight）：★ 一组里可以有任意多个，
+                           纵向堆叠在这一个单元格内（表头固定 5 列）。
+                           代码里不出现"2 个"这类假设 —— 见 Backlog S5 判据②b -->
                       <td>
-                        <tal:weight condition="python:group['weight_slot']"
-                                    tal:define="target python:group['weight_slot']">
+                        <tal:weight repeat="target group/weight_slots">
+                          <div tal:attributes="class python:'pt-2 mt-2 border-top' if not repeat['target'].start else ''">
+                          <div class="text-muted" style="font-size:.75rem"
+                               tal:content="target/display_title">字段</div>
                           <span class="badge badge-warning mr-1"
                                 tal:condition="python:target['status'] == 'pending'">待称量</span>
                           <span class="badge badge-success mr-1"
@@ -329,6 +340,7 @@
                             <button class="btn btn-sm btn-success"
                                     type="submit">绑定</button>
                           </form>
+                          </div>
                         </tal:weight>
                       </td>
                       <!-- 操作：添加行 / 删除（独立列，不与徽章混排）-->
@@ -338,16 +350,20 @@
                             <input type="hidden" name="action" value="add_target_row"/>
                             <input type="hidden" name="analysis_uid"
                                    tal:attributes="value group/analysis_uid"/>
+                            <!-- ★ 组号必须一起提：一个分析可以有多个采集组，
+                                 不带组号会给所有组一起加行（S5 裁决⑧）-->
+                            <input type="hidden" name="acquisition_group"
+                                   tal:attributes="value group/acquisition_group"/>
                             <button class="btn btn-sm btn-outline-primary"
                                     type="submit"
-                                    title="添加一组（名称 + 重量）">+ 添加行</button>
+                                    title="给本组添加一行（组内各字段同时加）">+ 添加行</button>
                           </form>
                         </tal:addrow>
                         <tal:delrow condition="python:group['is_extra']">
                           <form class="d-inline" method="post">
                             <input type="hidden" name="action" value="remove_target_row"/>
                             <input type="hidden" name="target_key"
-                                   tal:attributes="value python:group['weight_slot'] and group['weight_slot']['target_key'] or group['field_slots'][0]['target_key']"/>
+                                   tal:attributes="value python:(group['weight_slots'] or group['field_slots'])[0]['target_key']"/>
                             <button class="btn btn-sm btn-outline-danger ml-1"
                                     type="submit">删除</button>
                           </form>

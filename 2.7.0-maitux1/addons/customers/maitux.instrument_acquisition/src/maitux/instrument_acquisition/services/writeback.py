@@ -3,7 +3,8 @@
 
 "统一保存"时，将当前分配关系写回 Worksheet 对应分析行的指定 Interim 字段：
 
-- 只允许回写 `phase1_targets.PHASE1_TARGET_DEFINITIONS` 中定义的目标位
+- 只允许回写"在该分析行上被标成采集目标"的字段
+  （`phase1_targets.get_target_definition(analysis, keyword)` 判定）
 - 一条读数对应多个目标位时，多个目标位写入同一 event_id 来源（同源引用）
 - 第一阶段只写 Interim 字段，不扩展普通结果字段
 - 回写成功后更新 annotations 中的读数状态为 saved
@@ -14,7 +15,9 @@ import logging
 
 from bika.lims import api
 
-from maitux.instrument_acquisition.services.phase1_targets import PHASE1_KEYWORDS
+from maitux.instrument_acquisition.services.phase1_targets import (
+    get_target_definition,
+)
 from maitux.instrument_acquisition.services.phase1_targets import (
     is_array_result_type,
 )
@@ -107,10 +110,12 @@ def save(worksheet):
     events = data.get("events", {})
 
     # 按 (analysis_uid, keyword) 分组收集 (seq, value)
+    # ★ "是不是采集目标"要拿到分析对象才能判（标记在分析的 interim 快照上），
+    # 所以这里只做形状校验，按行校验放在下面的写循环里。
     groups = {}
     for target_key, assignment in assignments.items():
         analysis_uid, keyword, seq = parse_target_key_full(target_key)
-        if not keyword or keyword not in PHASE1_KEYWORDS:
+        if not analysis_uid or not keyword:
             continue
         value = _resolve_value(assignment, events)
         if value is None or value == u"":
@@ -129,6 +134,14 @@ def save(worksheet):
             analysis = api.get_object(analysis_uid)
             if not api.is_object(analysis):
                 skipped += 1
+                continue
+            # ★ 按行校验：该 keyword 必须在**这个分析行**上被标成采集目标。
+            # 原实现是全局白名单，任意分析上的 T_name/T_weight 都放行。
+            if get_target_definition(analysis, keyword) is None:
+                skipped += 1
+                logger.warning(
+                    "Writeback skipped: %s is not an acquisition target on %s",
+                    keyword, analysis_uid)
                 continue
             if _is_array_interim(analysis, keyword):
                 # 数组字段：所有行写为一个 JSON 数组

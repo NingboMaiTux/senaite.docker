@@ -15,8 +15,8 @@ from maitux.reviewerassignment.browser.manage_results import (
     ManageResultsView as ReviewerManageResultsView,
 )
 
-from maitux.instrument_acquisition.services.phase1_targets import (
-    get_readonly_keywords,
+from maitux.instrument_acquisition.services.session_store import (
+    collect_readonly_keywords,
 )
 from maitux.instrument_acquisition.services.session_store import (
     get_active_session,
@@ -64,9 +64,16 @@ class ManageResultsView(ReviewerManageResultsView):
         }
 
     def get_readonly_keywords(self):
-        """返回第一阶段只读保护的关键字列表"""
-        return get_readonly_keywords()
+        """返回本 Worksheet 需要只读保护的关键字列表
+
+        = 各分析行上被标成采集目标（`acquisition_role`/`acquisition_group`）
+        的 keyword 并集。★ 原先返回写死的 `("T_name", "T_weight")`。
+        """
+        try:
+            return collect_readonly_keywords(self.context)
+        except Exception:
+            return []
 
     def get_readonly_keywords_json(self):
         """返回只读关键字的 JSON 数组（供模板内 JS 使用）"""
-        return json.dumps(get_readonly_keywords())
+        return json.dumps(self.get_readonly_keywords())

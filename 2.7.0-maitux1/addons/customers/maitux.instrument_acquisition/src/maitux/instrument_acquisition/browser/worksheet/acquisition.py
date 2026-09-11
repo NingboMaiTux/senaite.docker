@@ -6,7 +6,7 @@
 - 展示中转站推送过来的原始读数（events）
 - 展示可分配目标位（target_key 抽象）
 - 支持一条读数分配给多个目标位、撤销分配、废弃读数
-- 支持 T_name 目标位手工填写名称
+- 支持 role=name 的目标位手工填写名称
 - 统一保存回写（writeback.save）
 - 展示完整操作日志
 
@@ -25,12 +25,7 @@ from bika.lims import api
 
 from maitux.instrument_acquisition.api.views import _json_safe
 
-from maitux.instrument_acquisition.services.phase1_targets import (
-    T_NAME_KEYWORD,
-)
-from maitux.instrument_acquisition.services.phase1_targets import (
-    get_readonly_keywords,
-)
+from maitux.instrument_acquisition.services.phase1_targets import ROLE_NAME
 from maitux.instrument_acquisition.services.session_store import (
     assign_reading,
 )
@@ -77,8 +72,10 @@ from maitux.instrument_acquisition.services.writeback import save
 
 ACQUISITION_VIEW_NAME = "worksheet_instrument_acquisition"
 
-# 允许的名称关键字（可手工填写）
-MANUAL_NAME_KEYWORDS = (T_NAME_KEYWORD,)
+
+# ★ 原先这里写死 `MANUAL_NAME_KEYWORDS = ("T_name",)`。"哪些字段可手工填写"
+# 现在由 interim 标记的角色决定（`role=name` → `manual_input=True`），
+# 按分析行算，见 `_manual_name_keywords()`。
 
 
 class InstrumentAcquisitionView(BrowserView):
@@ -144,10 +141,18 @@ class InstrumentAcquisitionView(BrowserView):
             close_session(self.context)
             self.add_status_message(u"采集会话已关闭。", "info")
         elif action == "add_target_row":
-            # 数组字段按组添加（T_name + T_weight 同时加一行）
+            # 数组字段按采集组添加（组内名称 + 重量 同时加一行）
             analysis_uid = api.safe_unicode(
                 form.get("analysis_uid", "")).strip()
-            ok, message = add_target_row(self.context, analysis_uid)
+            # ★ 组号必须一起提：一个分析可以有多个 acquisition_group，
+            # 不带组号会给所有组一起加行（Backlog S5 裁决⑧）
+            group = api.safe_unicode(
+                form.get("acquisition_group", "")).strip()
+            try:
+                group = int(group) if group else None
+            except (TypeError, ValueError):
+                group = None
+            ok, message = add_target_row(self.context, analysis_uid, group)
             self.add_status_message(message, "info" if ok else "warning")
         elif action == "remove_target_row":
             target_key = api.safe_unicode(
@@ -234,8 +239,8 @@ class InstrumentAcquisitionView(BrowserView):
         self._prepare()
         data = dict(self._data or {})
         data["session_error"] = self._session_error or u""
-        data["readonly_keywords"] = get_readonly_keywords()
-        data["manual_name_keywords"] = list(MANUAL_NAME_KEYWORDS)
+        data["readonly_keywords"] = self.get_readonly_keywords()
+        data["manual_name_keywords"] = self._manual_name_keywords()
         data["listening"] = self.is_listening()
         data["relay"] = self.get_relay_state()
         return data
@@ -456,10 +461,23 @@ class InstrumentAcquisitionView(BrowserView):
         return data.get("counts", {})
 
     def get_readonly_keywords(self):
-        return get_readonly_keywords()
+        """本 Worksheet 各分析行上被标成采集目标的 keyword 并集"""
+        try:
+            from maitux.instrument_acquisition.services import session_store
+            return session_store.collect_readonly_keywords(self.context)
+        except Exception:
+            return []
+
+    def _manual_name_keywords(self):
+        """可手工填写的 keyword（`role=name` 的那些），按本 Worksheet 取并集"""
+        keywords = set()
+        for slot in (self._data or {}).get("targets", []) or []:
+            if slot.get("acquisition_role") == ROLE_NAME:
+                keywords.add(slot.get("interim_keyword"))
+        return sorted(k for k in keywords if k)
 
     def is_manual_name_keyword(self, keyword):
-        return keyword in MANUAL_NAME_KEYWORDS
+        return keyword in self._manual_name_keywords()
 
     def get_reading_options(self):
         """返回可分配的读数下拉选项（pending/assigned 状态）"""
