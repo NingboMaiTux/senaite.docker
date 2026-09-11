@@ -974,6 +974,7 @@ def build_target_slots(worksheet, data=None):
         analysis_uid = api.get_uid(analysis)
         # py2 下 api.get_title 可能返回 str(bytes) 中文，模板渲染会崩溃，统一转 unicode
         analysis_title = analysis_title_of(analysis)
+        sample_id = sample_id_of(analysis)
         # ★ 按行推导目标位定义（原先是全局的 get_target_definitions()）。
         # 定义已按 (角色次序, 快照出现序) 排好，下面的 [-1] 依赖这个次序。
         definitions = build_target_definitions(
@@ -1036,12 +1037,18 @@ def build_target_slots(worksheet, data=None):
                         and s.get("seq") == max_seq):
                     s["is_add_row_anchor"] = True
 
+        for slot in analysis_slots:
+            slot["sample_id"] = sample_id
         slots.extend(analysis_slots)
 
-    # 排序：同一分析的同一组连在一起，组内按角色次序（名称在前、重量在后）。
+    # 排序：**样品优先**，然后同一分析的同一组连在一起，组内按角色次序。
+    # ★ 样品做首键是有意的：一个 Worksheet 装多个样品的同一个 AS 时
+    # （WS-008 的三行都是「有关物质-系统适用性」），按样品聚在一起，
+    # 操作者才能一个样品一个样品地称。
     # ★ 原先首键是 sort_order，会把所有分析的"名称"排到所有"重量"之前 ——
     # 有了分组之后那样排会让"分配目标"下拉里同一行的字段彼此隔很远。
-    slots.sort(key=lambda s: (s["analysis_title"],
+    slots.sort(key=lambda s: (s.get("sample_id", u""),
+                              s["analysis_title"],
                               s.get("acquisition_group", 0),
                               s.get("seq", 0),
                               s.get("sort_order", 0),
@@ -1082,6 +1089,7 @@ def build_target_groups(worksheet, data=None):
                 "acquisition_group": group_no,
                 "analysis_uid": slot["analysis_uid"],
                 "analysis_title": slot["analysis_title"],
+                "sample_id": slot.get("sample_id", u""),
                 "is_extra": seq > 0,
                 "is_array": slot.get("is_array", False),
                 "is_add_row_anchor": False,
@@ -1097,7 +1105,8 @@ def build_target_groups(worksheet, data=None):
             group["is_add_row_anchor"] = True
 
     result = sorted(groups.values(),
-                    key=lambda g: (g["analysis_title"],
+                    key=lambda g: (g.get("sample_id", u""),
+                                   g["analysis_title"],
                                    g["acquisition_group"], g["seq"]))
     for group in result:
         # 供模板遍历：按 (角色次序, 快照出现序) 排列的字段行
@@ -1233,6 +1242,9 @@ def _build_slot(analysis, analysis_uid, analysis_title, keyword, definition,
         "target_key": target_key,
         "analysis_uid": analysis_uid,
         "analysis_title": analysis_title,
+        # 所属样品（AR）ID，由 build_target_slots 统一填入（见 sample_id_of）。
+        # 同一 Worksheet 常有多个样品的同一个 AS，缺了它界面上分不清行。
+        "sample_id": u"",
         "interim_keyword": keyword,
         "display_title": definition.get("display_title", keyword),
         "value_type": definition.get("value_type", "string"),
@@ -1374,6 +1386,29 @@ def analysis_title_of(analysis):
     try:
         return api.safe_unicode(api.get_title(analysis)
                                 or api.get_id(analysis))
+    except Exception:
+        return u""
+
+
+def sample_id_of(analysis):
+    """返回分析所属样品（AR）的 ID，如 `S-0007`；取不到返回 u""
+
+    ★ 采集页**必须**显示它：一个 Worksheet 常常装着多个样品的**同一个** AS
+    （实测 WS-008 的三行全是「有关物质-系统适用性」，分别属于 S-0007 /
+    S-0008 / S-0009）。只显示分析标题的话三行一模一样，操作者分不清
+    自己在给哪个样品称量。
+    """
+    try:
+        get_request_id = getattr(analysis, "getRequestID", None)
+        if get_request_id is not None:
+            request_id = get_request_id()
+            if request_id:
+                return api.safe_unicode(request_id)
+    except Exception:
+        pass
+    # 回退：分析挂在 AR 下，父对象的 id 就是样品 ID
+    try:
+        return api.safe_unicode(api.get_id(api.get_parent(analysis)) or u"")
     except Exception:
         return u""
 

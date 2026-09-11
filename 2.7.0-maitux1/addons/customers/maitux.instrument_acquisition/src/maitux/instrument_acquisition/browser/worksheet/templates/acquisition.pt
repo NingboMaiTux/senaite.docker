@@ -251,7 +251,10 @@
                      tal:condition="python:view.get_target_groups()">
                 <thead>
                   <tr>
-                    <th style="width:80px">组</th>
+                    <!-- ★ 样品列不可省：一个 Worksheet 常装多个样品的同一个 AS，
+                         只显示分析标题时各行一模一样，分不清在给谁称量 -->
+                    <th style="width:90px">样品</th>
+                    <th style="width:70px">组</th>
                     <th>分析</th>
                     <th>名称</th>
                     <th style="min-width:220px">重量</th>
@@ -262,6 +265,11 @@
                   <!-- 按组排版：同一 acquisition_group 的字段并排（名称 + 重量）-->
                   <tal:group repeat="group view/get_target_groups">
                     <tr>
+                      <td class="text-nowrap">
+                        <span class="badge badge-light border"
+                              style="font-size:.8rem"
+                              tal:content="group/sample_id">S-0000</span>
+                      </td>
                       <td class="text-nowrap text-muted"
                           style="font-size:.8rem"
                           tal:content="group/group_title">第 1 组</td>

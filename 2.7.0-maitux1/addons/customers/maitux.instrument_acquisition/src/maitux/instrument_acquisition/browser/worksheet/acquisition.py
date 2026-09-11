@@ -497,18 +497,23 @@ class InstrumentAcquisitionView(BrowserView):
         return options
 
     def get_target_label(self, target):
-        """目标位下拉显示文案（带组序号，如 "重量 · 重量 1"）
+        """目标位下拉文案，如 "S-0007 · 有关物质-系统适用性 · 对照品1称样量(mg)"
+
+        ★ 必须带 Sample ID：同一 Worksheet 装多个样品的同一个 AS 时
+        （WS-008 三行都是「有关物质-系统适用性」），缺了它下拉里就是三条
+        一模一样的选项，选错了也看不出来。
 
         row_title 含序号（重量 1/重量 2…），区分同分析项的多行；
         unicode 拼接，避免 py2 下 '·' 字面量崩溃。
         """
-        return u"%s \u00b7 %s" % (
-            api.safe_unicode(target.get("analysis_title") or u""),
-            api.safe_unicode(target.get("row_title")
-                             or target.get("display_title") or u""))
+        parts = [target.get("sample_id") or u"",
+                 target.get("analysis_title") or u"",
+                 target.get("row_title") or target.get("display_title") or u""]
+        return u" \u00b7 ".join(
+            [api.safe_unicode(part) for part in parts if part])
 
     def get_target_groups(self):
-        """目标位按组（seq）分组（key-value 排版：名称+重量并排）"""
+        """目标位按 (样品, 采集组, 行号) 分组（名称 + 重量 并排）"""
         try:
             from maitux.instrument_acquisition.services import session_store
             return session_store.build_target_groups(self.context)
