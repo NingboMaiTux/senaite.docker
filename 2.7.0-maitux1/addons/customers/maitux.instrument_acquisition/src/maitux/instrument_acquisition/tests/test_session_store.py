@@ -985,5 +985,41 @@ class SyncSiblingsTest(unittest.TestCase):
                          assignments)
 
 
+@unittest.skipUnless(_IMPORT_OK, "Zope 环境不可用，跳过标签测试")
+class GroupAndRowLabelTest(unittest.TestCase):
+    """「组」= acquisition_group；数组行号是另一回事
+
+    ★ 这条曾经错过一次：S5 把分组键改成了三元组，却把标签留成
+    `u"第 %s 组" % (seq + 1)` —— 同一组的第 2 行被印成「第 2 组」。
+    用户 2026-09-11 指正。钉在这里，别再回去。
+    """
+
+    def test_group_title_is_group_not_seq(self):
+        # 同一组的不同行，组标题必须**相同**
+        self.assertEqual(session_store._group_title(1),
+                         session_store._group_title(1))
+        self.assertEqual(session_store._group_title(1), u"第 1 组")
+        self.assertEqual(session_store._group_title(2), u"第 2 组")
+
+    def test_group_title_takes_no_seq(self):
+        """签名里不该再有 seq —— 有 seq 就是又把行号混进组号了"""
+        import inspect
+        try:
+            args = inspect.getargspec(session_store._group_title).args
+        except AttributeError:  # py3
+            args = list(inspect.signature(
+                session_store._group_title).parameters)
+        self.assertEqual(args, ["group_no"])
+
+    def test_row_label_only_for_array_groups(self):
+        # 非数组组只有一行，不印行号（噪音）
+        self.assertEqual(session_store._row_label(False, 0), u"")
+        self.assertEqual(session_store._row_label(False, 3), u"")
+        # 数组组每行都印，且是 1 起
+        self.assertEqual(session_store._row_label(True, 0), u"第 1 行")
+        self.assertEqual(session_store._row_label(True, 1), u"第 2 行")
+        self.assertEqual(session_store._row_label(True, 5), u"第 6 行")
+
+
 if __name__ == "__main__":
     unittest.main()

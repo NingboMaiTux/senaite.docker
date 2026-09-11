@@ -891,7 +891,7 @@ def unassign_reading(worksheet, target_key):
                 "assigned_at": _now(),
             }
             add_log(worksheet, "unassign",
-                    u"撤销 %s 第 %s 组已保存值，可重新绑定" % (keyword, seq))
+                    u"撤销 %s 第 %s 行已保存值，可重新绑定" % (keyword, seq + 1))
             _commit(worksheet, data)
             return True, u"已撤销，可重新绑定"
         return False, u"目标位 %s 未分配" % target_key
@@ -1096,7 +1096,7 @@ def build_target_groups(worksheet, data=None):
                 "is_extra": seq > 0,
                 "is_array": slot.get("is_array", False),
                 "is_add_row_anchor": False,
-                "group_title": _group_title(group_no, seq),
+                "group_title": _group_title(group_no),
                 "slots": {},
             }
             groups[key] = group
@@ -1124,6 +1124,8 @@ def build_target_groups(worksheet, data=None):
         # 名称按语义每组至多一个（allow_multi_assign=False），给模板留个便捷键
         group["name_slot"] = (group["name_slots"][0]
                               if group["name_slots"] else None)
+        # 行号标签：组内有数组字段时才有意义（is_array 在上面的聚合里已定）
+        group["row_label"] = _row_label(group.get("is_array"), group["seq"])
 
     # 兄弟样品数：同一个 AS、同一采集组、同一行号，但在其它样品上。
     # 模板拿它决定要不要出「同步到其它 N 个样品」按钮（单样品时不出）。
@@ -1268,14 +1270,30 @@ def sync_group_to_siblings(worksheet, analysis_uid, group, seq=0):
     return True, message
 
 
-def _group_title(group_no, seq):
-    """组标题：多个 acquisition_group 时要能区分是哪一组的第几行
+def _group_title(group_no):
+    """组标题 = `acquisition_group`，**与数组行号无关**
 
-    单组（最常见）时保持原文案「第 N 组」不变，避免无谓的界面变化。
+    ★ 「组」表达的是"哪些 keyword 绑在一起"（需求方案 §4.1：同组字段
+    绑同一行）。list 型字段点「添加行」是在**同一组内**多一行数据，
+    **组不变** —— 行号由 `_row_label()` 单独显示。
+
+    ★ 原实现是 `u"第 %s 组" % (seq + 1)`，把**行号印成了组号**：同一组的
+    第 2 行会显示成「第 2 组」。那正是 S5 事实② 点出的概念混淆
+    （现有的「组」其实是数组行号 seq）—— 当时只改了分组键、标签留成
+    原样，是错误判断，2026-09-11 由用户指正后改正。
     """
-    if group_no > 1:
-        return u"组%s · 第 %s 行" % (group_no, seq + 1)
-    return u"第 %s 组" % (seq + 1)
+    return u"第 %s 组" % group_no
+
+
+def _row_label(is_array, seq):
+    """数组组的行号标签（「第 N 行」）；非数组组返回 u""
+
+    非数组组只有一行，印个行号是噪音；数组组**每行都印**，这样"有多行"
+    这件事本身也看得见。
+    """
+    if not is_array:
+        return u""
+    return u"第 %s 行" % (seq + 1)
 
 
 def collect_readonly_keywords(worksheet):
@@ -1521,11 +1539,11 @@ def add_target_row(worksheet, analysis_uid, group=None):
             "assigned_at": _now(),
         }
     add_log(worksheet, "add_row",
-            u"为 %s 添加第 %s 组数据（%s）" % (
-                analysis_title_of(analysis), new_seq,
+            u"为 %s 的第 %s 组添加第 %s 行（%s）" % (
+                analysis_title_of(analysis), group, new_seq + 1,
                 u"、".join(array_keywords)))
     _commit(worksheet, data)
-    return True, u"已添加第 %s 组数据" % new_seq
+    return True, u"已在第 %s 组添加第 %s 行" % (group, new_seq + 1)
 
 
 def analysis_title_of(analysis):
@@ -1636,9 +1654,9 @@ def remove_target_row(worksheet, target_key):
         return False, u"行不存在或已删除"
 
     add_log(worksheet, "remove_row",
-            u"删除 %s 的第 %s 组数据" % (keyword, seq))
+            u"删除 %s 的第 %s 行数据" % (keyword, seq + 1))
     _commit(worksheet, data)
-    return True, u"已删除第 %s 组数据" % seq
+    return True, u"已删除第 %s 行数据" % (seq + 1)
 
 
 def get_page_data(worksheet):

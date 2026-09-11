@@ -270,9 +270,16 @@
                               style="font-size:.8rem"
                               tal:content="group/sample_id">S-0000</span>
                       </td>
+                      <!-- 「组」= acquisition_group（哪些 keyword 绑在一起）；
+                           数组的行号是另一回事，小字单独印在下面。
+                           点「添加行」只增行、**不换组**。 -->
                       <td class="text-nowrap text-muted"
-                          style="font-size:.8rem"
-                          tal:content="group/group_title">第 1 组</td>
+                          style="font-size:.8rem">
+                        <div tal:content="group/group_title">第 1 组</div>
+                        <div class="text-muted" style="font-size:.72rem"
+                             tal:condition="group/row_label"
+                             tal:content="group/row_label">第 1 行</div>
+                      </td>
                       <td tal:content="group/analysis_title">分析</td>
                       <!-- 名称（role=name，每组至多一个）-->
                       <td>
