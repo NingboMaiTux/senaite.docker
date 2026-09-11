@@ -68,6 +68,9 @@ from maitux.instrument_acquisition.services.session_store import (
 from maitux.instrument_acquisition.services.session_store import (
     unassign_reading,
 )
+from maitux.instrument_acquisition.services.session_store import (
+    sync_group_to_siblings,
+)
 from maitux.instrument_acquisition.services.writeback import save
 
 ACQUISITION_VIEW_NAME = "worksheet_instrument_acquisition"
@@ -153,6 +156,25 @@ class InstrumentAcquisitionView(BrowserView):
             except (TypeError, ValueError):
                 group = None
             ok, message = add_target_row(self.context, analysis_uid, group)
+            self.add_status_message(message, "info" if ok else "warning")
+        elif action == "sync_siblings":
+            # 一次称量写进本工作表其它样品的同名分析（系统适用性那类）。
+            # ★ 不是配置驱动的"共用"语义 —— 是操作者点一下代替点 N 遍。
+            analysis_uid = api.safe_unicode(
+                form.get("analysis_uid", "")).strip()
+            group = api.safe_unicode(
+                form.get("acquisition_group", "")).strip()
+            seq = api.safe_unicode(form.get("seq", "")).strip()
+            try:
+                group = int(group) if group else 0
+            except (TypeError, ValueError):
+                group = 0
+            try:
+                seq = int(seq) if seq else 0
+            except (TypeError, ValueError):
+                seq = 0
+            ok, message = sync_group_to_siblings(
+                self.context, analysis_uid, group, seq)
             self.add_status_message(message, "info" if ok else "warning")
         elif action == "remove_target_row":
             target_key = api.safe_unicode(

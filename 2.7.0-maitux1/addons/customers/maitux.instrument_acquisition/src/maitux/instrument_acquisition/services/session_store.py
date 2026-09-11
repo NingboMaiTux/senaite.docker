@@ -975,6 +975,7 @@ def build_target_slots(worksheet, data=None):
         # py2 下 api.get_title 可能返回 str(bytes) 中文，模板渲染会崩溃，统一转 unicode
         analysis_title = analysis_title_of(analysis)
         sample_id = sample_id_of(analysis)
+        analysis_keyword = analysis_keyword_of(analysis)
         # ★ 按行推导目标位定义（原先是全局的 get_target_definitions()）。
         # 定义已按 (角色次序, 快照出现序) 排好，下面的 [-1] 依赖这个次序。
         definitions = build_target_definitions(
@@ -1039,6 +1040,7 @@ def build_target_slots(worksheet, data=None):
 
         for slot in analysis_slots:
             slot["sample_id"] = sample_id
+            slot["analysis_keyword"] = analysis_keyword
         slots.extend(analysis_slots)
 
     # 排序：**样品优先**，然后同一分析的同一组连在一起，组内按角色次序。
@@ -1090,6 +1092,7 @@ def build_target_groups(worksheet, data=None):
                 "analysis_uid": slot["analysis_uid"],
                 "analysis_title": slot["analysis_title"],
                 "sample_id": slot.get("sample_id", u""),
+                "analysis_keyword": slot.get("analysis_keyword", u""),
                 "is_extra": seq > 0,
                 "is_array": slot.get("is_array", False),
                 "is_add_row_anchor": False,
@@ -1121,7 +1124,148 @@ def build_target_groups(worksheet, data=None):
         # 名称按语义每组至多一个（allow_multi_assign=False），给模板留个便捷键
         group["name_slot"] = (group["name_slots"][0]
                               if group["name_slots"] else None)
+
+    # 兄弟样品数：同一个 AS、同一采集组、同一行号，但在其它样品上。
+    # 模板拿它决定要不要出「同步到其它 N 个样品」按钮（单样品时不出）。
+    for group in result:
+        peers = [g for g in result
+                 if g.get("analysis_keyword")
+                 and g.get("analysis_keyword") == group.get("analysis_keyword")
+                 and g["acquisition_group"] == group["acquisition_group"]
+                 and g["seq"] == group["seq"]
+                 and g["analysis_uid"] != group["analysis_uid"]]
+        group["sibling_sample_count"] = len(peers)
+        group["sibling_sample_ids"] = sorted(
+            set(g.get("sample_id") or u"" for g in peers) - set([u""]))
     return result
+
+
+def find_sibling_analyses(worksheet, analysis_uid, analysis_keyword=None):
+    """本工作表内"同一个 AS、不同样品"的其它分析
+
+    ★ 为什么需要它：系统适用性这类测定现实上只称一次，但 SENAITE 要求
+    **每个 AR 下都有**这个分析（一个 Sample 上同一个 AS 只能有一个，见根
+    CLAUDE.md §6.3.3）—— 于是同一个称量值要落到 N 个样品的分析上。
+    分配本来就是人做的，这里只解决**别让他点 N 遍**。
+    """
+    siblings = []
+    try:
+        analyses = worksheet.getAnalyses() or []
+    except Exception:
+        return siblings
+    if not analysis_keyword:
+        for analysis in analyses:
+            if api.get_uid(analysis) == analysis_uid:
+                analysis_keyword = analysis_keyword_of(analysis)
+                break
+    if not analysis_keyword:
+        return siblings
+    for analysis in analyses:
+        try:
+            if api.get_uid(analysis) == analysis_uid:
+                continue
+            if analysis_keyword_of(analysis) != analysis_keyword:
+                continue
+        except Exception:
+            continue
+        siblings.append(analysis)
+    return siblings
+
+
+def sync_group_to_siblings(worksheet, analysis_uid, group, seq=0):
+    """把本组已填/已绑的值一次同步到其它样品的同名分析
+
+    每样品仍各占一行（用户 2026-09-11 裁决）—— 能看到每个 AR 确实都有值；
+    本函数只把"点 N 遍"变成"点一遍"。
+
+    ★ 没有新增任何标记："哪个字段是共用的"由**操作者点这个按钮**表达，
+    不写进配置（用户裁决：分配本来就由人完成，问题只在方不方便）。
+
+    ★ 复用 `assign_reading` / `set_manual_value` 逐个写，**不自己另写一套记账**
+    —— 读数的 `targets` 列表、状态流转、日志都在那两个函数里，绕过它们就会
+    出现"分配了但读数里没记"这种不一致。
+
+    :returns: (success, message)
+    """
+    try:
+        analysis = api.get_object(analysis_uid)
+    except Exception:
+        analysis = None
+    if not api.is_object(analysis):
+        return False, u"无效的分析项"
+
+    analysis_keyword = analysis_keyword_of(analysis)
+    siblings = find_sibling_analyses(worksheet, analysis_uid, analysis_keyword)
+    if not siblings:
+        return False, u"本工作表内没有其它样品的同名分析，无需同步"
+
+    data = get_session_data(worksheet)
+    assignments = data.get("assignments", {})
+
+    # 收集源组里确实有值的槽位
+    sources = []
+    for definition in build_target_definitions(analysis):
+        if definition["acquisition_group"] != group:
+            continue
+        keyword = definition["interim_keyword"]
+        source_key = make_target_key(analysis_uid, keyword, seq)
+        assignment = assignments.get(source_key)
+        if not assignment:
+            continue
+        if assignment.get("source") == SOURCE_MANUAL:
+            if not assignment.get("value"):
+                continue
+        elif not assignment.get("event_id"):
+            continue
+        sources.append((keyword, assignment))
+    if not sources:
+        return False, u"本组还没有值可同步（先填写或绑定读数）"
+
+    synced = 0
+    overwritten = 0
+    skipped = []
+    for sibling in siblings:
+        sibling_uid = api.get_uid(sibling)
+        sibling_sample = sample_id_of(sibling) or sibling_uid
+        for keyword, assignment in sources:
+            # 兄弟行上该字段必须也被标为采集目标 —— 快照可能不一样：
+            # 标记导入前建的老分析根本没有这两个键
+            if get_target_definition(sibling, keyword) is None:
+                skipped.append(u"%s/%s" % (sibling_sample, keyword))
+                continue
+            target_key = make_target_key(sibling_uid, keyword, seq)
+            existing = assignments.get(target_key) or {}
+            if existing:
+                # 操作者主动点"同步"，覆盖是意图；但要在消息里说出来
+                same = (existing.get("event_id") == assignment.get("event_id")
+                        and existing.get("value") == assignment.get("value"))
+                if not same:
+                    overwritten += 1
+                unassign_reading(worksheet, target_key)
+            if assignment.get("source") == SOURCE_MANUAL:
+                ok, _msg = set_manual_value(
+                    worksheet, target_key, assignment.get("value"))
+            else:
+                ok, _msg = assign_reading(
+                    worksheet, assignment.get("event_id"), target_key)
+            if ok:
+                synced += 1
+            else:
+                skipped.append(u"%s/%s" % (sibling_sample, keyword))
+
+    add_log(worksheet, "sync_siblings",
+            u"把 %s 的第 %s 组同步到 %s 个样品，写入 %s 个目标位"
+            % (analysis_title_of(analysis), group, len(siblings), synced))
+    _commit(worksheet, get_session_data(worksheet))
+
+    message = u"已同步到 %s 个样品（写入 %s 个目标位）。" % (
+        len(siblings), synced)
+    if overwritten:
+        message += u"其中 %s 处覆盖了原有不同的值。" % overwritten
+    if skipped:
+        message += u"跳过 %s 处（未标记或写入失败）：%s" % (
+            len(skipped), u"、".join(skipped[:6]))
+    return True, message
 
 
 def _group_title(group_no, seq):
@@ -1245,6 +1389,9 @@ def _build_slot(analysis, analysis_uid, analysis_title, keyword, definition,
         # 所属样品（AR）ID，由 build_target_slots 统一填入（见 sample_id_of）。
         # 同一 Worksheet 常有多个样品的同一个 AS，缺了它界面上分不清行。
         "sample_id": u"",
+        # 所属分析的 AS keyword，同样由 build_target_slots 填入；
+        # “同值同步到其它样品”拿它找兄弟行。
+        "analysis_keyword": u"",
         "interim_keyword": keyword,
         "display_title": definition.get("display_title", keyword),
         "value_type": definition.get("value_type", "string"),
@@ -1388,6 +1535,22 @@ def analysis_title_of(analysis):
                                 or api.get_id(analysis))
     except Exception:
         return u""
+
+
+def analysis_keyword_of(analysis):
+    """返回分析对应的 AS keyword（如 `imp_sys_suit`）；取不到返回 u""
+
+    ★ 这是“同名分析”的匹配键：一次称量要写进本工作表内其它样品的
+    **同一个 AS** 时，拿它找兄弟行。用 keyword 而不用标题：标题可改（配置线
+    明确“AS 可以放心改中文名”），keyword 是身份。
+    """
+    try:
+        get_keyword = getattr(analysis, "getKeyword", None)
+        if get_keyword is not None:
+            return api.safe_unicode(get_keyword() or u"")
+    except Exception:
+        pass
+    return u""
 
 
 def sample_id_of(analysis):

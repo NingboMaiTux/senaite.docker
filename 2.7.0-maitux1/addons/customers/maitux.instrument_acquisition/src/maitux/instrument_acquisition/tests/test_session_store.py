@@ -69,10 +69,14 @@ try:
         光给一个 uid 字符串已经不够了。
         """
 
-        def __init__(self, uid, interims=None, result_type="numeric"):
+        def __init__(self, uid, interims=None, result_type="numeric",
+                     as_keyword="t_service", sample_id=None):
             self._uid = uid
             self.id = uid
             self.title = uid
+            # AS keyword：sync_group_to_siblings 拿它找"同一个 AS、不同样品"
+            self._as_keyword = as_keyword
+            self._sample_id = sample_id or (u"S-" + uid)
             self._interims = interims if interims is not None else [
                 _marked_interim(TEST_NAME_KEYWORD, ROLE_NAME, 1, result_type),
                 _marked_interim(TEST_WEIGHT_KEYWORD, ROLE_WEIGHT, 1,
@@ -81,6 +85,12 @@ try:
 
         def UID(self):
             return self._uid
+
+        def getKeyword(self):
+            return self._as_keyword
+
+        def getRequestID(self):
+            return self._sample_id
 
         def getInterimFields(self):
             return [dict(item) for item in self._interims]
@@ -837,6 +847,142 @@ class AgentModeSessionStoreTest(unittest.TestCase):
         self.assertIsNone(
             session_store.resolve_listening_worksheet_by_instrument(
                 self.worksheet, "BALANCE-02")[0])
+
+
+@unittest.skipUnless(_IMPORT_OK, "Zope 环境不可用，跳过同步测试")
+class SyncSiblingsTest(unittest.TestCase):
+    """一次称量写进本工作表其它样品的同名分析（S8）
+
+    ★ 场景（WS-008 实测）：系统适用性现实上只称一次，但 SENAITE 要求每个
+    AR 下都有这个分析，于是同一个值要落到 N 个样品上。分配由人完成，
+    本功能只把"点 N 遍"变成"点一遍"。
+    """
+
+    def setUp(self):
+        self._orig = {}
+        self._patch("get_uid", lambda obj: obj.UID())
+        self._patch("get_id", lambda obj: getattr(
+            obj, "code", getattr(obj, "id", obj.UID())))
+        self._patch("get_title", lambda obj: getattr(
+            obj, "title", obj.UID()))
+        self._patch("get_path", lambda obj: obj.UID())
+        self._patch("is_object", lambda obj: True)
+        self._patch("get_parent", lambda obj: obj)
+
+        # 三个样品上的同一个 AS（as_keyword 相同），外加一个不同 AS 作对照
+        self.a1 = FakeAnalysis("a1", sample_id=u"S-0007")
+        self.a2 = FakeAnalysis("a2", sample_id=u"S-0008")
+        self.a3 = FakeAnalysis("a3", sample_id=u"S-0009")
+        self.other = FakeAnalysis("b1", as_keyword="t_other",
+                                  sample_id=u"S-0007")
+        self.analyses = {"a1": self.a1, "a2": self.a2, "a3": self.a3,
+                         "b1": self.other}
+        self._patch("get_object", lambda uid: self.analyses.get(uid))
+
+        self._orig_portal = session_store._get_portal
+        self.portal = FakePortal()
+        session_store._get_portal = lambda context: self.portal
+
+        self.instrument = FakeInstrument("inst-1", "BALANCE-01", u"天平")
+        self.worksheet = FakeWorksheet(
+            "ws-sync", self.instrument,
+            analyses=[self.a1, self.a2, self.a3, self.other])
+
+    def tearDown(self):
+        session_store._get_portal = self._orig_portal
+        for name, original in self._orig.items():
+            if original is None:
+                delattr(bika_api, name)
+            else:
+                setattr(bika_api, name, original)
+
+    def _patch(self, name, func):
+        self._orig[name] = getattr(bika_api, name, None)
+        setattr(bika_api, name, func)
+
+    def _fill(self, analysis_uid, keyword, value):
+        ok, msg = session_store.set_manual_value(
+            self.worksheet, make_target_key(analysis_uid, keyword), value)
+        self.assertTrue(ok, msg)
+
+    # ------------------------------------------------------------------
+
+    def test_find_siblings_only_same_as_keyword(self):
+        siblings = session_store.find_sibling_analyses(self.worksheet, "a1")
+        uids = sorted(bika_api.get_uid(a) for a in siblings)
+        # 只认同一个 AS 的其它样品；不同 AS 的 b1 不算
+        self.assertEqual(uids, ["a2", "a3"])
+
+    def test_sync_writes_all_siblings(self):
+        self._fill("a1", TEST_NAME_KEYWORD, u"对乙酰氨基酚")
+        self._fill("a1", TEST_WEIGHT_KEYWORD, u"10.50")
+        ok, message = session_store.sync_group_to_siblings(
+            self.worksheet, "a1", 1, 0)
+        self.assertTrue(ok, message)
+        # 2 个兄弟 × 2 个字段 = 4 个目标位
+        self.assertIn(u"2 个样品", message)
+        self.assertIn(u"4 个目标位", message)
+        assignments = session_store.get_session_data(
+            self.worksheet)["assignments"]
+        for uid in ("a2", "a3"):
+            for kw, expected in ((TEST_NAME_KEYWORD, u"对乙酰氨基酚"),
+                                 (TEST_WEIGHT_KEYWORD, u"10.50")):
+                key = make_target_key(uid, kw)
+                self.assertIn(key, assignments)
+                self.assertEqual(assignments[key].get("value"), expected)
+
+    def test_sync_does_not_touch_other_as(self):
+        self._fill("a1", TEST_WEIGHT_KEYWORD, u"10.50")
+        session_store.sync_group_to_siblings(self.worksheet, "a1", 1, 0)
+        assignments = session_store.get_session_data(
+            self.worksheet)["assignments"]
+        # 不同 AS 的 b1 一个字段都不该被写
+        self.assertFalse([k for k in assignments if k.startswith("b1:")])
+
+    def test_sync_refuses_without_siblings(self):
+        lonely = FakeWorksheet("ws-one", self.instrument, analyses=[self.a1])
+        self._fill("a1", TEST_WEIGHT_KEYWORD, u"1.0")
+        ok, message = session_store.sync_group_to_siblings(
+            lonely, "a1", 1, 0)
+        self.assertFalse(ok)
+        self.assertIn(u"没有其它样品的同名分析", message)
+
+    def test_sync_refuses_without_values(self):
+        ok, message = session_store.sync_group_to_siblings(
+            self.worksheet, "a1", 1, 0)
+        self.assertFalse(ok)
+        self.assertIn(u"还没有值可同步", message)
+
+    def test_sync_reports_overwrite(self):
+        self._fill("a1", TEST_WEIGHT_KEYWORD, u"10.50")
+        self._fill("a2", TEST_WEIGHT_KEYWORD, u"99.99")   # 兄弟上已有不同值
+        ok, message = session_store.sync_group_to_siblings(
+            self.worksheet, "a1", 1, 0)
+        self.assertTrue(ok, message)
+        # 覆盖必须在消息里说出来，不能静默
+        self.assertIn(u"覆盖", message)
+        assignments = session_store.get_session_data(
+            self.worksheet)["assignments"]
+        self.assertEqual(
+            assignments[make_target_key("a2", TEST_WEIGHT_KEYWORD)]["value"],
+            u"10.50")
+
+    def test_sync_skips_unmarked_sibling(self):
+        """兄弟行的快照里没有标记（标记导入前建的老分析）→ 跳过并报出来"""
+        self.analyses["a3"] = FakeAnalysis("a3", sample_id=u"S-0009", interims=[
+            {"keyword": TEST_WEIGHT_KEYWORD, "title": TEST_WEIGHT_KEYWORD,
+             "result_type": "numeric", "value": u""},
+        ])
+        self.worksheet._analyses = [self.a1, self.a2, self.analyses["a3"]]
+        self._fill("a1", TEST_WEIGHT_KEYWORD, u"10.50")
+        ok, message = session_store.sync_group_to_siblings(
+            self.worksheet, "a1", 1, 0)
+        self.assertTrue(ok, message)
+        self.assertIn(u"跳过", message)
+        assignments = session_store.get_session_data(
+            self.worksheet)["assignments"]
+        self.assertNotIn(make_target_key("a3", TEST_WEIGHT_KEYWORD),
+                         assignments)
 
 
 if __name__ == "__main__":

@@ -367,6 +367,27 @@
                                     title="给本组添加一行（组内各字段同时加）">+ 添加行</button>
                           </form>
                         </tal:addrow>
+                        <!-- 同值同步到其它样品：一次称量要落到 N 个 AR 上
+                             （系统适用性那类）。只在本工作表确实有其它样品的
+                             同名分析时才出现 —— 单样品工作表不出这个按钮。 -->
+                        <tal:sync condition="python:group['sibling_sample_count']">
+                          <form class="d-inline" method="post">
+                            <input type="hidden" name="action" value="sync_siblings"/>
+                            <input type="hidden" name="analysis_uid"
+                                   tal:attributes="value group/analysis_uid"/>
+                            <input type="hidden" name="acquisition_group"
+                                   tal:attributes="value group/acquisition_group"/>
+                            <input type="hidden" name="seq"
+                                   tal:attributes="value group/seq"/>
+                            <button class="btn btn-sm btn-outline-secondary"
+                                    type="submit"
+                                    tal:attributes="title python:u'把本组填好的值同步到：' + u'、'.join(group['sibling_sample_ids'])">
+                              同步到其它
+                              <tal:n content="group/sibling_sample_count">2</tal:n>
+                              个样品
+                            </button>
+                          </form>
+                        </tal:sync>
                         <tal:delrow condition="python:group['is_extra']">
                           <form class="d-inline" method="post">
                             <input type="hidden" name="action" value="remove_target_row"/>
