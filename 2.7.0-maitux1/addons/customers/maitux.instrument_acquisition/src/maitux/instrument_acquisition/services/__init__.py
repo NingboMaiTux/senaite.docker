@@ -2,7 +2,7 @@
 """maitux.instrument_acquisition 服务层
 
 第一阶段服务：
-- phase1_targets：写死的目标位定义（T_name/T_weight）与常量
+- phase1_targets：采集角色词表与常量；目标位由 interim 标记按行推导
 - session_store：Worksheet annotations 会话/读数/分配/日志存储
 - writeback：统一保存回写服务
 - relay：进程内仪器连接服务（集成进 LIMS，替代独立中转站）

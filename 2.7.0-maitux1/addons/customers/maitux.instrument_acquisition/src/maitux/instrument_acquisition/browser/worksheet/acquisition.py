@@ -6,7 +6,7 @@
 - 展示中转站推送过来的原始读数（events）
 - 展示可分配目标位（target_key 抽象）
 - 支持一条读数分配给多个目标位、撤销分配、废弃读数
-- 支持 T_name 目标位手工填写名称
+- 支持 role=name 的目标位手工填写名称
 - 统一保存回写（writeback.save）
 - 展示完整操作日志
 
@@ -25,12 +25,7 @@ from bika.lims import api
 
 from maitux.instrument_acquisition.api.views import _json_safe
 
-from maitux.instrument_acquisition.services.phase1_targets import (
-    T_NAME_KEYWORD,
-)
-from maitux.instrument_acquisition.services.phase1_targets import (
-    get_readonly_keywords,
-)
+from maitux.instrument_acquisition.services.phase1_targets import ROLE_NAME
 from maitux.instrument_acquisition.services.session_store import (
     assign_reading,
 )
@@ -73,12 +68,17 @@ from maitux.instrument_acquisition.services.session_store import (
 from maitux.instrument_acquisition.services.session_store import (
     unassign_reading,
 )
+from maitux.instrument_acquisition.services.session_store import (
+    sync_group_to_siblings,
+)
 from maitux.instrument_acquisition.services.writeback import save
 
 ACQUISITION_VIEW_NAME = "worksheet_instrument_acquisition"
 
-# 允许的名称关键字（可手工填写）
-MANUAL_NAME_KEYWORDS = (T_NAME_KEYWORD,)
+
+# ★ 原先这里写死 `MANUAL_NAME_KEYWORDS = ("T_name",)`。"哪些字段可手工填写"
+# 现在由 interim 标记的角色决定（`role=name` → `manual_input=True`），
+# 按分析行算，见 `_manual_name_keywords()`。
 
 
 class InstrumentAcquisitionView(BrowserView):
@@ -144,10 +144,37 @@ class InstrumentAcquisitionView(BrowserView):
             close_session(self.context)
             self.add_status_message(u"采集会话已关闭。", "info")
         elif action == "add_target_row":
-            # 数组字段按组添加（T_name + T_weight 同时加一行）
+            # 数组字段按采集组添加（组内名称 + 重量 同时加一行）
             analysis_uid = api.safe_unicode(
                 form.get("analysis_uid", "")).strip()
-            ok, message = add_target_row(self.context, analysis_uid)
+            # ★ 组号必须一起提：一个分析可以有多个 acquisition_group，
+            # 不带组号会给所有组一起加行（Backlog S5 裁决⑧）
+            group = api.safe_unicode(
+                form.get("acquisition_group", "")).strip()
+            try:
+                group = int(group) if group else None
+            except (TypeError, ValueError):
+                group = None
+            ok, message = add_target_row(self.context, analysis_uid, group)
+            self.add_status_message(message, "info" if ok else "warning")
+        elif action == "sync_siblings":
+            # 一次称量写进本工作表其它样品的同名分析（系统适用性那类）。
+            # ★ 不是配置驱动的"共用"语义 —— 是操作者点一下代替点 N 遍。
+            analysis_uid = api.safe_unicode(
+                form.get("analysis_uid", "")).strip()
+            group = api.safe_unicode(
+                form.get("acquisition_group", "")).strip()
+            seq = api.safe_unicode(form.get("seq", "")).strip()
+            try:
+                group = int(group) if group else 0
+            except (TypeError, ValueError):
+                group = 0
+            try:
+                seq = int(seq) if seq else 0
+            except (TypeError, ValueError):
+                seq = 0
+            ok, message = sync_group_to_siblings(
+                self.context, analysis_uid, group, seq)
             self.add_status_message(message, "info" if ok else "warning")
         elif action == "remove_target_row":
             target_key = api.safe_unicode(
@@ -234,8 +261,8 @@ class InstrumentAcquisitionView(BrowserView):
         self._prepare()
         data = dict(self._data or {})
         data["session_error"] = self._session_error or u""
-        data["readonly_keywords"] = get_readonly_keywords()
-        data["manual_name_keywords"] = list(MANUAL_NAME_KEYWORDS)
+        data["readonly_keywords"] = self.get_readonly_keywords()
+        data["manual_name_keywords"] = self._manual_name_keywords()
         data["listening"] = self.is_listening()
         data["relay"] = self.get_relay_state()
         return data
@@ -456,10 +483,23 @@ class InstrumentAcquisitionView(BrowserView):
         return data.get("counts", {})
 
     def get_readonly_keywords(self):
-        return get_readonly_keywords()
+        """本 Worksheet 各分析行上被标成采集目标的 keyword 并集"""
+        try:
+            from maitux.instrument_acquisition.services import session_store
+            return session_store.collect_readonly_keywords(self.context)
+        except Exception:
+            return []
+
+    def _manual_name_keywords(self):
+        """可手工填写的 keyword（`role=name` 的那些），按本 Worksheet 取并集"""
+        keywords = set()
+        for slot in (self._data or {}).get("targets", []) or []:
+            if slot.get("acquisition_role") == ROLE_NAME:
+                keywords.add(slot.get("interim_keyword"))
+        return sorted(k for k in keywords if k)
 
     def is_manual_name_keyword(self, keyword):
-        return keyword in MANUAL_NAME_KEYWORDS
+        return keyword in self._manual_name_keywords()
 
     def get_reading_options(self):
         """返回可分配的读数下拉选项（pending/assigned 状态）"""
@@ -479,18 +519,23 @@ class InstrumentAcquisitionView(BrowserView):
         return options
 
     def get_target_label(self, target):
-        """目标位下拉显示文案（带组序号，如 "重量 · 重量 1"）
+        """目标位下拉文案，如 "S-0007 · 有关物质-系统适用性 · 对照品1称样量(mg)"
+
+        ★ 必须带 Sample ID：同一 Worksheet 装多个样品的同一个 AS 时
+        （WS-008 三行都是「有关物质-系统适用性」），缺了它下拉里就是三条
+        一模一样的选项，选错了也看不出来。
 
         row_title 含序号（重量 1/重量 2…），区分同分析项的多行；
         unicode 拼接，避免 py2 下 '·' 字面量崩溃。
         """
-        return u"%s \u00b7 %s" % (
-            api.safe_unicode(target.get("analysis_title") or u""),
-            api.safe_unicode(target.get("row_title")
-                             or target.get("display_title") or u""))
+        parts = [target.get("sample_id") or u"",
+                 target.get("analysis_title") or u"",
+                 target.get("row_title") or target.get("display_title") or u""]
+        return u" \u00b7 ".join(
+            [api.safe_unicode(part) for part in parts if part])
 
     def get_target_groups(self):
-        """目标位按组（seq）分组（key-value 排版：名称+重量并排）"""
+        """目标位按 (样品, 采集组, 行号) 分组（名称 + 重量 并排）"""
         try:
             from maitux.instrument_acquisition.services import session_store
             return session_store.build_target_groups(self.context)

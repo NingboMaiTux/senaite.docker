@@ -2,10 +2,74 @@
 
 SENAITE（LIMS）仪器数据采集插件：采集页绑定解析模板 → 按模板连接仪器 /
 对接本地采集端（labgate）→ 接收读数 → 解析 → 分配/回写到 Worksheet 的
-Interim Field（`T_name` / `T_weight`）→ 可选 HTTP 转发到第三方系统。
+Interim Field → 可选 HTTP 转发到第三方系统。
 
 > 适用版本：SENAITE core 2.x / Plone 5 / Zope 4（Python 2.7）
 > 采集端：`labgate`（Go，边缘网关，见 labgate 项目 README）
+
+---
+
+## ★ 1.1.0：采集目标位改为可配置（原先写死 `T_name` / `T_weight`）
+
+**1.0.0 把采集目标写死成两个 keyword**（`T_name` / `T_weight`），而线上任何
+Calculation 都没有这两个字段 —— 采集页因此一个目标位都渲染不出来。
+
+**1.1.0 起，"哪些字段参与采集"由配置决定**：在 Calculation 的 interim 字段上
+配两个标记（由 `maitux.calcenhance` ≥1.6.0 注册为 subfield）：
+
+| 标记 | 取值 | 含义 |
+|---|---|---|
+| `采集角色` `acquisition_role` | `name` / `weight`（空 = 不参与） | `name` = 名称录入框，`weight` = 重量接收区 |
+| `分组号` `acquisition_group` | `0` = 不参与；`≥1` = 组号 | 同组字段绑同一行 |
+
+留在代码里的只有**角色词表**（`name` / `weight` 两个取值及其槽位元数据），
+见 `services/phase1_targets.py`。
+
+### 三条上手就会踩的
+
+1. **★ 标记是快照进分析行的，不追溯。** 标记配好之后**新建**的样品才会出现
+   采集目标位；已有的分析不会追溯（SENAITE 的 interim 快照机制，
+   见根 `CLAUDE.md` §6.3.2）。采集页的空状态提示里写了这一条。
+2. **★ 重新生成配置 XLSX 再导入会冲掉标记** —— 生成器目前还不认这两列
+   （已单独立项）。导入后请回读这两列，或看 calcenhance 那条点名
+   Calculation 与 keyword 的 warn。
+3. **★ `locked` 目前还不能给采集字段标上。** 机器写入通道还没包
+   `allow_locked_writes()` 逃生阀（S6 待做），标了就会"写一次再也改不了"。
+
+### 表格排版
+
+采集页「待分配目标列表」**固定 6 列**（样品 / 组 / 分析 / 名称 / 重量 / 状态·操作）。
+一组里可以有**任意多个** `weight` 字段，它们在「重量」这一格内纵向堆叠，
+各带自己的标题与操作 —— 所以 3 个、5 个称量都装得下，表头不变。
+
+★ **样品列不可省。** 一个 Worksheet 常常装着多个样品的**同一个** AS
+（实测 WS-008 三行全是「有关物质-系统适用性」，分属 S-0007 / S-0008 / S-0009）。
+只显示分析标题时三行一模一样，操作者分不清在给哪个样品称量。
+读数的「选择分配目标」下拉同理，标签带 Sample ID 前缀。
+列表按**样品优先**排序，一个样品的活儿聚在一起。
+
+### 一次称量落到多个样品：「同步到其它 N 个样品」
+
+系统适用性这类测定**现实上只称一次**，但 SENAITE 要求**每个 AR 下都有**
+这个分析（一个 Sample 上同一个 AS 只能有一个，见根 `CLAUDE.md` §6.3.3）——
+于是同一个称量值要落到 N 个样品的分析上。
+
+采集页的每一组，只要本 Worksheet 里**存在其它样品的同名分析**，
+「状态 / 操作」列就会出现 **「同步到其它 N 个样品」**：先在一行里填好
+（或绑好读数），点一下，组内**全部字段**一次写进其它样品的同名分析。
+
+实测 WS-008：填 3 次 + 点 1 下 + 保存 = 9 个 interim 值三份完全一致，
+代替原来的填 9 次。
+
+三条要点：
+
+- **每样品仍各占一行**，不归并 —— 看得到每个 AR 确实都有值。
+- **没有引入任何新标记。**「哪个字段是共用的」由**操作者点这个按钮**表达，
+  不写进配置：分配本来就由人完成，这里解决的只是方不方便。
+  （供试品称量每个 AR 不同，就别点这个按钮。）
+- **覆盖会说出来。** 兄弟行上已有**不同**的值时照样覆盖（点"同步"就是这个意图），
+  但消息里会写「其中 N 处覆盖了原有不同的值」；兄弟行快照里没有标记的
+  （标记导入前建的老分析）会跳过并点名。
 
 ---
 
@@ -24,7 +88,7 @@ LIMS 采集页（Worksheet）
 读数列表（pending / assigned / saved / discarded）
    │  手动分配或自动回写
    ▼
-Worksheet Interim Field：T_name（名称）、T_weight（重量）
+Worksheet Interim Field：由标记指定（role=name 的名称、role=weight 的重量）
 ```
 
 默认模式是 **远端采集端模式**（`PHASE1_AGENT_MODE = True`）：LIMS 与仪器
@@ -78,7 +142,8 @@ LIMS 点「开始采集」只是标记会话监听并通知采集端连接仪器
 
 - 解析脚本：模板字段 `script_file` 上传 `.js` 脚本，入站数据经 JS 解析出
   `parsed{value,unit}`
-- 目标位：`T_name`（名称，单值）、`T_weight`（重量，支持数组多行），
+- 目标位：由 interim 标记决定 —— `role=name`（名称，单值）、
+  `role=weight`（重量，可多个；`result_type=list` 时支持数组多行），
   target_key 格式 `{analysis_uid}:{keyword}[:{seq}]`
 - 手动导入：PDF 报告经 `browser/deemo` 的提取/JS 解析/写回逻辑
   （`services/acquisition.py::parse_and_write_report` 复用同一套逻辑）
@@ -98,7 +163,7 @@ LIMS 点「开始采集」只是标记会话监听并通知采集端连接仪器
 - 「开始采集」：远端模式调用采集端 `/api/start_sync`（带 host/port/push/code），
   连接失败当场报错；进程内 relay 模式由 LIMS 直连仪器
 - 读数卡片：`#event_id前8位` + 解析值/单位 + 原始文本 + 状态徽章
-- 分配：下拉选择目标位（分析行的 T_name/T_weight）
+- 分配：下拉选择目标位（分析行上被标记的字段）
 
 ---
 
@@ -130,7 +195,7 @@ SENAITE 后台「仪器 → 解析模板」新建/编辑：
 | `PHASE1_AGENT_MODE` | `True` | `True`=远端采集端模式（labgate）；`False`=进程内 relay 模式 |
 | `PHASE1_INGEST_TOKEN` | `maitux-phase1-instrument-acquisition-token` | 固定共享 Token（兼容旧采集端；新部署建议用模板 `agent_token`） |
 | `PHASE1_TCP_PROBE_TIMEOUT` | `3` | 开始采集时 TCP 连通探测超时（秒） |
-| `T_NAME_KEYWORD` / `T_WEIGHT_KEYWORD` | `T_name` / `T_weight` | 回写的 Interim Field keyword |
+| `ACQUISITION_ROLE_META` | `name` / `weight` 两个角色的槽位元数据 | 角色词表（目标位本身由 interim 标记决定，不写死） |
 | `PHASE1_TARGET_DEFINITIONS` | 名称/重量 | 目标位定义（keyword、显示标题、是否多值、排序、值类型） |
 | `PHASE1_ANNOTATION_KEY` / `PHASE1_SESSION_INDEX_KEY` | `maitux...v1.session*` | Worksheet annotations 存储键 |
 

@@ -11,19 +11,95 @@
 import unittest
 
 try:
-    from zope.annotation.attribute import AttributeAnnotatable
+    # ★ 2026-09-11 修：原先这里 import 的是
+    # `zope.annotation.attribute.AttributeAnnotatable` —— **这个名字在本版
+    # zope.annotation 里不存在**（模块里只有 `AttributeAnnotations` 适配器，
+    # 标记接口在 `interfaces.IAttributeAnnotatable`）。于是整个 try 块抛
+    # ImportError、`_IMPORT_OK` 恒为 False，**本文件的测试从来没真跑过**，
+    # 而 unittest 只报 "skipped" 不报错 —— 典型的静默失败（R9）。
+    # 现在改成注册真正的 annotations 适配器，测试可以实跑。
+    from zope.annotation.attribute import AttributeAnnotations
+    from zope.annotation.interfaces import IAnnotations
+    from zope.annotation.interfaces import IAttributeAnnotatable
+    from zope.component import provideAdapter
+    from zope.interface import implementer
+
+    provideAdapter(AttributeAnnotations, (IAttributeAnnotatable,),
+                   IAnnotations)
+
+    @implementer(IAttributeAnnotatable)
+    class AttributeAnnotatable(object):
+        """可挂 annotations 的测试基类（替代原先那个不存在的同名类）"""
 
     from bika.lims import api as bika_api
 
     from maitux.instrument_acquisition.services import session_store
     from maitux.instrument_acquisition.services import phase1_targets
     from maitux.instrument_acquisition.services.phase1_targets import (
-        T_WEIGHT_KEYWORD,
+        ACQUISITION_GROUP_KEY,
+        ACQUISITION_ROLE_KEY,
+        ROLE_NAME,
+        ROLE_WEIGHT,
         make_target_key,
     )
 
+    # ★ 采集目标不再写死：测试自己造带标记的 interim。
+    # 原先这里 import 的是 `T_WEIGHT_KEYWORD`（写死的 "T_weight"），已随 S5 删除。
+    TEST_NAME_KEYWORD = "t_name"
+    TEST_WEIGHT_KEYWORD = "t_weight"
+
+    def _marked_interim(keyword, role, group, result_type="numeric"):
+        return {
+            "keyword": keyword,
+            "title": keyword,
+            "result_type": result_type,
+            "value": u"",
+            ACQUISITION_ROLE_KEY: role,
+            ACQUISITION_GROUP_KEY: group,
+        }
+
     class FakePortal(AttributeAnnotatable):
         """替代 portal 的 annotations 容器"""
+
+    class FakeAnalysis(AttributeAnnotatable):
+        """带采集标记的分析行
+
+        `assign_reading` / `set_manual_value` / `writeback.save` 现在都按
+        (分析, keyword) 查标记，所以测试必须提供真的 interim 快照 ——
+        光给一个 uid 字符串已经不够了。
+        """
+
+        def __init__(self, uid, interims=None, result_type="numeric",
+                     as_keyword="t_service", sample_id=None):
+            self._uid = uid
+            self.id = uid
+            self.title = uid
+            # AS keyword：sync_group_to_siblings 拿它找"同一个 AS、不同样品"
+            self._as_keyword = as_keyword
+            self._sample_id = sample_id or (u"S-" + uid)
+            self._interims = interims if interims is not None else [
+                _marked_interim(TEST_NAME_KEYWORD, ROLE_NAME, 1, result_type),
+                _marked_interim(TEST_WEIGHT_KEYWORD, ROLE_WEIGHT, 1,
+                                result_type),
+            ]
+
+        def UID(self):
+            return self._uid
+
+        def getKeyword(self):
+            return self._as_keyword
+
+        def getRequestID(self):
+            return self._sample_id
+
+        def getInterimFields(self):
+            return [dict(item) for item in self._interims]
+
+        def setInterimFields(self, interims):
+            self._interims = [dict(item) for item in interims]
+
+        def reindexObject(self):
+            pass
 
     class FakeInstrument(AttributeAnnotatable):
         def __init__(self, uid, code, title):
@@ -63,6 +139,9 @@ except Exception:  # pragma: no cover
     class FakeWorksheet(object):
         pass
 
+    class FakeAnalysis(object):
+        pass
+
 
 @unittest.skipUnless(_IMPORT_OK, "Zope 环境不可用，跳过会话存储测试")
 class SessionStoreTest(unittest.TestCase):
@@ -77,6 +156,13 @@ class SessionStoreTest(unittest.TestCase):
             obj, "title", getattr(obj, "code", obj.UID())))
         self._patch("get_path", lambda obj: obj.UID())
         self._patch("is_object", lambda obj: True)
+        # ★ uid → 分析对象：校验改成"按 (分析, keyword) 查标记"之后，
+        # target_key 里的 uid 必须能解析回带 interim 快照的对象
+        self.analyses = {
+            "analysis-1": FakeAnalysis("analysis-1"),
+            "analysis-2": FakeAnalysis("analysis-2"),
+        }
+        self._patch("get_object", lambda uid: self.analyses.get(uid))
         # portal 反查：直接返回 FakePortal（替代 api.get_portal）
         self._orig_portal = session_store._get_portal
         self.portal = FakePortal()
@@ -413,8 +499,8 @@ class SessionStoreTest(unittest.TestCase):
         session = self._start_session(self.worksheet)
         self._ingest(self.worksheet, session)
 
-        tk1 = make_target_key("analysis-1", T_WEIGHT_KEYWORD)
-        tk2 = make_target_key("analysis-2", T_WEIGHT_KEYWORD)
+        tk1 = make_target_key("analysis-1", TEST_WEIGHT_KEYWORD)
+        tk2 = make_target_key("analysis-2", TEST_WEIGHT_KEYWORD)
 
         ok, message = session_store.assign_reading(
             self.worksheet, "e-1", tk1)
@@ -437,7 +523,7 @@ class SessionStoreTest(unittest.TestCase):
         self._ingest(self.worksheet, session, event_id="e-2",
                      raw="ST,GS,1.2345,mg", value="1.2345")
 
-        tk = make_target_key("analysis-1", T_WEIGHT_KEYWORD)
+        tk = make_target_key("analysis-1", TEST_WEIGHT_KEYWORD)
         self.assertTrue(session_store.assign_reading(
             self.worksheet, "e-1", tk)[0])
         ok, message = session_store.assign_reading(
@@ -448,7 +534,7 @@ class SessionStoreTest(unittest.TestCase):
         session = self._start_session(self.worksheet)
         self._ingest(self.worksheet, session)
 
-        tk = make_target_key("analysis-1", T_WEIGHT_KEYWORD)
+        tk = make_target_key("analysis-1", TEST_WEIGHT_KEYWORD)
         session_store.assign_reading(self.worksheet, "e-1", tk)
 
         ok, message = session_store.unassign_reading(self.worksheet, tk)
@@ -464,7 +550,7 @@ class SessionStoreTest(unittest.TestCase):
         session = self._start_session(self.worksheet)
         self._ingest(self.worksheet, session)
 
-        tk = make_target_key("analysis-1", T_WEIGHT_KEYWORD)
+        tk = make_target_key("analysis-1", TEST_WEIGHT_KEYWORD)
         session_store.assign_reading(self.worksheet, "e-1", tk)
 
         ok, message = session_store.discard_reading(self.worksheet, "e-1")
@@ -483,7 +569,7 @@ class SessionStoreTest(unittest.TestCase):
 
     def test_set_manual_value(self):
         session = self._start_session(self.worksheet)
-        tk = make_target_key("analysis-1", "T_name")
+        tk = make_target_key("analysis-1", TEST_NAME_KEYWORD)
         ok, message = session_store.set_manual_value(
             self.worksheet, tk, u"Z13")
         self.assertTrue(ok)
@@ -492,10 +578,97 @@ class SessionStoreTest(unittest.TestCase):
         self.assertEqual(assignment["source"], session_store.SOURCE_MANUAL)
         self.assertEqual(assignment["value"], u"Z13")
 
+    # ------------------------------------------------------------------
+    # ★ 校验收紧：全局白名单 → 按 (分析, keyword) 查标记（S5 判据⑥）
+
+    def test_assign_rejects_unmarked_keyword(self):
+        """没标记的字段不能被分配读数 —— 1.0.0 的全局白名单放行过这种"""
+        session = self._start_session(self.worksheet)
+        self._ingest(self.worksheet, session)
+        tk = make_target_key("analysis-1", "imp_dilution")
+        ok, message = session_store.assign_reading(
+            self.worksheet, "e-1", tk)
+        self.assertFalse(ok)
+        self.assertIn(u"无效的目标位", message)
+
+    def test_set_manual_value_rejects_unmarked_keyword(self):
+        self._start_session(self.worksheet)
+        tk = make_target_key("analysis-1", "imp_dilution")
+        ok, message = session_store.set_manual_value(
+            self.worksheet, tk, u"x")
+        self.assertFalse(ok)
+        self.assertIn(u"无效的目标位", message)
+
+    def test_assign_rejects_unknown_analysis(self):
+        """target_key 里的 uid 解析不出分析对象 → 拒绝"""
+        session = self._start_session(self.worksheet)
+        self._ingest(self.worksheet, session)
+        tk = make_target_key("analysis-nope", TEST_WEIGHT_KEYWORD)
+        ok, _message = session_store.assign_reading(
+            self.worksheet, "e-1", tk)
+        self.assertFalse(ok)
+
+    def test_marked_keyword_on_other_analysis_is_independent(self):
+        """★ 同名 keyword 在没标记的分析上不放行
+
+        这正是全局白名单表达不了的：keyword 相同、分析不同，标记也可以不同。
+        """
+        session = self._start_session(self.worksheet)
+        self._ingest(self.worksheet, session)
+        # analysis-2 上把标记摘掉（保留同名 interim，但不是采集目标）
+        self.analyses["analysis-2"] = FakeAnalysis("analysis-2", interims=[
+            {"keyword": TEST_WEIGHT_KEYWORD, "title": TEST_WEIGHT_KEYWORD,
+             "result_type": "numeric", "value": u""},
+        ])
+        ok, _message = session_store.assign_reading(
+            self.worksheet, "e-1",
+            make_target_key("analysis-2", TEST_WEIGHT_KEYWORD))
+        self.assertFalse(ok)
+        # analysis-1 上仍有标记 → 放行
+        ok, _message = session_store.assign_reading(
+            self.worksheet, "e-1",
+            make_target_key("analysis-1", TEST_WEIGHT_KEYWORD))
+        self.assertTrue(ok)
+
+    def test_add_target_row_refuses_when_group_ambiguous(self):
+        """★ 裁决⑧：多个采集组而没指明组号时拒绝，不猜"""
+        self._start_session(self.worksheet)
+        self.analyses["analysis-1"] = FakeAnalysis("analysis-1", interims=[
+            _marked_interim("n1", ROLE_NAME, 1, "list"),
+            _marked_interim("w1", ROLE_WEIGHT, 1, "list"),
+            _marked_interim("n2", ROLE_NAME, 2, "list"),
+            _marked_interim("w2", ROLE_WEIGHT, 2, "list"),
+        ])
+        ok, message = session_store.add_target_row(
+            self.worksheet, "analysis-1")
+        self.assertFalse(ok)
+        self.assertIn(u"多个采集组", message)
+
+    def test_add_target_row_scoped_to_group(self):
+        """★ 裁决⑧：给第 1 组加行不能连带给第 2 组加行"""
+        self._start_session(self.worksheet)
+        self.analyses["analysis-1"] = FakeAnalysis("analysis-1", interims=[
+            _marked_interim("n1", ROLE_NAME, 1, "list"),
+            _marked_interim("w1", ROLE_WEIGHT, 1, "list"),
+            _marked_interim("n2", ROLE_NAME, 2, "list"),
+            _marked_interim("w2", ROLE_WEIGHT, 2, "list"),
+        ])
+        ok, _message = session_store.add_target_row(
+            self.worksheet, "analysis-1", group=1)
+        self.assertTrue(ok)
+        assignments = session_store.get_session_data(
+            self.worksheet)["assignments"]
+        added = sorted(
+            phase1_targets.parse_target_key_full(key)[1]
+            for key in assignments
+            if phase1_targets.parse_target_key_full(key)[2])
+        # 只有第 1 组的两个字段多了一行
+        self.assertEqual(added, ["n1", "w1"])
+
     def test_logs_recorded(self):
         session = self._start_session(self.worksheet)
         self._ingest(self.worksheet, session)
-        tk = make_target_key("analysis-1", T_WEIGHT_KEYWORD)
+        tk = make_target_key("analysis-1", TEST_WEIGHT_KEYWORD)
         session_store.assign_reading(self.worksheet, "e-1", tk)
         session_store.unassign_reading(self.worksheet, tk)
         session_store.close_session(self.worksheet)
@@ -535,6 +708,13 @@ class AgentModeSessionStoreTest(unittest.TestCase):
             obj, "title", getattr(obj, "code", obj.UID())))
         self._patch("get_path", lambda obj: obj.UID())
         self._patch("is_object", lambda obj: True)
+        # ★ uid → 分析对象：校验改成"按 (分析, keyword) 查标记"之后，
+        # target_key 里的 uid 必须能解析回带 interim 快照的对象
+        self.analyses = {
+            "analysis-1": FakeAnalysis("analysis-1"),
+            "analysis-2": FakeAnalysis("analysis-2"),
+        }
+        self._patch("get_object", lambda uid: self.analyses.get(uid))
         self._orig_portal = session_store._get_portal
         self.portal = FakePortal()
         session_store._get_portal = lambda context: self.portal
@@ -667,6 +847,178 @@ class AgentModeSessionStoreTest(unittest.TestCase):
         self.assertIsNone(
             session_store.resolve_listening_worksheet_by_instrument(
                 self.worksheet, "BALANCE-02")[0])
+
+
+@unittest.skipUnless(_IMPORT_OK, "Zope 环境不可用，跳过同步测试")
+class SyncSiblingsTest(unittest.TestCase):
+    """一次称量写进本工作表其它样品的同名分析（S8）
+
+    ★ 场景（WS-008 实测）：系统适用性现实上只称一次，但 SENAITE 要求每个
+    AR 下都有这个分析，于是同一个值要落到 N 个样品上。分配由人完成，
+    本功能只把"点 N 遍"变成"点一遍"。
+    """
+
+    def setUp(self):
+        self._orig = {}
+        self._patch("get_uid", lambda obj: obj.UID())
+        self._patch("get_id", lambda obj: getattr(
+            obj, "code", getattr(obj, "id", obj.UID())))
+        self._patch("get_title", lambda obj: getattr(
+            obj, "title", obj.UID()))
+        self._patch("get_path", lambda obj: obj.UID())
+        self._patch("is_object", lambda obj: True)
+        self._patch("get_parent", lambda obj: obj)
+
+        # 三个样品上的同一个 AS（as_keyword 相同），外加一个不同 AS 作对照
+        self.a1 = FakeAnalysis("a1", sample_id=u"S-0007")
+        self.a2 = FakeAnalysis("a2", sample_id=u"S-0008")
+        self.a3 = FakeAnalysis("a3", sample_id=u"S-0009")
+        self.other = FakeAnalysis("b1", as_keyword="t_other",
+                                  sample_id=u"S-0007")
+        self.analyses = {"a1": self.a1, "a2": self.a2, "a3": self.a3,
+                         "b1": self.other}
+        self._patch("get_object", lambda uid: self.analyses.get(uid))
+
+        self._orig_portal = session_store._get_portal
+        self.portal = FakePortal()
+        session_store._get_portal = lambda context: self.portal
+
+        self.instrument = FakeInstrument("inst-1", "BALANCE-01", u"天平")
+        self.worksheet = FakeWorksheet(
+            "ws-sync", self.instrument,
+            analyses=[self.a1, self.a2, self.a3, self.other])
+
+    def tearDown(self):
+        session_store._get_portal = self._orig_portal
+        for name, original in self._orig.items():
+            if original is None:
+                delattr(bika_api, name)
+            else:
+                setattr(bika_api, name, original)
+
+    def _patch(self, name, func):
+        self._orig[name] = getattr(bika_api, name, None)
+        setattr(bika_api, name, func)
+
+    def _fill(self, analysis_uid, keyword, value):
+        ok, msg = session_store.set_manual_value(
+            self.worksheet, make_target_key(analysis_uid, keyword), value)
+        self.assertTrue(ok, msg)
+
+    # ------------------------------------------------------------------
+
+    def test_find_siblings_only_same_as_keyword(self):
+        siblings = session_store.find_sibling_analyses(self.worksheet, "a1")
+        uids = sorted(bika_api.get_uid(a) for a in siblings)
+        # 只认同一个 AS 的其它样品；不同 AS 的 b1 不算
+        self.assertEqual(uids, ["a2", "a3"])
+
+    def test_sync_writes_all_siblings(self):
+        self._fill("a1", TEST_NAME_KEYWORD, u"对乙酰氨基酚")
+        self._fill("a1", TEST_WEIGHT_KEYWORD, u"10.50")
+        ok, message = session_store.sync_group_to_siblings(
+            self.worksheet, "a1", 1, 0)
+        self.assertTrue(ok, message)
+        # 2 个兄弟 × 2 个字段 = 4 个目标位
+        self.assertIn(u"2 个样品", message)
+        self.assertIn(u"4 个目标位", message)
+        assignments = session_store.get_session_data(
+            self.worksheet)["assignments"]
+        for uid in ("a2", "a3"):
+            for kw, expected in ((TEST_NAME_KEYWORD, u"对乙酰氨基酚"),
+                                 (TEST_WEIGHT_KEYWORD, u"10.50")):
+                key = make_target_key(uid, kw)
+                self.assertIn(key, assignments)
+                self.assertEqual(assignments[key].get("value"), expected)
+
+    def test_sync_does_not_touch_other_as(self):
+        self._fill("a1", TEST_WEIGHT_KEYWORD, u"10.50")
+        session_store.sync_group_to_siblings(self.worksheet, "a1", 1, 0)
+        assignments = session_store.get_session_data(
+            self.worksheet)["assignments"]
+        # 不同 AS 的 b1 一个字段都不该被写
+        self.assertFalse([k for k in assignments if k.startswith("b1:")])
+
+    def test_sync_refuses_without_siblings(self):
+        lonely = FakeWorksheet("ws-one", self.instrument, analyses=[self.a1])
+        self._fill("a1", TEST_WEIGHT_KEYWORD, u"1.0")
+        ok, message = session_store.sync_group_to_siblings(
+            lonely, "a1", 1, 0)
+        self.assertFalse(ok)
+        self.assertIn(u"没有其它样品的同名分析", message)
+
+    def test_sync_refuses_without_values(self):
+        ok, message = session_store.sync_group_to_siblings(
+            self.worksheet, "a1", 1, 0)
+        self.assertFalse(ok)
+        self.assertIn(u"还没有值可同步", message)
+
+    def test_sync_reports_overwrite(self):
+        self._fill("a1", TEST_WEIGHT_KEYWORD, u"10.50")
+        self._fill("a2", TEST_WEIGHT_KEYWORD, u"99.99")   # 兄弟上已有不同值
+        ok, message = session_store.sync_group_to_siblings(
+            self.worksheet, "a1", 1, 0)
+        self.assertTrue(ok, message)
+        # 覆盖必须在消息里说出来，不能静默
+        self.assertIn(u"覆盖", message)
+        assignments = session_store.get_session_data(
+            self.worksheet)["assignments"]
+        self.assertEqual(
+            assignments[make_target_key("a2", TEST_WEIGHT_KEYWORD)]["value"],
+            u"10.50")
+
+    def test_sync_skips_unmarked_sibling(self):
+        """兄弟行的快照里没有标记（标记导入前建的老分析）→ 跳过并报出来"""
+        self.analyses["a3"] = FakeAnalysis("a3", sample_id=u"S-0009", interims=[
+            {"keyword": TEST_WEIGHT_KEYWORD, "title": TEST_WEIGHT_KEYWORD,
+             "result_type": "numeric", "value": u""},
+        ])
+        self.worksheet._analyses = [self.a1, self.a2, self.analyses["a3"]]
+        self._fill("a1", TEST_WEIGHT_KEYWORD, u"10.50")
+        ok, message = session_store.sync_group_to_siblings(
+            self.worksheet, "a1", 1, 0)
+        self.assertTrue(ok, message)
+        self.assertIn(u"跳过", message)
+        assignments = session_store.get_session_data(
+            self.worksheet)["assignments"]
+        self.assertNotIn(make_target_key("a3", TEST_WEIGHT_KEYWORD),
+                         assignments)
+
+
+@unittest.skipUnless(_IMPORT_OK, "Zope 环境不可用，跳过标签测试")
+class GroupAndRowLabelTest(unittest.TestCase):
+    """「组」= acquisition_group；数组行号是另一回事
+
+    ★ 这条曾经错过一次：S5 把分组键改成了三元组，却把标签留成
+    `u"第 %s 组" % (seq + 1)` —— 同一组的第 2 行被印成「第 2 组」。
+    用户 2026-09-11 指正。钉在这里，别再回去。
+    """
+
+    def test_group_title_is_group_not_seq(self):
+        # 同一组的不同行，组标题必须**相同**
+        self.assertEqual(session_store._group_title(1),
+                         session_store._group_title(1))
+        self.assertEqual(session_store._group_title(1), u"第 1 组")
+        self.assertEqual(session_store._group_title(2), u"第 2 组")
+
+    def test_group_title_takes_no_seq(self):
+        """签名里不该再有 seq —— 有 seq 就是又把行号混进组号了"""
+        import inspect
+        try:
+            args = inspect.getargspec(session_store._group_title).args
+        except AttributeError:  # py3
+            args = list(inspect.signature(
+                session_store._group_title).parameters)
+        self.assertEqual(args, ["group_no"])
+
+    def test_row_label_only_for_array_groups(self):
+        # 非数组组只有一行，不印行号（噪音）
+        self.assertEqual(session_store._row_label(False, 0), u"")
+        self.assertEqual(session_store._row_label(False, 3), u"")
+        # 数组组每行都印，且是 1 起
+        self.assertEqual(session_store._row_label(True, 0), u"第 1 行")
+        self.assertEqual(session_store._row_label(True, 1), u"第 2 行")
+        self.assertEqual(session_store._row_label(True, 5), u"第 6 行")
 
 
 if __name__ == "__main__":

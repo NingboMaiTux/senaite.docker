@@ -2,15 +2,6 @@
   "_说明": "lint 门禁基线：这里列的是**已知欠账**，门禁只拦不在本表里的 ERROR（政策见 Docs/SENAITE-Addon流水线.md「不新增 ERROR」）。基线不是永久豁免 —— 修掉一条就重写本表把它剔掉；lint 会把「基线里已消失」的条目报出来提醒你重写。",
   "_重写命令": "python lint_addon.py --write-baseline <addons>/customers/lint_baseline.json",
   "_纪律": "① note 不许留空 —— 空 note 的基线会烂成没人看的免死金牌。② 每次运行 lint 都会把本表里的条目打印在「基线抑制了 N 条既有 ERROR」一段，它们不会消失在视野里。③ 不要为了让门禁变绿而往这里加条目：本次新增的 ERROR 就该修，加进来等于把责任推给下一个人。",
-  "recorded": "2026-09-07",
-  "entries": [
-    {
-      "addon": "maitux.instrument_acquisition",
-      "code": "E17_UI_INJECTION_UNGATED",
-      "path": "src/maitux/instrument_acquisition/browser/worksheet/configure.zcml",
-      "count": 1,
-      "level": "ERROR",
-      "note": "R14 规则 2026-09-07 新增时打出的真 bug（不是误报）：IListingViewAdapter 订阅者没做 layer 门控，「仪器采集」按钮在四个站点全显示，包括没装该 addon 的。修法见 R14：该签名是 (view, context) 不含 request，ZCML 无处插 layer，只能在 before_render() 开头判 IInstrumentAcquisitionLayer.providedBy(self.request)。列入基线只是为了不阻塞别人跑门禁，**这条是要修的**。"
-    }
-  ]
+  "recorded": "2026-09-11",
+  "entries": []
 }
