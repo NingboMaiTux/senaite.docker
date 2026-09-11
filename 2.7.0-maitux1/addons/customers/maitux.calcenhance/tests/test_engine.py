@@ -18,7 +18,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from harness import Results, load_patches, rebuild  # noqa: E402
+from harness import (  # noqa: E402
+    Results, build_sample, evaluate, install_engine_stubs, load_patches,
+    rebuild)
 
 
 # Values recorded from the pre-hoist source, so a typo during the move shows
@@ -272,7 +274,9 @@ def test_count_values_rows(p, r):
 #              -> 62 (S2 revised: CF_GATE dropped, BAND + GATE added,
 #                     both tables -- the single-threshold rule was wrong)
 #              -> 64 (S7: GROUP_CI_LOW / GROUP_CI_HIGH, array table only)
-EXPECTED_SAFE_ENTRIES = 64
+#              -> 65 (BASELINE_BYlist, array table only -- a different
+#                     backlog: 稳定性基线取值 S1)
+EXPECTED_SAFE_ENTRIES = 65
 EXPECTED_SCALAR_ENTRIES = 26
 
 
@@ -706,6 +710,328 @@ def test_s7_registration(p, r):
                 bool(array_fn_re.search(u"%s([a])" % name)), True)
 
 
+# =============================================================================
+# BASELINE_BYlist -- the stability "percent of time zero" column.
+# Backlog: Docs/Cal增加/maitux.calcenhance-稳定性基线取值-Backlog.md (S1)
+# =============================================================================
+#
+# The eleven rows below are the analysts' own S1919 record, both injections
+# of one sample, transcribed unchanged from 需求与方案 §1.1.  Its last column
+# was filled in by the instrument operator, by hand, before this function
+# existed -- so the expected numbers are not a restatement of what the code
+# does.  They are the thing the code has to reproduce.
+#
+# Peak 6 (RRT 1.38) is the whole point: it appears at 8h and has no row at
+# T0.  The operator left its cell EMPTY.  A "first value in the group"
+# implementation returns 100.0 there instead -- correct-looking, unflagged,
+# wrong.
+
+S1919_AREA = [
+    # T0 -- 2026/5/13 20:47.  RRT 0.14 / 0.71 / 1.00 / 1.33 / 1.40
+    1691.0, 6290.0, 13068724.0, 1616.0, 3265.0,
+    # 8h -- 2026/5/14 04:51.  RRT 0.14 / 0.71 / 1.00 / 1.33 / 1.38 / 1.41
+    1600.0, 6450.0, 13076197.0, 1954.0, 1402.0, 3369.0,
+]
+S1919_HOURS = [0.0] * 5 + [8.0] * 6
+# Peak identity, the column `imp_pct_group` will hold.  Names cannot do this
+# job: six of these eleven rows are all called 未知杂质.
+S1919_PEAK = [u"1", u"2", u"3", u"4", u"5",
+              u"1", u"2", u"3", u"4", u"6", u"5"]
+
+# Written down before the first run (Backlog gate ①).
+S1919_BASELINE = [
+    1691.0, 6290.0, 13068724.0, 1616.0, 3265.0,
+    1691.0, 6290.0, 13068724.0, 1616.0, u"---", 3265.0,
+]
+S1919_DEVIATION_8H = [94.6, 102.5, 100.1, 120.9, u"---", 103.2]
+
+
+class _FakeOwner(object):
+    """Only the `id` the duplicate warning quotes."""
+
+    id = "S1919-R01-imp_stability_cold"
+
+
+def _rebuild_baseline(p, owner):
+    """Rebuild BASELINE_BYlist bottom-up through its two cells."""
+    warn_fn = rebuild(p, "_baseline_duplicate_warn", freevars={"self": owner})
+    if warn_fn is None:
+        return None
+    return rebuild(p, "_baseline_bylist", freevars={
+        "_norm_key": rebuild(p, "_norm_key"),
+        "_baseline_duplicate_warn": warn_fn,
+    })
+
+
+def _rebuild_round_even(p):
+    """Rebuild ROUND_EVEN, which recurses and so closes over itself.
+
+    Python 2 has no writable cell, so the self-reference goes in as a
+    trampoline that is pointed at the real function once it exists.  Only
+    the list branch follows it; the scalar calls below never do.
+    """
+    box = {}
+    fn = rebuild(p, "_round_half_even", defaults=(0,), freevars={
+        "_round_half_even": lambda *a, **kw: box["fn"](*a, **kw),
+        "_dec_quantize": rebuild(p, "_dec_quantize")})
+    box["fn"] = fn
+    return fn
+
+
+def test_baseline_bylist(p, r):
+    """S1: the baseline is the earliest RUN, not each group's first row."""
+    logger = install_engine_stubs()
+    owner = _FakeOwner()
+    f = _rebuild_baseline(p, owner)
+    r.check("rebuilt BASELINE_BYlist", f is not None, True)
+    if f is None:
+        return
+
+    # -- ① the analysts' record, end to end ----------------------------
+    got = f(S1919_AREA, S1919_HOURS, S1919_PEAK)
+    r.check("S1919 baseline column", got, S1919_BASELINE)
+
+    round_even = _rebuild_round_even(p)
+    r.check("rebuilt ROUND_EVEN", round_even is not None, True)
+    if round_even is not None:
+        deviation = []
+        for index in range(5, 11):
+            base = got[index]
+            if base == p._PLACEHOLDER:
+                deviation.append(p._PLACEHOLDER)
+            else:
+                deviation.append(
+                    round_even(S1919_AREA[index] / base * 100, 1))
+        r.check("S1919 8h deviation column", deviation, S1919_DEVIATION_8H)
+
+    # -- ② the ordinary case: broadcast the baseline to every row ------
+    #    Three runs of one peak -- every row reads the same baseline.
+    r.check("broadcast to the whole group",
+            f([10.0, 12.0, 14.0], [0.0, 4.0, 8.0], [u"p", u"p", u"p"]),
+            [10.0, 10.0, 10.0])
+
+    # -- ③ a peak that is absent from the baseline run -----------------
+    #    Kept apart from ② on purpose: this is the failure the function
+    #    exists to prevent, and merging it into a happy-path case is how
+    #    it would go unnoticed.
+    late = f([10.0, 12.0, 7.0], [0.0, 8.0, 8.0], [u"p", u"p", u"new"])
+    r.check("new peak has no baseline", late[2], p._PLACEHOLDER)
+    r.check("new peak is NOT its own value", late[2] == 7.0, False)
+    r.check("new peak is NOT zero", late[2] == 0, False)
+    r.check("new peak is NOT the main peak's baseline", late[2] == 10.0, False)
+    r.check("the established peak is unaffected", late[:2], [10.0, 10.0])
+
+    # -- ④ global minimum, not the group's own minimum -----------------
+    #    Same trap as ③ approached from the other side: here the late
+    #    group has TWO runs of its own, so "the group's earliest row"
+    #    is a perfectly available answer -- and the wrong one.
+    spread = f([10.0, 5.0, 12.0, 6.0],
+               [0.0, 8.0, 16.0, 16.0],
+               [u"p", u"late", u"p", u"late"])
+    r.check("group minimum is not the baseline", spread[1], p._PLACEHOLDER)
+    r.check("late group stays blank on its later run",
+            spread[3], p._PLACEHOLDER)
+    r.check("late group did not fall back to 5.0", spread[1] == 5.0, False)
+
+    #    And the sequence column does not have to start at 0: injection
+    #    numbers count from 1.  A `== 0` baseline test would blank
+    #    everything here.
+    ones = f([10.0, 11.0], [1.0, 2.0], [u"p", u"p"])
+    r.check("sequence starting at 1 still finds a baseline", ones,
+            [10.0, 10.0])
+
+    # -- ⑤ composite keys ----------------------------------------------
+    #    Two key columns combine into one key, exactly as GROUP_*list.
+    composite = f([10.0, 100.0, 12.0, 130.0],
+                  [0.0, 0.0, 8.0, 8.0],
+                  [u"未知杂质", u"未知杂质"] * 2,
+                  [u"low", u"high", u"low", u"high"])
+    r.check("composite key keeps the levels apart",
+            composite, [10.0, 100.0, 10.0, 100.0])
+    #    Collapse it to the name alone and the two levels merge -- which
+    #    is what makes the second key column load-bearing, not decoration.
+    collapsed = f([10.0, 100.0, 12.0, 130.0],
+                  [0.0, 0.0, 8.0, 8.0],
+                  [u"未知杂质"] * 4)
+    r.check("one key column merges them", collapsed,
+            [10.0, 10.0, 10.0, 10.0])
+
+    # -- ⑥ edges --------------------------------------------------------
+    blank_seq = f([10.0, 12.0], [u"", u""], [u"p", u"p"])
+    r.check("empty sequence column blanks the output", blank_seq,
+            [p._PLACEHOLDER] * 2)
+    r.check("empty sequence does NOT promote row 0",
+            blank_seq[0] == 10.0, False)
+    r.check("non-numeric sequence column blanks the output",
+            f([10.0, 12.0], [u"abc", p._PLACEHOLDER], [u"p", u"p"]),
+            [p._PLACEHOLDER] * 2)
+    #    A missing value ON the baseline run is skipped the way the
+    #    GROUP_* family skips it -- the group simply has no baseline.
+    r.check("missing baseline value is skipped",
+            f([u"", 12.0], [0.0, 8.0], [u"p", u"p"]),
+            [p._PLACEHOLDER, p._PLACEHOLDER])
+    #    ...but a later missing value costs the group nothing.
+    r.check("missing later value keeps the baseline",
+            f([10.0, u"", 12.0], [0.0, 8.0, 8.0], [u"p", u"p", u"p"]),
+            [10.0, 10.0, 10.0])
+    r.check("empty input", f([], [], []), [])
+    #    A scalar sequence means one single run: every row is baseline.
+    r.check("scalar sequence broadcasts",
+            f([10.0, 20.0], 0.0, [u"a", u"b"]), [10.0, 20.0])
+
+    # -- ⑦ two rows of one group inside the baseline run ---------------
+    before = len(logger.lines)
+    dup = f([10.0, 40.0, 12.0], [0.0, 0.0, 8.0], [u"p", u"p", u"p"])
+    r.check("earliest row wins", dup, [10.0, 10.0, 10.0])
+    r.check("the later duplicate is not used", dup[0] == 40.0, False)
+    new_lines = logger.lines[before:]
+    r.check("one warn line", len(new_lines), 1)
+    r.check("the warn names the function",
+            bool(new_lines) and "BASELINE_BYlist" in new_lines[0], True)
+    r.check("the warn names the analysis",
+            bool(new_lines) and owner.id in new_lines[0], True)
+
+    #    One line per GROUP, not per row.  A key column filled with one
+    #    value on every row is an easy mistake to make, and a per-row
+    #    line would put one entry per table row into the log on every
+    #    evaluation -- enough noise to bury the finding itself.
+    before = len(logger.lines)
+    flat = f([10.0, 20.0, 30.0, 40.0], [0.0] * 4, [u"same"] * 4)
+    r.check("all four read the first row", flat, [10.0] * 4)
+    r.check("four duplicate rows still log one line",
+            len(logger.lines) - before, 1)
+    r.check("the line names every ignored row",
+            "2, 3, 4" in logger.lines[-1], True)
+
+    #    The key is analyst text and is routinely CJK.  Py2 turns a
+    #    careless %-format here into UnicodeDecodeError, which would
+    #    replace the warning with a traceback -- R13.
+    before = len(logger.lines)
+    cjk = f([10.0, 40.0, 12.0], [0.0, 0.0, 8.0], [u"未知杂质"] * 3)
+    r.check("CJK duplicate still resolves", cjk, [10.0, 10.0, 10.0])
+    r.check("CJK duplicate logged once", len(logger.lines) - before, 1)
+    r.check("CJK key survives into the warn",
+            u"未知杂质".encode("utf-8") in logger.lines[-1], True)
+
+
+def test_baseline_registration(p, r):
+    """S1: array table only, and named in the dispatch regex by hand."""
+    safe = _registry_keys(p, "_SAFE")
+    scalar = _registry_keys(p, "safe_globals")
+    r.check("BASELINE_BYlist in _SAFE", "BASELINE_BYlist" in safe, True)
+    r.check("BASELINE_BYlist not in safe_globals",
+            "BASELINE_BYlist" in scalar, False)
+
+    # ★ The name does not begin with GROUP_ and does not end in _ROWS, so
+    # the family patterns do NOT catch it.  Assert that directly: this is
+    # the one-line omission that would send it down the per-element path,
+    # where it sees a single scalar and can never find the baseline row.
+    family_only = re.compile(r'(GROUP_\w+(?:list)?|\w+_ROWS)\s*\(')
+    r.check("the family patterns do not cover it",
+            bool(family_only.search(u"BASELINE_BYlist([a],[b],[c])")), False)
+
+    src = open(p.__source_path__, "rb").read().decode("utf-8")
+    r.check("named in the dispatch regex in source",
+            u"|BASELINE_BYlist" in src, True)
+    array_fn_re = re.compile(
+        r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS'
+        r'|COALESCE|SHIFT|BASELINE_BYlist)\s*\(')
+    r.check("BASELINE_BYlist takes the array path",
+            bool(array_fn_re.search(u"BASELINE_BYlist([a],[b],[c])")), True)
+
+    # It must not be wired through _group_apply: that helper has no
+    # sequence dimension, so a group absent from the baseline run would
+    # aggregate its OWN rows and come back as a ratio of 100.0.
+    code = _find_code(p, "_baseline_bylist")
+    r.check("found the code object", code is not None, True)
+    if code is not None:
+        r.check("does not call _group_apply",
+                "_group_apply" in (code.co_names + code.co_freevars), False)
+
+
+def test_baseline_through_the_engine(p, r):
+    """S1: drive the REAL engine, not a rebuilt closure.
+
+    Everything above calls the function directly, which cannot see the one
+    mistake that would hurt most: _ARRAY_FN_RE decides array path vs
+    per-element path by NAME, and BASELINE_BYlist matches none of the
+    family patterns.  Left out of that regex it would be handed one scalar
+    at a time and could never find the baseline row.  Only the engine
+    proves the wiring.
+
+    It also pins the spelling.  The array path substitutes whole columns
+    and evaluates ONCE, so `[g_area] / BASELINE_BYlist(...)` is a list
+    divided by a list -- a TypeError that blanks the column.  The baseline
+    has to land in its own interim field first.  That is not a quirk of
+    this function; it is how every array-path function composes.
+    """
+    import json
+
+    install_engine_stubs()
+    base_call = (u"BASELINE_BYlist([g_area],[imp_stab_time],"
+                 u"[imp_pct_group])")
+
+    def columns():
+        return [
+            {"keyword": "g_area", "title": u"峰面积", "result_type": "list",
+             "value": json.dumps(S1919_AREA)},
+            {"keyword": "imp_stab_time", "title": u"时间",
+             "result_type": "list", "value": json.dumps(S1919_HOURS)},
+            {"keyword": "imp_pct_group", "title": u"峰组",
+             "result_type": "list", "value": json.dumps(S1919_PEAK)},
+        ]
+
+    def run(extra):
+        _, analyses = build_sample([{
+            "as_id": "AS1", "service_kw": "stab",
+            "fields": columns() + extra}])
+        out = evaluate(p, analyses, ("AS1",))
+        return dict((k.split(".", 1)[1], json.loads(v))
+                    for k, v in out.items() if v)
+
+    # -- the spelling that works -------------------------------------
+    two_column = run([
+        {"keyword": "imp_base", "title": u"0点峰面积",
+         "result_type": "calculatedlist", "formula": base_call},
+        {"keyword": "imp_deviation", "title": u"与0点的比值",
+         "result_type": "calculatedlist",
+         "formula": u"ROUND_EVEN([g_area]/[imp_base]*100, 1)"},
+    ])
+    r.check("engine: baseline column", two_column.get("imp_base"),
+            S1919_BASELINE)
+    r.check("engine: deviation column", two_column.get("imp_deviation"),
+            [100.0] * 5 + S1919_DEVIATION_8H)
+    # ★ The new peak has to reach the RESULT as a blank.  The per-element
+    # path propagates the placeholder for free -- but only because the
+    # baseline really is "---" there, which is the whole point.
+    r.check("engine: the 8h-only peak stays blank",
+            two_column.get("imp_deviation")[9], u"---")
+
+    # -- the spelling that does NOT work, pinned on purpose -----------
+    one_liner = run([
+        {"keyword": "imp_deviation", "title": u"与0点的比值",
+         "result_type": "calculatedlist",
+         "formula": u"ROUND_EVEN([g_area]/%s*100, 1)" % base_call},
+    ])
+    r.check("engine: inlining the call blanks the whole column",
+            one_liner.get("imp_deviation"), [u"---"] * 11)
+
+    # The README may SHOW the broken spelling -- it is worth showing --
+    # but only next to the warning.  What it must never do is present it
+    # as the recipe, which is how it was written before this ran.
+    readme = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(p.__source_path__))),
+        "..", "..", "README.md")
+    readme = os.path.normpath(readme)
+    r.check("README found at %s" % readme, os.path.exists(readme), True)
+    if os.path.exists(readme):
+        text = open(readme, "rb").read().decode("utf-8")
+        r.check("README gives the two-field recipe",
+                u"ROUND_EVEN([g_area]/[imp_base]*100, 1)" in text, True)
+        r.check("README warns against the one-liner",
+                u"不能写成一行" in text, True)
+
+
 def main():
     p = load_patches()
     print("IMPORT OK  (no Zope instance started)")
@@ -733,7 +1059,10 @@ def main():
     test_dependent_lookup_branch_wired(p, r)
     test_group_ci_whole_column(p, r)
     test_s7_registration(p, r)
-    return r.report("S0-S7 engine helpers")
+    test_baseline_bylist(p, r)
+    test_baseline_registration(p, r)
+    test_baseline_through_the_engine(p, r)
+    return r.report("S0-S7 engine helpers + BASELINE_BYlist")
 
 
 if __name__ == "__main__":

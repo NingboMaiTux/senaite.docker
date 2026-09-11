@@ -4674,6 +4674,156 @@ def _evaluate_calculatedlist_interims(self, only=None):
         """Upper bound of each group's 95% CI, broadcast to input length."""
         return _group_apply(values, keys, lambda ns: _agg_ci(ns, +1))
 
+    # ---- baseline lookup ----------------------------------------------
+    #
+    # BASELINE_BYlist wears the family's `list` suffix but is NOT built on
+    # _group_apply, on purpose.  That helper has no sequence dimension: it
+    # groups by key and aggregates whatever the group itself holds, so
+    # "the baseline value" would silently become "the group's own first
+    # row".  For a peak that only APPEARS at the second time point, that
+    # reads back as a ratio of 100.0 -- a number nobody questions,
+    # standing exactly where "this peak did not exist at time zero"
+    # belongs.  The sequence column is what separates the two, so it is a
+    # parameter, and this is a parallel helper rather than one more
+    # `_group_apply(...)` one-liner.
+
+    def _baseline_duplicate_warn(floor, repeated, order):
+        """Log the groups that occupy more than one row of the baseline run.
+
+        Two rows of one group inside a single injection means the
+        grouping key is not separating the peaks -- a configuration
+        error.  The earliest row still wins so the column stays usable,
+        but it must not resolve itself quietly (R9).
+
+        ONE line per group, not per row.  A key column filled with the
+        same value on every row is a plausible mistake, and row-by-row
+        that would put one line per row of the table into the log on
+        every single evaluation -- noise deep enough to bury the finding
+        it is trying to make.
+
+        [PY2-UNICODE] The keys are analyst-entered text and are routinely
+        CJK.  Build the whole message as unicode and encode ONCE at the
+        end: interpolating an already-encoded utf-8 `str` beside a
+        unicode argument promotes the format string to unicode and then
+        decodes the encoded half as ASCII -- R13.
+        """
+        from bika.lims import logger as _bl_logger
+        for key in order:
+            message = (
+                u"maitux.calcenhance: BASELINE_BYlist on %s: group %s has "
+                u"more than one row on the baseline run (sequence %s).  "
+                u"Row(s) %s ignored, the earliest row wins -- but the "
+                u"grouping key is not telling these rows apart, so check "
+                u"the grouping column."
+                % (_safe_text(getattr(self, "id", "?")),
+                   u"/".join(key) or u"(empty)",
+                   _safe_text(floor),
+                   u", ".join(unicode(i + 1) for i in repeated[key])))
+            _bl_logger.warn(message.encode("utf-8"))
+
+    def _baseline_bylist(values, sequence, *keys):
+        """Each row's value on the BASELINE run of its OWN group.
+
+            BASELINE_BYlist([value], [sequence], [key1], ... [keyN])
+
+        Written for solution stability, where every peak is reported as a
+        percentage of itself at time zero.  It takes TWO interim fields,
+        not one:
+
+            imp_base      = BASELINE_BYlist([g_area], [imp_stab_time],
+                                            [imp_pct_group])
+            imp_deviation = ROUND_EVEN([g_area] / [imp_base] * 100, 1)
+
+        Inlining the call into the ratio does not work, and the reason is
+        structural rather than particular to this function: _ARRAY_FN_RE
+        routes the whole formula to the array path, which substitutes
+        entire columns and evaluates ONCE, so `[g_area] / BASELINE_...`
+        is a list divided by a list.  The TypeError blanks the column to
+        '---' (with an ARRAY_FN eval FAIL line in the log).  Split across
+        two fields, the second formula holds no array function, takes the
+        per-element path, and gets placeholder propagation for free: the
+        row whose baseline is '---' comes out '---' without a test for
+        it.  The baseline column is worth having on the report anyway --
+        it shows which zero-hour area each peak was measured against.
+
+        `sequence` says which run a row belongs to -- hours elapsed, an
+        injection number, anything ordered and numeric.  The baseline run
+        is the GLOBAL minimum of that column; it is never each group's
+        own minimum.  Compare against the smallest value present rather
+        than against 0: TIME_ELAPSED_HOURS happens to start at 0.0, but
+        other methods number their injections from 1.
+
+        A group with no value on the baseline run yields the "---"
+        placeholder -- not 0, not the group's own first value, not the
+        main peak.  A peak that appears only at the second time point has
+        nothing to be compared against, and that is what the analysts'
+        own worksheet records: an empty cell.
+
+        Missing and non-numeric cells are skipped the way the GROUP_*
+        family skips them.  A sequence column with nothing numeric in it
+        blanks the whole output instead of promoting row 0 to baseline;
+        an invented baseline would make every ratio downstream look
+        perfectly reasonable.
+
+        An array-path function: a per-element view cannot see which row
+        carries the baseline.
+        """
+        import sys as _bl_sys
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        count = len(values)
+
+        def _column(arr):
+            """`arr` as a column of exactly `count` cells."""
+            if not isinstance(arr, (list, tuple)):
+                return [arr] * count
+            arr = list(arr)
+            if len(arr) < count:
+                arr = arr + [None] * (count - len(arr))
+            return arr[:count]
+
+        seq = [_num_or_none(v) for v in _column(sequence)]
+        key_columns = [_column(k) for k in keys]
+        row_keys = [tuple(_norm_key(col[index]) for col in key_columns)
+                    for index in range(count)]
+
+        present = [s for s in seq if s is not None]
+        if not present:
+            if count:
+                # An EMPTY table says nothing is wrong -- the analyst has
+                # not typed anything yet -- so it gets no line.  A table
+                # with rows but no usable sequence column does.
+                _bl_sys.stderr.write(
+                    "maitux:   BASELINE_BYlist: the sequence column holds "
+                    "no numeric value -- cannot tell which run is the "
+                    "baseline; returning '---' for all %d row(s)\n" % count)
+            return [_PLACEHOLDER] * count
+        floor = min(present)
+
+        baseline = {}
+        repeated = {}
+        repeated_order = []
+        for index in range(count):
+            if seq[index] != floor:
+                continue
+            number = _num_or_none(values[index])
+            if number is None:
+                # A blank cell on the baseline run is not a duplicate --
+                # trailing empty rows are ordinary in an interim table.
+                continue
+            key = row_keys[index]
+            if key in baseline:
+                if key not in repeated:
+                    repeated[key] = []
+                    repeated_order.append(key)
+                repeated[key].append(index)
+                continue
+            baseline[key] = number
+        if repeated:
+            _baseline_duplicate_warn(floor, repeated, repeated_order)
+
+        return [baseline.get(key, _PLACEHOLDER) for key in row_keys]
+
     # ---- rounding, formatting, numeric-isation -------------------------
     #
     # These four are SCALAR functions on the per-element path and must not
@@ -5417,6 +5567,13 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "GROUP_RSDlist": _group_rsdlist,
         "GROUP_CI_LOWlist": _group_ci_lowlist,
         "GROUP_CI_HIGHlist": _group_ci_highlist,
+        # Sits beside the family but does not belong to it: it takes a
+        # SEQUENCE column as well as the keys, because "the baseline" is
+        # the earliest run of the whole table, not the first row of each
+        # group.  The name does not start with GROUP_, so it has to be
+        # named in _ARRAY_FN_RE explicitly (see the dispatch comment
+        # there) or it degrades to the per-element path.
+        "BASELINE_BYlist": _baseline_bylist,
         "RESULT_STATUS": _result_status,
         "COALESCE": _coalesce,
         "SHIFT": _shift,
@@ -5607,8 +5764,14 @@ def _evaluate_calculatedlist_interims(self, only=None):
         # short-circuits a whole row to "---" as soon as ANY input is
         # the placeholder, and tolerating missing inputs is precisely
         # what COALESCE is for.
+        # BASELINE_BYlist is in the same position as TIME_ELAPSED_HOURS:
+        # the `list` suffix is not what the regex matches on, GROUP_ is,
+        # so it must be spelled out here.  Left off, it would take the
+        # per-element path, see one scalar at a time, and never find the
+        # baseline row at all.
         _ARRAY_FN_RE = re.compile(
-            r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS|COALESCE|SHIFT)\s*\(')
+            r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS|COALESCE|SHIFT'
+            r'|BASELINE_BYlist)\s*\(')
         if _ARRAY_FN_RE.search(formula):
             expr = formula
             if isinstance(expr, str):
