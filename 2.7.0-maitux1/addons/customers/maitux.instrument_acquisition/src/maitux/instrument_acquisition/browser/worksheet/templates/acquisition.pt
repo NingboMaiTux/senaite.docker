@@ -146,7 +146,10 @@
               <span class="badge badge-primary ml-2"
                     tal:content="python:view.get_counts().get('total', 0)">0</span>
             </div>
-            <div class="card-body p-2" style="max-height:540px;overflow-y:auto">
+            <!-- 高度按视口算（原来写死 540px）：操作日志折叠到底部之后，
+                 省下来的高度还给这两栏。min-height 兜住小屏。 -->
+            <div class="card-body p-2"
+                 style="max-height:calc(100vh - 320px);min-height:340px;overflow-y:auto">
 
               <tal:empty condition="python:not view.get_readings()">
                 <div class="text-muted text-center py-4">
@@ -233,7 +236,8 @@
               <i class="fas fa-clipboard-check mr-2 text-muted"></i>
               待分配目标列表
             </div>
-            <div class="card-body p-0" style="max-height:540px;overflow-y:auto">
+            <div class="card-body p-0"
+                 style="max-height:calc(100vh - 320px);min-height:340px;overflow-y:auto">
 
               <tal:empty condition="python:not view.get_targets()">
                 <div class="text-muted text-center py-4">
@@ -418,14 +422,20 @@
       <!-- ===== 操作日志 ===== -->
       <div class="row">
         <div class="col-sm-12">
+          <!-- 操作日志默认折叠：平时不看，占着高度不如让上面两栏长一点。
+               用原生 details/summary 元素，不依赖 bootstrap.js（本页只保证有 jQuery）。 -->
           <div class="card">
-            <div class="card-header d-flex align-items-center">
+            <details id="acq_log_details">
+            <summary class="card-header" style="cursor:pointer">
               <i class="fas fa-history mr-2 text-muted"></i>
               操作日志
               <span class="badge badge-light ml-2"
                     tal:content="python:len(view.get_logs())">0</span>
-            </div>
-            <div class="card-body p-0" style="max-height:240px;overflow-y:auto">
+              <span class="text-muted ml-2" style="font-size:.75rem">
+                （平时折叠，点击展开）
+              </span>
+            </summary>
+            <div class="card-body p-0" style="max-height:320px;overflow-y:auto">
               <table class="table table-sm table-borderless mb-0">
                 <thead>
                   <tr>
@@ -454,11 +464,29 @@
                 </tbody>
               </table>
             </div>
+            </details>
           </div>
         </div>
       </div>
 
       <script type="text/javascript">
+        // 操作日志默认折叠；展开状态记在 localStorage —— 否则轮询触发整页
+        // 刷新后它又自己合上，正在看日志的人会被反复打断。
+        (function() {
+          var box = document.getElementById('acq_log_details');
+          if (!box) { return; }
+          try {
+            if (localStorage.getItem('acq_log_open') === '1') {
+              box.open = true;
+            }
+          } catch (e) {}
+          box.addEventListener('toggle', function() {
+            try {
+              localStorage.setItem('acq_log_open', box.open ? '1' : '0');
+            } catch (e) {}
+          });
+        })();
+
         // 阶段一：简单轮询 —— 读数集合或监听状态变化时整页刷新。
         var acquisition_view_url = '<tal:u content="view_url"/>';
         var acquisition_session_id = '<tal:s content="view/get_session_id"/>';
