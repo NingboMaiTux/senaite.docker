@@ -276,7 +276,10 @@ def test_count_values_rows(p, r):
 #              -> 64 (S7: GROUP_CI_LOW / GROUP_CI_HIGH, array table only)
 #              -> 65 (BASELINE_BYlist, array table only -- a different
 #                     backlog: 稳定性基线取值 S1)
-EXPECTED_SAFE_ENTRIES = 65
+#              -> 66 (ROUND_UP, array table only -- completes the
+#                     rounding family; array table because that is
+#                     where ROUND / ROUND_EVEN already live)
+EXPECTED_SAFE_ENTRIES = 66
 EXPECTED_SCALAR_ENTRIES = 26
 
 
@@ -778,6 +781,62 @@ def _rebuild_round_even(p):
     return fn
 
 
+def _rebuild_round_up(p):
+    """Rebuild ROUND_UP.  Same shape as _rebuild_round_even: it recurses on
+    the list branch, so the self-reference goes in as a trampoline."""
+    box = {}
+    fn = rebuild(p, "_round_up", defaults=(0,), freevars={
+        "_round_up": lambda *a, **kw: box["fn"](*a, **kw),
+        "_dec_quantize": rebuild(p, "_dec_quantize")})
+    box["fn"] = fn
+    return fn
+
+
+def test_round_up(p, r):
+    """ROUND_UP: 只进不舍, and -- the point of it -- it maps over a list.
+
+    The function exists because `ceil(RSD_ROWS(...)*10)/10` in a formula
+    crashes: the array function returns a list, `list * 10` is Python list
+    repetition, and math.ceil then throws "a float is required", which the
+    engine surfaces as "---" for the whole column.  So the list branch is
+    the case under test, not a nicety.
+    """
+    safe = _registry_keys(p, "_SAFE")
+    r.check("ROUND_UP registered in _SAFE", "ROUND_UP" in safe, True)
+
+    f = _rebuild_round_up(p)
+    r.check("rebuilt ROUND_UP", f is not None, True)
+    if f is None:
+        return
+
+    # -- scalars -------------------------------------------------------
+    # 1.606 is the RSD the 2026-09-11 simulated run actually produced from
+    # areas 100/102/101/103/104/100; loq_rsd should report 1.7.
+    r.check("1.606 -> 1.7", f(1.606, 1), 1.7)
+    r.check("1.601 -> 1.7", f(1.601, 1), 1.7)
+    # No remainder means no carry -- 只进不舍 is not "always add one".
+    r.check("1.6 stays 1.6", f(1.6, 1), 1.6)
+    r.check("2.0 stays 2.0", f(2.0, 1), 2.0)
+    r.check("0.01 -> 0.1", f(0.01, 1), 0.1)
+    r.check("digits=0", f(1.0001, 0), 2.0)
+
+    # -- the list branch, i.e. what GROUP_RSDlist / RSD_ROWS hand it ----
+    r.check("maps over a list",
+            f([1.606, 2.301, 0.05], 1), [1.7, 2.4, 0.1])
+
+    # -- non-numeric members degrade per element, not per column -------
+    r.check("placeholder per element",
+            f([1.606, None, u"", u"N.D."], 1),
+            [1.7, p._PLACEHOLDER, p._PLACEHOLDER, p._PLACEHOLDER])
+    r.check("scalar non-numeric", f(u"N.D.", 1), p._PLACEHOLDER)
+
+    # -- away from zero, NOT toward +inf -------------------------------
+    # Pins the documented decision: ceil(-1.51) would give -1.5.  Every
+    # caller today is a percentage or an RSD and never negative, so this
+    # only bites a future one -- which is exactly why it is nailed down.
+    r.check("negative rounds away from zero", f(-1.51, 1), -1.6)
+
+
 def test_baseline_bylist(p, r):
     """S1: the baseline is the earliest RUN, not each group's first row."""
     logger = install_engine_stubs()
@@ -1059,6 +1118,7 @@ def main():
     test_dependent_lookup_branch_wired(p, r)
     test_group_ci_whole_column(p, r)
     test_s7_registration(p, r)
+    test_round_up(p, r)
     test_baseline_bylist(p, r)
     test_baseline_registration(p, r)
     test_baseline_through_the_engine(p, r)

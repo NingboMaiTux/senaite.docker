@@ -4871,6 +4871,37 @@ def _evaluate_calculatedlist_interims(self, only=None):
         d = _dec_quantize(val, digits, ROUND_HALF_EVEN)
         return _PLACEHOLDER if d is None else float(d)
 
+    def _round_up(val, digits=0):
+        """Round AWAY FROM ZERO at `digits` decimals.
+
+        Completes the rounding family: ROUND is half away from zero,
+        ROUND_EVEN is half to even (GB/T 8170 / ChP), and this one never
+        discards a remainder at all -- GB/T 8170 calls it 只进不舍, the
+        analysts here ask for it as 向上进位.  Returns a NUMBER.
+
+        Why a function instead of writing ceil() in the formula:
+        `ceil` is bare math.ceil and takes a float, but every field that
+        wants this rounding reads from an array function (RSD_ROWS,
+        GROUP_RSDlist, ...) which returns a LIST.  So
+        `ceil(RSD_ROWS(...)*10)/10` hits Python list repetition on the
+        multiply and then throws "a float is required" -- the column
+        reads "---" and looks like missing data rather than a bad
+        formula.  Mapping over the list here is the same shape the rest
+        of the family already uses.
+
+        ★ Deliberately NOT ceil() for negative values.  ceil(-1.51)
+        rounds toward +inf (-1.5); this rounds away from zero (-1.6),
+        which is what 只进不舍 means and what ROUND does.  Every caller
+        today is a percentage or an RSD and never negative, so the two
+        agree in practice; the difference is written down so a future
+        negative-valued caller is not a surprise.
+        """
+        if isinstance(val, list):
+            return [_round_up(v, digits) for v in val]
+        from decimal import ROUND_UP
+        d = _dec_quantize(val, digits, ROUND_UP)
+        return _PLACEHOLDER if d is None else float(d)
+
     def _format_digits(val, digits=0):
         """Fixed number of decimals, TRAILING ZEROS KEPT.  Returns a STRING.
 
@@ -5581,6 +5612,7 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "RESULT_NUM": _result_num,
         "ROUND": _round_half_up,
         "ROUND_EVEN": _round_half_even,
+        "ROUND_UP": _round_up,
         "FORMAT": _format_digits,
         "INDEX_BY": _index_by,
         "SLOPE": _slope,
