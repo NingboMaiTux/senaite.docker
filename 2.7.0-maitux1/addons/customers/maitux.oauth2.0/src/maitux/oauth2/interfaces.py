@@ -61,7 +61,10 @@ class IOAuth2Settings(model.Schema):
 
     app_id = schema.TextLine(
         title=_(u"AppId"),
-        description=_(u"竹云为本应用分配的 AppId。仅用于记录与排查，登录流程不使用。"),
+        description=_(
+            u"竹云为本应用分配的 AppId。登录流程不使用，但用户同步必须有它："
+            u"“谁有权限访问 LIMS”这份名单是按应用查的。"
+        ),
         default=u"20260804155456579-E219-3F7069E8F",
         missing_value=u"",
         required=False,
@@ -144,7 +147,8 @@ class IOAuth2Settings(model.Schema):
             "introspect_path",
             "idp_logout_path",
             "eiam_token_path",
-            "eiam_users_path",
+            "eiam_app_accounts_path",
+            "eiam_user_by_username_path",
         ],
     )
 
@@ -191,9 +195,25 @@ class IOAuth2Settings(model.Schema):
         required=False,
     )
 
-    eiam_users_path = schema.TextLine(
-        title=_(u"EIAM 用户列表接口"),
-        default=u"/api/v2/tenant/users",
+    eiam_app_accounts_path = schema.TextLine(
+        title=_(u"应用账号列表接口"),
+        description=_(
+            u"用户同步的第一步：查出竹云里被授权访问本应用的人。"
+            u"路径中的 {app_id} 会自动替换成上面配置的 AppId。"
+        ),
+        default=u"/api/v2/tenant/applications/{app_id}/accounts",
+        missing_value=u"",
+        required=False,
+    )
+
+    eiam_user_by_username_path = schema.TextLine(
+        title=_(u"按用户名查用户接口"),
+        description=_(
+            u"用户同步的第二步：只为上一步查出来的那几十个人取详细信息。"
+            u"刻意不使用“获取用户列表”接口——那个会把全公司几千条员工档案"
+            u"（含证件号、手机号）全部拉到本地。"
+        ),
+        default=u"/api/v2/tenant/users/user-by-username",
         missing_value=u"",
         required=False,
     )
@@ -422,8 +442,9 @@ class IOAuth2Settings(model.Schema):
         label=_(u"用户定时同步"),
         fields=[
             "sync_enabled",
+            "sync_create_missing",
+            "sync_protected_users",
             "sync_user_id_field",
-            "sync_org_id",
             "sync_page_size",
             "sync_deactivate_missing",
             "sync_max_missing_percent",
@@ -436,39 +457,62 @@ class IOAuth2Settings(model.Schema):
 
     sync_enabled = schema.Bool(
         title=_(u"启用用户同步"),
-        description=_(u"每天从竹云 EIAM 拉取用户列表，把离职/停用/锁定的用户在 LIMS 里停用。"),
+        description=_(
+            u"每天向竹云要一次“谁被授权访问本应用”的名单，据此在 LIMS 里建号和停用。"
+        ),
         default=True,
+        required=False,
+    )
+
+    sync_create_missing = schema.Bool(
+        title=_(u"为名单里的人提前建号"),
+        description=_(
+            u"开启后，竹云里被授权但还没登录过 LIMS 的人，同步时就会把本地账号建好，"
+            u"管理员可以提前分配权限，不必等对方先登录一次。"
+            u"新建的账号同样处于“待授权”状态。"
+        ),
+        default=True,
+        required=False,
+    )
+
+    sync_protected_users = schema.List(
+        title=_(u"永不停用的账号"),
+        description=_(
+            u"同步时绝不停用的 LIMS 用户名，每行一个。"
+            u"管理员（Manager / Site Administrator）已自动受保护，不必写在这里——"
+            u"竹云的应用授权名单是给实验室人员的，管理员通常不在名单上，"
+            u"如果照着名单停用，第一晚就会把管理员自己锁在门外。"
+            u"这里用于补充：服务账号，或只通过用户组间接获得管理角色的人。"
+        ),
+        value_type=schema.TextLine(),
+        default=[],
+        missing_value=[],
         required=False,
     )
 
     sync_user_id_field = schema.TextLine(
         title=_(u"同步比对字段"),
         description=_(
-            u"EIAM 用户列表中与“唯一 ID 字段”对应的字段名，可填多个用英文逗号分隔。"
+            u"竹云用户详情中与“唯一 ID 字段”对应的字段名，可填多个用英文逗号分隔。"
         ),
         default=u"external_id,user_id",
         missing_value=u"",
         required=False,
     )
 
-    sync_org_id = schema.TextLine(
-        title=_(u"限定组织 ID"),
-        description=_(u"留空表示同步全部用户。"),
-        default=u"",
-        missing_value=u"",
-        required=False,
-    )
-
     sync_page_size = schema.Int(
         title=_(u"每页数量"),
-        description=_(u"竹云要求 10-100。"),
+        description=_(u"读取应用账号列表时的分页大小。竹云要求 10-100。"),
         default=100,
         required=False,
     )
 
     sync_deactivate_missing = schema.Bool(
-        title=_(u"竹云中查不到的用户也停用"),
-        description=_(u"覆盖“账号被直接删除”的情况。"),
+        title=_(u"不在名单里的用户也停用"),
+        description=_(
+            u"覆盖“离职”和“被取消 LIMS 授权”两种情况——"
+            u"只要人不在竹云的应用授权名单里，本地账号就停用。"
+        ),
         default=True,
         required=False,
     )
@@ -476,9 +520,9 @@ class IOAuth2Settings(model.Schema):
     sync_max_missing_percent = schema.Int(
         title=_(u"允许缺失比例上限（%）"),
         description=_(
-            u"安全保险。如果本地超过这个比例的统一登录账号在竹云用户列表里"
-            u"匹配不到，就不停用任何账号，只报错。防止“存的唯一 ID 和 EIAM "
-            u"的字段对不上”或“接口只返回了部分数据”时一次把所有人停用。"
+            u"安全保险。如果本地超过这个比例的统一登录账号在竹云的应用授权名单里"
+            u"匹配不到，就不停用任何账号，只报错。防止“存的唯一 ID 和竹云的字段"
+            u"对不上”或“接口只返回了部分数据”时一次把所有人停用。"
             u"填 100 = 关闭本保险。缺失数少于 5 个时不变。"
         ),
         default=50,

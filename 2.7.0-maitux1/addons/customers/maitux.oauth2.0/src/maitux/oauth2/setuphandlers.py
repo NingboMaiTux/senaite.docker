@@ -108,10 +108,13 @@ def upgrade_registry(context):
 
     Registered as a GenericSetup upgrade step so a production site can pick up
     new configuration options from the add-ons control panel, without anyone
-    having to open the settings page first.
+    having to open the settings page first.  Also (re)declares the member data
+    properties, since a release may add one of those too -- ``manage_addProperty``
+    is skipped for properties that already exist, so this is safe to re-run.
     """
     missing = config.ensure_records()
     fixed = config.normalize_text_records()
+    _add_memberdata_properties(api.portal.get())
     logger.info("maitux.oauth2 upgrade: created %s record(s)%s, normalised %s",
                 len(missing), (": %s" % sorted(missing)) if missing else "",
                 sorted(fixed))

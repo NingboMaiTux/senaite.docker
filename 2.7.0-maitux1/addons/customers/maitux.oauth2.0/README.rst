@@ -27,9 +27,9 @@ SENAITE 2.7 / Plone 5.2 / Python 2.7。
   * 不存在 → 自动建号并放入“待授权”组 → ``/@@oauth2-pending``
     （待管理员分配权限）
 
-* **每天一次的用户同步**：调用竹云 EIAM ``/api/v2/tenant/users``，把
-  ``disabled`` / ``locked`` / 已从竹云消失的用户在 LIMS 里停用（解决“员工离职、
-  客户不提供通知接口”的问题）。
+* **每天一次的用户同步**：向竹云要一次“谁被授权访问本应用”的名单，据此
+  提前建号、恢复误停用的账号、并把离职或被取消授权的人在 LIMS 里停用
+  （解决“员工离职、客户不提供通知接口”的问题）。管理员永不被停用。
 * 退出时可同时调用竹云全局退出接口。
 * 管理员逃生出口：``/@@oauth2-local-login`` 始终可以打开本地登录表单。
 
@@ -41,16 +41,22 @@ SENAITE 2.7 / Plone 5.2 / Python 2.7。
 用到的竹云接口
 ==============
 
-===================================  ==========================================
-接口                                  用途
-===================================  ==========================================
-``GET  /api/v1/oauth2/authorize``     获取标准授权码
-``POST /api/v1/oauth2/token``         授权码换 access_token
-``GET  /api/v1/oauth2/userinfo``      获取用户身份
-``POST /api/v1/oauth2/introspect``    检查 token 有效性（预留）
-``GET  /api/v1/logout``               全局退出
-``POST /api/v2/tenant/token``         EIAM 鉴权 (client_credentials)
-``GET  /api/v2/tenant/users``         EIAM 用户列表（每日同步）
-===================================  ==========================================
+======================================================  ====================================
+接口                                                     用途
+======================================================  ====================================
+``GET  /api/v1/oauth2/authorize``                        获取标准授权码
+``POST /api/v1/oauth2/token``                            授权码换 access_token
+``GET  /api/v1/oauth2/userinfo``                         获取用户身份
+``POST /api/v1/oauth2/introspect``                       检查 token 有效性（预留）
+``GET  /api/v1/logout``                                  全局退出
+``POST /api/v2/tenant/token``                            EIAM 鉴权 (client_credentials)
+``GET  /api/v2/tenant/applications/{app_id}/accounts``   谁被授权访问本应用（每日同步第一步）
+``POST /api/v2/tenant/users/user-by-username``           取单个用户详情（每日同步第二步）
+======================================================  ====================================
 
-文档：https://open.bccastle.com/development/
+刻意**不使用** ``GET /api/v2/tenant/users``（租户级用户列表）：它没有应用维度的
+过滤条件，一次会返回全租户几千条员工档案（含证件号、手机号），而实际有权访问
+LIMS 的只有几十人。
+
+文档：https://docs.bccastle.com/
+（旧站 https://open.bccastle.com/development/ 没有应用账号那组接口）

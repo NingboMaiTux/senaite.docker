@@ -57,6 +57,16 @@
       profile="maitux.oauth2:default"
       />
 
+  <genericsetup:upgradeStep
+      title="Switch the daily sync to the application authorisation list"
+      description="Adds the settings for the new sync endpoints (eiam_app_accounts_path, eiam_user_by_username_path, sync_create_missing, sync_protected_users) and the member property that remembers which groups a disabled account had. The obsolete eiam_users_path / sync_org_id records are left in place; they are simply no longer read."
+      source="2"
+      destination="3"
+      handler=".setuphandlers.upgrade_registry"
+      sortkey="1"
+      profile="maitux.oauth2:default"
+      />
+
   <utility
       factory=".setuphandlers.HiddenProfiles"
       name="maitux.oauth2-hiddenprofiles"
