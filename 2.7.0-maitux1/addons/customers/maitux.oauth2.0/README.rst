@@ -38,6 +38,25 @@ SENAITE 2.7 / Plone 5.2 / Python 2.7。
 
 见 `INSTALL.md <INSTALL.md>`_。
 
+测试
+====
+
+同步逻辑的测试不需要 Plone、不需要网络、不需要竹云账号，用 Python 2.7 直接跑::
+
+    python src/maitux/oauth2/tests.py
+    python src/maitux/oauth2/tests.py -v
+    python src/maitux/oauth2/tests.py AdminProtectionTests
+
+它用假对象顶掉 ``plone.api`` / ``Products.CMFCore``，加载**真实的** ``users.py``
+和 ``sync.py`` 来跑，覆盖建号、停用、恢复还原用户组、管理员保护、三道安全保护、
+dry run 等场景。
+
+``BCastleClient`` 被整体换成假的——HTTP 层由仓库根目录的 ``zhuyun-api-test``
+对着真实竹云环境验证，这里只测拿到数据之后的决策。
+
+⚠️ 不要在 Zope 进程里跑（``bin/instance run`` 之类）：往 ``sys.modules`` 里塞假的
+``plone.api`` 会把正在服务的站点搞坏。检测到那种情况测试会直接拒绝运行。
+
 用到的竹云接口
 ==============
 

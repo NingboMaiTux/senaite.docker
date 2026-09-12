@@ -7,6 +7,11 @@ Changelog
 - 首个版本：竹云 IDaaS OAuth 2.0 标准授权码模式统一登录，
   含首次登录建号（待授权）、停用拦截、以及每日 EIAM 用户同步。
 
+- 新增 ``tests.py``：27 个用例覆盖同步逻辑，不需要 Plone、网络或竹云账号。
+  用假对象顶掉 ``plone.api`` / ``Products.CMFCore``，加载真实的 ``users.py`` 和
+  ``sync.py`` 来跑。``python src/maitux/oauth2/tests.py`` 即可。
+  检测到在 Zope 进程里运行会直接拒绝——替换活站点的 ``plone.api`` 会出事。
+
 - 每日同步改为按**应用授权名单**进行，不再拉取租户级用户列表。
   ``GET /api/v2/tenant/users`` 只有 ``org_id`` / ``updated_at_greater`` 两个
   过滤条件，拿不到应用维度，实测一次返回 2717 条全公司员工档案（含身份证号、
