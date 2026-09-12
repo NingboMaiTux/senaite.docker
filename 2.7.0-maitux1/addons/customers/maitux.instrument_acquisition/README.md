@@ -9,6 +9,54 @@ Interim Field → 可选 HTTP 转发到第三方系统。
 
 ---
 
+## ★ 1.1.1：修两个只有单测真跑起来才看得到的问题
+
+`tests/test_session_store.py` 的 38 条测试**从来没真跑过**：文件顶部
+的 try 块里 import 了一个在本版 `zope.annotation` 里根本不存在的名字
+（`attribute.AttributeAnnotatable`），`_IMPORT_OK` 恒为 False，unittest
+只报 "skipped 38" 不报错。harness 已随 1.1.0 修好，真跑起来之后
+暴露出一个真产品 bug：
+
+### ★ `flush_relay_readings`：重试预算在**一次** flush 里就烧光了（丢数）
+
+进程内 relay 模式下，采集页每次轮询调 `flush_relay_readings` 把队列里
+的读数写进会话。单条写入失败时重新入队，最多重试
+`RELAY_FLUSH_MAX_RETRIES`（5）次 —— docstring 写的是“下个轮询周期重试”。
+
+实际不是。`relay.requeue()` 把读数放回的是**同一个队列**，而 requeue
+写在 `while True: pop` 的循环体里 —— 下一轮循环立刻又把它 pop 出来重试。
+**5 次重试在同一次 flush 内耗尽，读数当场丢失**；下一个轮询周期根本
+等不到。一次瞬时性拒绝（切会话、ZODB 冲突）就能把一次称量静默抹掉。
+
+修法：失败的读数先攒起来，**等本轮排空队列之后**再统一 requeue。
+日志也跟着改了：原先的 `failed` 按“尝试次数”计（一条读数会报 5 次），
+现在分开报 `retrying` 与 `dropped`。
+
+回归测试 `test_flush_retry_budget_spans_poll_cycles` 把“每个轮询周期只消耗
+一次重试额度”钉死了。
+
+### 其余是测试自己写错（不改产品）
+
+| 桩 | 错在哪 | 后果 |
+|---|---|---|
+| `api.is_object` 桩恒 True | 真的 `is_object(None)` 是 False | `ensure_session` 的“没分配仪器”那道门测不到 |
+| `api.get_object` 桩只认分析 | portal 会话索引存的是 `worksheet_uid` | 会话反查 / 跨工作表占用互斥 / force 挤占整条链路恒为 None |
+| 没打桩当前用户 | zopepy 无安全上下文，`_get_user_id()` 恒 u"" | `occupied_by` 恒空，“记录占用者”立不住 |
+| `test_unassign_returns_pending` 的 `assertNotIn` | 描述的是“撤销就删整条 assignment”的旧行为 | 现在是**只解绑、不删行**（数组字段的手动添加行靠 assignment 存在），已改成核“占位还在、绑定已清” |
+
+跑法（容器内，**不能用 `bin/instance run`**，会 OOM 杀实例）：
+
+```bash
+docker exec maituxlimslatest /home/senaite/senaitelims/bin/zopepy -c '
+import unittest, sys
+sys.path.insert(0, "/opt/addons/customers/maitux.instrument_acquisition/src")
+suite = unittest.TestLoader().loadTestsFromName(
+    "maitux.instrument_acquisition.tests.test_session_store")
+unittest.TextTestRunner(verbosity=1).run(suite)'
+```
+
+---
+
 ## ★ 1.1.0：采集目标位改为可配置（原先写死 `T_name` / `T_weight`）
 
 **1.0.0 把采集目标写死成两个 keyword**（`T_name` / `T_weight`），而线上任何
