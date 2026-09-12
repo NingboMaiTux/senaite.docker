@@ -31,6 +31,7 @@ PROP_DISABLED_REASON = "maitux_oauth2_disabled_reason"
 PROP_LAST_SYNC = "maitux_oauth2_last_sync"
 PROP_LAST_LOGIN = "maitux_oauth2_last_login"
 PROP_REVOKED_GROUPS = "maitux_oauth2_revoked_groups"
+PROP_USERNAME = "maitux_oauth2_username"
 
 MEMBERDATA_PROPERTIES = (
     (PROP_SUBJECT, "string", ""),
@@ -39,6 +40,7 @@ MEMBERDATA_PROPERTIES = (
     (PROP_LAST_SYNC, "string", ""),
     (PROP_LAST_LOGIN, "string", ""),
     (PROP_REVOKED_GROUPS, "string", ""),
+    (PROP_USERNAME, "string", ""),
 )
 
 #: Roles every authenticated Plone user carries -- they do not count as
@@ -235,7 +237,7 @@ def _resolve(portal, subject, username, fullname, email, may_create):
     """
     userid = storage.get_userid(portal, subject)
     if userid and get_member(portal, userid) is not None:
-        _touch(portal, userid, subject, fullname, email)
+        _touch(portal, userid, subject, fullname, email, username)
         return userid, "existing"
 
     if userid:
@@ -267,7 +269,7 @@ def _resolve(portal, subject, username, fullname, email, may_create):
             # Not bound to anyone yet: adopt the pre-existing local account
             # (e.g. one that was created by hand before SSO was switched on).
             storage.set_userid(portal, subject, candidate)
-            _touch(portal, candidate, subject, fullname, email)
+            _touch(portal, candidate, subject, fullname, email, username)
             logger.info("Linked IdP identity %s to existing member %s",
                         subject, candidate)
             return candidate, "linked"
@@ -282,12 +284,17 @@ def _resolve(portal, subject, username, fullname, email, may_create):
         raise AccountError(
             u"LIMS 中不存在对应账号，且系统未开启自动建号，请联系管理员。")
 
-    return create_user(portal, subject, candidate, fullname, email), "created"
+    return (create_user(portal, subject, candidate, fullname, email, username),
+            "created")
 
 
+def create_user(portal, subject, userid, fullname, email, idp_username=None):
+    """Create the local member and put it in the right group.
 
-def create_user(portal, subject, userid, fullname, email):
-    """Create the local member and put it in the right group."""
+    ``idp_username`` is the 竹云 login name.  It is kept verbatim because the
+    local user id is a *derived* value (see :func:`normalize_username`) and the
+    e-signature password check has to send 竹云 the name 竹云 knows.
+    """
     try:
         with api.env.adopt_roles(["Manager"]):
             api.user.create(
@@ -298,6 +305,7 @@ def create_user(portal, subject, userid, fullname, email):
                 properties={
                     "fullname": fullname or userid,
                     PROP_SUBJECT: subject,
+                    PROP_USERNAME: idp_username or u"",
                     PROP_DISABLED: False,
                 },
             )
@@ -325,7 +333,7 @@ def create_user(portal, subject, userid, fullname, email):
     return userid
 
 
-def _touch(portal, userid, subject, fullname, email):
+def _touch(portal, userid, subject, fullname, email, idp_username=None):
     """Keep the stored identity in sync with what 竹云 just told us."""
     member = get_member(portal, userid)
     if member is None:
@@ -333,12 +341,40 @@ def _touch(portal, userid, subject, fullname, email):
     properties = {}
     if member_property(member, PROP_SUBJECT, u"") != subject:
         properties[PROP_SUBJECT] = subject
+    if idp_username and member_property(member, PROP_USERNAME, u"") != idp_username:
+        properties[PROP_USERNAME] = idp_username
     if fullname and member_property(member, "fullname", u"") != fullname:
         properties["fullname"] = fullname
     if email and member_property(member, "email", u"") != email:
         properties["email"] = email
     if properties:
         set_member_properties(portal, userid, properties)
+
+
+def idp_username(portal, userid):
+    """The 竹云 login name behind a local account, or ``u""``.
+
+    Needed whenever we have to talk to 竹云 *about* a local member -- the
+    e-signature password check being the case that matters.  The local user id
+    is derived from the login name by :func:`normalize_username`, which
+    lowercases, rewrites illegal characters and may prepend a prefix, so it
+    cannot be turned back into the original reliably.  Hence the name is stored
+    verbatim at login and at provisioning time.
+
+    Accounts created before that property existed fall back to undoing the
+    prefix, which is right whenever the name needed no rewriting -- true for
+    every 竹云 login name seen so far (``mengc``, ``duj2``).  The fallback is
+    deliberately not cleverer than that: guessing wrong here would send someone
+    else's login name to the IdP.
+    """
+    member = get_member(portal, userid)
+    stored = member_property(member, PROP_USERNAME, u"") if member else u""
+    if stored:
+        return stored
+    prefix = (config.get("username_prefix") or u"").strip().lower()
+    if prefix and userid.startswith(prefix):
+        return userid[len(prefix):]
+    return userid
 
 
 def add_to_group(portal, groupname, userid, create_missing=False):

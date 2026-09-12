@@ -149,6 +149,7 @@ class IOAuth2Settings(model.Schema):
             "eiam_token_path",
             "eiam_app_accounts_path",
             "eiam_user_by_username_path",
+            "sdk_login_path",
         ],
     )
 
@@ -214,6 +215,90 @@ class IOAuth2Settings(model.Schema):
             u"（含证件号、手机号）全部拉到本地。"
         ),
         default=u"/api/v2/tenant/users/user-by-username",
+        missing_value=u"",
+        required=False,
+    )
+
+    sdk_login_path = schema.TextLine(
+        title=_(u"用户名+密码登录接口"),
+        description=_(
+            u"电子签名二次验证使用。认证方式是请求头 X-client-id（不是 Basic），"
+            u"用的就是上面那个 ClientId，不需要额外开通。"
+        ),
+        default=u"/api/v2/sdk/login",
+        missing_value=u"",
+        required=False,
+    )
+
+    # ------------------------------------------------------------------
+    model.fieldset(
+        "esignature",
+        label=_(u"电子签名二次验证"),
+        description=_(
+            u"给 maitux.esignature 用的。统一登录之后本地账号没有真实密码，"
+            u"签名时的账号/密码复核只能回竹云去问。"
+            u"在电子签名控制面板里把“认证后端”选成“竹云统一登录”即可生效。"
+        ),
+        fields=[
+            "esign_max_attempts",
+            "esign_cooldown_seconds",
+            "esign_min_remaining_attempts",
+            "sdk_device_fingerprint",
+            "sdk_os_version",
+            "sdk_user_agent",
+        ],
+    )
+
+    esign_max_attempts = schema.Int(
+        title=_(u"本地连续失败上限"),
+        description=_(
+            u"同一个人连续输错这么多次后，进入冷却期，期间不再把请求发给竹云。"
+            u"这是为了保护竹云账号：签名是高频操作，手滑很正常，而竹云那边"
+            u"错够次数会锁定账号——锁的是统一账号，该员工所有公司系统一起进不去。"
+            u"填 0 表示关闭本地限流（不建议）。"
+        ),
+        default=3,
+        required=False,
+    )
+
+    esign_cooldown_seconds = schema.Int(
+        title=_(u"冷却时间（秒）"),
+        description=_(u"达到上限后，多久之后才允许再次尝试。"),
+        default=60,
+        required=False,
+    )
+
+    esign_min_remaining_attempts = schema.Int(
+        title=_(u"竹云剩余次数保护线"),
+        description=_(
+            u"竹云在密码错误时会返回“剩余登录尝试次数:N”。当 N 低到这个值时，"
+            u"本插件直接停止尝试并提示用户，把最后几次机会留给他自己登录竹云，"
+            u"避免因为在 LIMS 里签名而把公司账号锁死。填 0 表示不做这个保护。"
+        ),
+        default=3,
+        required=False,
+    )
+
+    sdk_device_fingerprint = schema.TextLine(
+        title=_(u"设备指纹"),
+        description=_(u"竹云 SDK 接口的必填请求头，取值可自定义，保持稳定即可。"),
+        default=u"maitux-lims-esignature",
+        missing_value=u"",
+        required=False,
+    )
+
+    sdk_os_version = schema.TextLine(
+        title=_(u"操作系统版本"),
+        description=_(u"竹云 SDK 接口的必填请求头。"),
+        default=u"linux",
+        missing_value=u"",
+        required=False,
+    )
+
+    sdk_user_agent = schema.TextLine(
+        title=_(u"User-Agent"),
+        description=_(u"竹云 SDK 接口的必填请求头。"),
+        default=u"MaituxLIMS/1.0 (eSignature)",
         missing_value=u"",
         required=False,
     )

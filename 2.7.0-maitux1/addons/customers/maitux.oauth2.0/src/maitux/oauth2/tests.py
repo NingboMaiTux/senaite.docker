@@ -35,6 +35,7 @@ Plone 的解释器本身没问题（buildout 那个解释器就是这样，也�
 """
 
 import imp
+import json
 import os
 import sys
 import types
@@ -46,7 +47,15 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 users = None
 sync = None
 storage = None
+reauth = None
+client = None
 FakeClient = None
+
+#: 宿主上不一定有 zope.interface（比如裸的 Python 2.7）。有就用真的。
+try:
+    import zope.interface as _zope_interface
+except ImportError:
+    _zope_interface = None
 
 #: 桩装过没有。必须记一笔：装完之后 sys.modules 里就有 plone.api 和
 #: maitux.oauth2.users 了，正是 :func:`_zope_is_live` 用来判断「Zope 活着」的
@@ -192,11 +201,55 @@ class _PortalApi(object):
         return PORTAL
 
 
+class _CurrentUser(object):
+    """谁登录着 —— 由测试直接设置。"""
+
+    userid = None
+
+
 class FakeApi(object):
     env = _Env()
     user = _UserApi()
     group = _GroupApi()
     portal = _PortalApi()
+
+
+def _get_current():
+    if _CurrentUser.userid is None:
+        return None
+    return WORLD.members.get(_CurrentUser.userid)
+
+
+_UserApi.get_current = staticmethod(_get_current)
+
+
+class FakeTransport(object):
+    """顶替 httputils.request_json，记下发出去的请求，回放预设的响应。
+
+    只换掉最外面那一层网络调用，``client.py`` 里拼请求头、拼 body、解析错误码
+    的代码都跑真的 —— 「设备信息请求头有没有带全」这种事只有这样才测得到。
+    """
+
+    def __init__(self):
+        self.calls = []
+        self.reply = (200, {})
+
+    def __call__(self, url, method="GET", form=None, json_body=None,
+                 headers=None, **kwargs):
+        self.calls.append({
+            "url": url,
+            "method": method,
+            "form": form,
+            "json": json_body,
+            "headers": dict(headers or {}),
+        })
+        if callable(self.reply):
+            return self.reply(self.calls[-1])
+        return self.reply
+
+    @property
+    def last(self):
+        return self.calls[-1] if self.calls else None
 
 
 class _Membership(object):
@@ -237,8 +290,24 @@ class _SilentLogger(object):
 # 装桩 + 加载真实模块
 # ---------------------------------------------------------------------------
 
+def _install_zope_interface():
+    u"""没有真的就造一个够用的 —— ``implementer`` 在这里只是个记号。"""
+    if _zope_interface is not None:
+        from zope.interface.interface import InterfaceClass
+        return InterfaceClass("IReAuthenticationProvider")
+
+    interface_mod = types.ModuleType("zope.interface")
+    interface_mod.implementer = lambda *ifaces: (lambda cls: cls)
+    interface_mod.Interface = object
+    zope_pkg = sys.modules.get("zope") or types.ModuleType("zope")
+    zope_pkg.interface = interface_mod
+    sys.modules["zope"] = zope_pkg
+    sys.modules["zope.interface"] = interface_mod
+    return object
+
+
 def _install_stubs():
-    global users, sync, storage, FakeClient, _STUBS_INSTALLED
+    global users, sync, storage, reauth, client, FakeClient, _STUBS_INSTALLED
     if _STUBS_INSTALLED:
         return
     _STUBS_INSTALLED = True
@@ -273,6 +342,25 @@ def _install_stubs():
     cfg.get = _get
     cfg.is_enabled = lambda: bool(SETTINGS.get("enabled", True))
     cfg.set_value = lambda name, value: SETTINGS.__setitem__(name, value)
+
+    def _base_url():
+        url = (SETTINGS.get("provider_url") or u"").strip()
+        if url and "://" not in url:
+            url = u"https://" + url
+        return url.rstrip("/")
+
+    def _endpoint(name):
+        path = (_get(name) or u"").strip()
+        if not path:
+            return u""
+        if "://" in path:
+            return path
+        if not path.startswith("/"):
+            path = u"/" + path
+        return _base_url() + path
+
+    cfg.base_url = _base_url
+    cfg.endpoint = _endpoint
     sys.modules["maitux.oauth2.config"] = cfg
     oauth2.config = cfg
 
@@ -290,11 +378,17 @@ def _install_stubs():
     users = imp.load_source("maitux.oauth2.users", os.path.join(HERE, "users.py"))
     oauth2.users = users
 
-    client_mod = types.ModuleType("maitux.oauth2.client")
+    # httputils 和 client 只依赖标准库和 six，可以加载真的。网络那一层
+    # (request_json) 由每个测试自己换掉，见 :class:`FakeTransport`。
+    httputils = imp.load_source("maitux.oauth2.httputils",
+                                os.path.join(HERE, "httputils.py"))
+    oauth2.httputils = httputils
+    client = imp.load_source("maitux.oauth2.client", os.path.join(HERE, "client.py"))
+    oauth2.client = client
 
+    # 同步那部分不关心 HTTP，给它一个纯数据的替身。sync.py 在 import 时就把
+    # BCastleClient 绑进了自己的全局名字空间，所以这里替换它自己的引用。
     class _FakeClient(object):
-        """竹云 stand-in.  The real HTTP layer is covered by zhuyun-api-test."""
-
         accounts = []
         directory = {}
 
@@ -308,12 +402,24 @@ def _install_stubs():
         def get_user_by_username(self, name, token=None):
             return _FakeClient.directory.get(name)
 
-    client_mod.BCastleClient = _FakeClient
-    sys.modules["maitux.oauth2.client"] = client_mod
-    oauth2.client = client_mod
     FakeClient = _FakeClient
 
     sync = imp.load_source("maitux.oauth2.sync", os.path.join(HERE, "sync.py"))
+    sync.BCastleClient = _FakeClient
+
+    # 电子签名的二次验证 provider。它在 import 时就要拿到 maitux.esignature 的
+    # 契约接口，所以那个包也得先顶上；真装了 esignature 的环境里用真的。
+    iface = _install_zope_interface()
+    if "maitux.esignature.interfaces" not in sys.modules:
+        esig = types.ModuleType("maitux.esignature")
+        esig_interfaces = types.ModuleType("maitux.esignature.interfaces")
+        esig_interfaces.IReAuthenticationProvider = iface
+        esig.interfaces = esig_interfaces
+        sys.modules["maitux.esignature"] = esig
+        sys.modules["maitux.esignature.interfaces"] = esig_interfaces
+
+    reauth = imp.load_source("maitux.oauth2.reauth",
+                             os.path.join(HERE, "reauth.py"))
 
 
 def setUpModule():
@@ -714,6 +820,287 @@ class ReportTests(SyncTestCase):
         self.assertEqual(stats["created"], 0)
         self.assertEqual(WORLD.members, {})
         self.assertTrue(stats["errors"])
+
+
+# ---------------------------------------------------------------------------
+# 电子签名二次验证
+# ---------------------------------------------------------------------------
+
+def id_token_for(user_name):
+    u"""造一个竹云那样的 id_token：身份埋在 payload.api 里，要解两层。"""
+    import base64
+    inner = json.dumps({"name": u"x", "mobile": u"", "id": u"UID",
+                        "userName": user_name, "email": u"x@example.com"})
+    payload = json.dumps({"iss": u"Issuer", "api": inner})
+    encoded = base64.urlsafe_b64encode(payload.encode("utf-8")).rstrip(b"=")
+    return u"header." + encoded.decode("ascii") + u".signature"
+
+
+class ReAuthTestCase(unittest.TestCase):
+
+    def setUp(self):
+        WORLD.reset()
+        storage.MAP.clear()
+        SETTINGS.clear()
+        SETTINGS.update(DEFAULT_SETTINGS)
+        SETTINGS.update({
+            "provider_url": u"https://passport.example.com",
+            "sdk_login_path": u"/api/v2/sdk/login",
+            "client_id": u"CLIENT",
+            "client_secret": u"SECRET",
+            "sdk_device_fingerprint": u"fp",
+            "sdk_os_version": u"linux",
+            "sdk_user_agent": u"MaituxLIMS",
+            "esign_max_attempts": 3,
+            "esign_cooldown_seconds": 60,
+            "esign_min_remaining_attempts": 3,
+            "request_timeout": 15,
+            "verify_ssl": True,
+            "use_system_proxy": False,
+        })
+        reauth._FAILURES.clear()
+
+        self.transport = FakeTransport()
+        client.request_json = self.transport
+
+        WORLD.add_member(u"mengc", {users.PROP_USERNAME: u"mengc"})
+        _CurrentUser.userid = u"mengc"
+        self.provider = reauth.BCastleReAuthenticationProvider()
+
+    def tearDown(self):
+        _CurrentUser.userid = None
+
+    def reply_ok(self, user_name=u"mengc", status=u"SUCCESS"):
+        self.transport.reply = (200, {"status": status,
+                                      "session_token": u"s",
+                                      "expire": 604800,
+                                      "id_token": id_token_for(user_name)})
+
+    def reply_error(self, code, message):
+        self.transport.reply = (400, {"error_code": code, "error_msg": message})
+
+    def verify(self, password=u"pw", user_id=u"mengc"):
+        return self.provider.authenticate_current_user(user_id, password)
+
+
+class PasswordCheckTests(ReAuthTestCase):
+
+    def test_a_correct_password_authenticates(self):
+        self.reply_ok()
+        result = self.verify()
+
+        self.assertTrue(result["authenticated"])
+        self.assertEqual(result["backend_id"], "bccastle")
+        self.assertIsNone(result["failure_reason"])
+
+    def test_a_password_about_to_expire_still_signs(self):
+        u"""快过期不是错密码，拦下来只会耽误工作。"""
+        self.reply_ok(status=u"PASSWORD_WARN")
+        self.assertTrue(self.verify()["authenticated"])
+
+    def test_an_expired_password_does_not_sign(self):
+        self.reply_ok(status=u"PASSWORD_EXPIRED")
+        result = self.verify()
+
+        self.assertFalse(result["authenticated"])
+        self.assertIn(u"已过期", result["failure_reason"])
+
+    def test_mfa_and_access_denied_do_not_sign(self):
+        for status in (u"MFA_AUTH", u"ACCESS_DENIED"):
+            self.reply_ok(status=status)
+            reauth._FAILURES.clear()
+            self.assertFalse(self.verify()["authenticated"], status)
+
+    def test_an_unknown_status_is_refused_not_accepted(self):
+        u"""没见过的状态一律当失败 —— 签名这种事不能猜。"""
+        self.reply_ok(status=u"SOMETHING_NEW")
+        self.assertFalse(self.verify()["authenticated"])
+
+    def test_a_wrong_password_fails(self):
+        self.reply_error(u"SDK.LOGIN.1005", u"无效的用户名或密码。 剩余登录尝试次数:8")
+        result = self.verify()
+
+        self.assertFalse(result["authenticated"])
+        self.assertIn(u"密码错误", result["failure_reason"])
+
+    def test_an_empty_password_never_reaches_the_idp(self):
+        result = self.verify(password=u"")
+
+        self.assertFalse(result["authenticated"])
+        self.assertEqual(self.transport.calls, [])
+
+    def test_the_request_carries_every_mandatory_header(self):
+        u"""少一个设备头，竹云就回 SDK.COMMON.1003，实测过。"""
+        self.reply_ok()
+        self.verify()
+
+        sent = self.transport.last
+        self.assertEqual(sent["url"],
+                         u"https://passport.example.com/api/v2/sdk/login")
+        self.assertEqual(sent["method"], "POST")
+        for header in ("X-client-id", "X-device-fingerprint",
+                       "X-operating-sys-version", "X-agent"):
+            self.assertIn(header, sent["headers"])
+        self.assertEqual(sent["headers"]["X-client-id"], u"CLIENT")
+
+    def test_the_password_goes_in_the_json_body_not_the_url(self):
+        self.reply_ok()
+        self.verify(password=u"hunter2")
+
+        sent = self.transport.last
+        self.assertEqual(sent["json"], {"user_name": u"mengc",
+                                        "password": u"hunter2"})
+        self.assertNotIn(u"hunter2", sent["url"])
+
+    def test_a_network_failure_is_not_reported_as_a_wrong_password(self):
+        u"""不然用户会去找一个其实没错的密码。"""
+        def explode(call):
+            raise client.HttpError(u"连不上")
+        self.transport.reply = explode
+        result = self.verify()
+
+        self.assertFalse(result["authenticated"])
+        self.assertIn(u"无法连接", result["failure_reason"])
+        self.assertNotIn(u"密码错误", result["failure_reason"])
+
+    def test_a_locked_account_says_so(self):
+        self.reply_error(u"SDK.LOGIN.1003", u"用户已被锁定")
+        result = self.verify()
+
+        self.assertIn(u"锁定", result["failure_reason"])
+
+
+class SignerIdentityTests(ReAuthTestCase):
+
+    def test_the_session_user_must_match_for_a_single_signature(self):
+        _CurrentUser.userid = u"someone-else"
+        result = self.verify()
+
+        self.assertFalse(result["authenticated"])
+        self.assertEqual(self.transport.calls, [])
+
+    def test_countersigning_does_not_require_the_session_user(self):
+        u"""第二复核人本来就不是当前登录的人。"""
+        WORLD.add_member(u"duj2", {users.PROP_USERNAME: u"duj2"})
+        self.reply_ok(user_name=u"duj2")
+        result = self.provider.authenticate_user(u"duj2", u"pw")
+
+        self.assertTrue(result["authenticated"])
+
+    def test_an_identity_mismatch_in_the_reply_is_refused(self):
+        u"""竹云说认证通过的是另一个人 —— 签名归错人是审计追溯最致命的错。"""
+        self.reply_ok(user_name=u"somebody-else")
+        result = self.verify()
+
+        self.assertFalse(result["authenticated"])
+        self.assertIn(u"身份", result["failure_reason"])
+
+    def test_the_idp_login_name_is_used_not_the_local_user_id(self):
+        SETTINGS["username_prefix"] = u"sso_"
+        WORLD.add_member(u"sso_zhangs", {users.PROP_USERNAME: u"zhangs"})
+        _CurrentUser.userid = u"sso_zhangs"
+        self.reply_ok(user_name=u"zhangs")
+
+        result = self.provider.authenticate_current_user(u"sso_zhangs", u"pw")
+
+        self.assertTrue(result["authenticated"])
+        self.assertEqual(self.transport.last["json"]["user_name"], u"zhangs")
+
+    def test_an_old_account_falls_back_to_stripping_the_prefix(self):
+        u"""属性是后加的，老账号上没有。"""
+        SETTINGS["username_prefix"] = u"sso_"
+        WORLD.add_member(u"sso_legacy", {})
+        _CurrentUser.userid = u"sso_legacy"
+        self.reply_ok(user_name=u"legacy")
+
+        self.provider.authenticate_current_user(u"sso_legacy", u"pw")
+
+        self.assertEqual(self.transport.last["json"]["user_name"], u"legacy")
+
+
+class LockoutProtectionTests(ReAuthTestCase):
+    u"""竹云是公司统一登录：锁了账号，人连邮箱和 OA 都进不去。
+
+    签名是高频操作，手滑很正常，所以 LIMS 必须比竹云先一步停下来。
+    """
+
+    def test_the_remaining_count_reaches_the_signer(self):
+        self.reply_error(u"SDK.LOGIN.1005", u"无效的用户名或密码。 剩余登录尝试次数:8")
+        reason = self.verify()["failure_reason"]
+
+        self.assertIn(u"8", reason)
+        self.assertIn(u"竹云", reason)
+
+    def test_local_throttle_stops_calling_the_idp(self):
+        self.reply_error(u"SDK.LOGIN.1005", u"无效的用户名或密码。 剩余登录尝试次数:8")
+        for _ in range(3):
+            self.verify()
+        calls_before = len(self.transport.calls)
+
+        result = self.verify()
+
+        self.assertEqual(len(self.transport.calls), calls_before)
+        self.assertIn(u"暂停验证", result["failure_reason"])
+
+    def test_a_low_remaining_count_stops_immediately(self):
+        u"""竹云自己报的数字才是权威的，本地计数只是辅助。"""
+        self.reply_error(u"SDK.LOGIN.1005", u"无效的用户名或密码。 剩余登录尝试次数:2")
+        result = self.verify()
+
+        self.assertIn(u"仅剩 2 次", result["failure_reason"])
+        calls_before = len(self.transport.calls)
+        self.verify()
+        self.assertEqual(len(self.transport.calls), calls_before)
+
+    def test_a_successful_check_clears_the_throttle(self):
+        self.reply_error(u"SDK.LOGIN.1005", u"无效的用户名或密码。 剩余登录尝试次数:8")
+        self.verify()
+        self.verify()
+        self.reply_ok()
+
+        self.assertTrue(self.verify()["authenticated"])
+        self.assertEqual(reauth.cooldown_remaining(u"mengc"), 0)
+
+    def test_the_throttle_can_be_switched_off(self):
+        SETTINGS["esign_max_attempts"] = 0
+        SETTINGS["esign_min_remaining_attempts"] = 0
+        self.reply_error(u"SDK.LOGIN.1005", u"无效的用户名或密码。 剩余登录尝试次数:8")
+        for _ in range(5):
+            self.verify()
+
+        self.assertEqual(len(self.transport.calls), 5)
+
+    def test_the_throttle_is_per_person(self):
+        WORLD.add_member(u"duj2", {users.PROP_USERNAME: u"duj2"})
+        self.reply_error(u"SDK.LOGIN.1005", u"无效的用户名或密码。 剩余登录尝试次数:8")
+        for _ in range(3):
+            self.verify()
+
+        self.assertTrue(reauth.cooldown_remaining(u"mengc") > 0)
+        self.assertEqual(reauth.cooldown_remaining(u"duj2"), 0)
+
+
+class ReplyParsingTests(unittest.TestCase):
+
+    def test_remaining_attempts_is_read_off_the_message(self):
+        self.assertEqual(
+            reauth.remaining_attempts(u"无效的用户名或密码。 剩余登录尝试次数:9"), 9)
+        self.assertEqual(
+            reauth.remaining_attempts(u"Invalid. Remaining attempts:10"), 10)
+
+    def test_a_message_without_a_count_gives_none(self):
+        u"""上游改了措辞只会少一句提示，不会算错。"""
+        self.assertIsNone(reauth.remaining_attempts(u"用户已被锁定"))
+        self.assertIsNone(reauth.remaining_attempts(u""))
+        self.assertIsNone(reauth.remaining_attempts(None))
+
+    def test_the_identity_is_dug_out_of_the_two_layer_id_token(self):
+        self.assertEqual(reauth.identity_from_id_token(id_token_for(u"louxi")),
+                         u"louxi")
+
+    def test_a_broken_id_token_yields_nothing_rather_than_raising(self):
+        for bad in (u"", u"not-a-jwt", u"a.b", None):
+            self.assertEqual(reauth.identity_from_id_token(bad), u"")
 
 
 if __name__ == "__main__":

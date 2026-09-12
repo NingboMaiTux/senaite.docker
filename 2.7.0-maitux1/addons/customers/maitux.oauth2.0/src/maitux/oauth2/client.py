@@ -11,6 +11,7 @@ Endpoints implemented (see https://open.bccastle.com/development/):
 * ``POST /api/v2/tenant/token``      EIAM 鉴权 (client_credentials)
 * ``GET  /api/v2/tenant/applications/{app_id}/accounts``  应用账号列表
 * ``POST /api/v2/tenant/users/user-by-username``          按用户名获取用户详情
+* ``POST /api/v2/sdk/login``                              用户名+密码登录（电子签名二次验证）
 
 The tenant-wide ``GET /api/v2/tenant/users`` is deliberately *not* implemented.
 It answers with every employee on the tenant -- a few thousand records carrying
@@ -213,6 +214,54 @@ class BCastleClient(object):
             if offset > 1000:  # pragma: no cover - runaway guard
                 logger.error("App account pagination did not terminate, aborting")
                 break
+
+    # -- SDK login (e-signature password check) ------------------------
+
+    def _sdk_headers(self):
+        """Headers the 用户接口 (SDK) family requires.
+
+        竹云 documents X-client-id, X-device-fingerprint, X-operating-sys-version
+        and X-agent as mandatory, and it means it: a request carrying only
+        X-client-id is rejected with ``SDK.COMMON.1003 设备信息不完整`` -- verified
+        against the customer's production tenant.  Note the authentication here
+        is the header, *not* HTTP Basic: this family does not use the OAuth2
+        client credentials.
+        """
+        return {
+            "X-client-id": self.client_id,
+            "X-device-fingerprint": (
+                config.get("sdk_device_fingerprint") or u"maitux-lims"),
+            "X-operating-sys-version": (
+                config.get("sdk_os_version") or u"linux"),
+            "X-agent": config.get("sdk_user_agent") or u"MaituxLIMS",
+            "X-L": u"zh",
+        }
+
+    def sdk_login(self, user_name, password):
+        """Check one login name / password pair against 竹云.
+
+        Used by the electronic signature re-authentication, which has to prove
+        the person at the keyboard really is who the session says -- the local
+        account cannot answer that, its password is a random string nobody
+        knows (see ``users.random_password``).
+
+        Returns the decoded body on success; ``status`` says what kind of
+        success it is (``SUCCESS``, ``PASSWORD_WARN``, ``PASSWORD_EXPIRED``,
+        ``MFA_AUTH``, ``ACCESS_DENIED``).  A wrong password raises
+        :class:`OAuth2Error` with ``error`` = ``SDK.LOGIN.1005`` and a
+        description that carries the remaining attempt count.
+
+        NOTE: every failure here consumes one of the account's 竹云 login
+        attempts, and running out locks the account across *every* company
+        system, not just the LIMS.  Callers must throttle -- see
+        ``maitux.oauth2.reauth``.
+        """
+        return self._call(
+            config.endpoint("sdk_login_path"),
+            method="POST",
+            json_body={"user_name": user_name, "password": password},
+            headers=self._sdk_headers(),
+        )
 
     #: 竹云 answers a lookup for an unknown login name with this error code.
     UNKNOWN_USER_ERROR = u"USER.0001"

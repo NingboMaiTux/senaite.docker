@@ -30,6 +30,10 @@ SENAITE 2.7 / Plone 5.2 / Python 2.7。
 * **每天一次的用户同步**：向竹云要一次“谁被授权访问本应用”的名单，据此
   提前建号、恢复误停用的账号、并把离职或被取消授权的人在 LIMS 里停用
   （解决“员工离职、客户不提供通知接口”的问题）。管理员永不被停用。
+* **电子签名的账号/密码二次验证**：给 ``maitux.esignature`` 注册一个走竹云的
+  认证后端。统一登录之后本地账号的密码是随机生成的、没人见过，本地校验那条路
+  是死的，所以签名复核只能回竹云去问。带账号锁定防护——竹云是公司统一登录，
+  连续输错会把人锁在**所有**公司系统之外。见 `INSTALL.md <INSTALL.md>`_ 第 9 节。
 * 退出时可同时调用竹云全局退出接口。
 * 管理员逃生出口：``/@@oauth2-local-login`` 始终可以打开本地登录表单。
 
@@ -47,12 +51,16 @@ SENAITE 2.7 / Plone 5.2 / Python 2.7。
     python src/maitux/oauth2/tests.py -v
     python src/maitux/oauth2/tests.py AdminProtectionTests
 
-它用假对象顶掉 ``plone.api`` / ``Products.CMFCore``，加载**真实的** ``users.py``
-和 ``sync.py`` 来跑，覆盖建号、停用、恢复还原用户组、管理员保护、三道安全保护、
-dry run 等场景。
+它用假对象顶掉 ``plone.api`` / ``Products.CMFCore``，加载**真实的** ``users.py`` /
+``sync.py`` / ``client.py`` / ``httputils.py`` / ``reauth.py`` 来跑。53 个用例覆盖：
 
-``BCastleClient`` 被整体换成假的——HTTP 层由仓库根目录的 ``zhuyun-api-test``
-对着真实竹云环境验证，这里只测拿到数据之后的决策。
+- 每日同步：建号、停用、恢复还原用户组、管理员保护、三道安全保护、dry run
+- 电子签名二次验证：密码校验、竹云各种返回状态、身份核对、账号锁定防护、
+  请求头是否带全、本地账号名到竹云登录名的映射
+
+只有最外层的网络调用（``httputils.request_json``）被换成假的，所以拼请求头、
+拼 body、解析错误码这些代码跑的都是真的——「设备信息请求头有没有带全」这种事
+只有这样才测得到。真实竹云环境的连通性由仓库根目录的 ``zhuyun-api-test`` 验证。
 
 ⚠️ 不要在 Zope 进程里跑（``bin/instance run`` 之类）：往 ``sys.modules`` 里塞假的
 ``plone.api`` 会把正在服务的站点搞坏。检测到那种情况测试会直接拒绝运行。
@@ -71,6 +79,7 @@ dry run 等场景。
 ``POST /api/v2/tenant/token``                            EIAM 鉴权 (client_credentials)
 ``GET  /api/v2/tenant/applications/{app_id}/accounts``   谁被授权访问本应用（每日同步第一步）
 ``POST /api/v2/tenant/users/user-by-username``           取单个用户详情（每日同步第二步）
+``POST /api/v2/sdk/login``                               电子签名的账号/密码二次验证
 ======================================================  ====================================
 
 刻意**不使用** ``GET /api/v2/tenant/users``（租户级用户列表）：它没有应用维度的

@@ -81,8 +81,8 @@ docker compose -f docker-compose.yml up -d --build
 
 安装时会自动完成：
 
-- 注册 5 个 memberdata 属性（`maitux_oauth2_subject` / `_disabled` /
-  `_disabled_reason` / `_last_sync` / `_last_login`）
+- 注册 7 个 memberdata 属性（`maitux_oauth2_subject` / `_username` / `_disabled` /
+  `_disabled_reason` / `_revoked_groups` / `_last_sync` / `_last_login`）
 - 创建“待授权”用户组 `oauth2-pending`（无任何角色）
 - 生成 `state` 签名密钥
 - 在控制面板里加一项 **竹云统一登录 (OAuth 2.0)**
@@ -129,7 +129,7 @@ docker compose -f docker-compose.yml up -d --build
 | ClientSecret | `lAI4L84uKn0MMOnw9qlIYiXSJ9mny4KObo4NrAjy45vxoy46uixB4NfLTyRlGy3h` |
 
 接口路径、`scope=get_user_info`、字段映射也全部预置为竹云的值，
-与官方文档逐字一致（见第 10 节对照表）。
+与官方文档逐字一致（见第 11 节对照表）。
 
 > 密钥作为默认值意味着它在 git 里。如果要收紧，把
 > `interfaces.py` 里 `client_secret` 的 `default` 改成 `u""`，部署时用
@@ -347,7 +347,81 @@ curl -s "https://lims.example.com/<站点id>/@@oauth2-sync-users?token=你的口
 
 最近一次的结果也会写回配置页的“上次同步结果”。
 
-## 9. 排错
+## 9. 电子签名的账号/密码二次验证
+
+GMP / 21 CFR Part 11 要求签名时重新输一次密码，证明人还在电脑前。
+`maitux.esignature` 自带的校验走本地 PAS —— 统一登录之后那条路是死的：
+本地账号的密码是建号时随机生成的（`users.random_password`），**没有任何人见过**，
+所以谁也输不出来。
+
+本插件因此注册了一个走竹云的校验后端。
+
+### 启用方法
+
+1. 确认两个插件都已安装（本插件的注册是条件加载，没装 `maitux.esignature`
+   时不会生效，也不会报错）
+2. 打开**电子签名控制面板**，把“认证后端”从「Local accounts (Plone PAS)」
+   改成「**竹云统一登录**」
+
+下拉框里的选项是自动枚举出来的，`maitux.esignature` 并不知道竹云的存在 ——
+依赖方向是单向的：本插件引用签名插件的接口，反过来没有。
+
+### 用的什么接口
+
+```
+POST /api/v2/sdk/login    {"user_name": "...", "password": "..."}
+```
+
+认证方式是请求头 `X-client-id`（**不是** Basic），用的就是现有 ClientId，
+不需要额外开通。文档：<https://docs.bccastle.com/api/eiam/userapi/login/username-pwd>
+
+> 标准 OAuth2 的密码模式（`grant_type=password`）看起来更对路，但本租户实测返回
+> `unsupported_grant_type: Unauthorized grant type: password` —— 该应用没被授权
+> 使用密码模式，走不通。
+
+⚠️ `X-device-fingerprint` / `X-operating-sys-version` / `X-agent` 三个请求头**是必填的**。
+只带 `X-client-id` 会被拒：`SDK.COMMON.1003 设备信息不完整`（实测）。
+
+### ⚠️ 账号锁定风险（这是本节最重要的部分）
+
+密码错误时竹云会返回「剩余登录尝试次数:N」，**次数耗尽会锁定账号**
+（`SDK.LOGIN.1003`）。竹云是公司统一登录，**锁的不只是 LIMS，是这个人所有公司
+系统** —— 邮箱、OA 一起进不去。
+
+而签名是高频操作（每次复核、审批都签），手滑输错完全正常。所以做了两道防护，
+刻意是两种不同性质的：
+
+| 防护 | 机制 | 局限 |
+|---|---|---|
+| 本地限流 | 连续错 `esign_max_attempts` 次（默认 3）后进入冷却，期间**根本不发请求给竹云** | 存在进程内存里。两个 Zope 实例就有两份，额度翻倍 |
+| 竹云剩余次数 | 竹云返回的 N 降到 `esign_min_remaining_attempts`（默认 3）时立即停手 | 权威、共享、不需要我们存状态 |
+
+第二道才是真正兜底的：那个数字是竹云自己算的，不管请求打到哪个实例都准。
+
+剩余次数还会**原样告诉签名的人**：
+
+> 密码错误，还可尝试 8 次；次数用尽将锁定您的竹云账号（公司所有系统一并无法登录）
+
+（`maitux.esignature` 会把 `failure_reason` 直接显示出来，所以提示能送到真正
+能处理它的人眼前。）
+
+### 身份核对
+
+竹云验证通过后返回的 `id_token` 里带着**实际通过认证的是谁**。插件会解开它
+（`id_token` → JWT payload → `api` 字段是个 JSON 字符串 → 再解一层 → `userName`），
+和请求的账号比对，**对不上就拒绝**。签名归错人是审计追溯最致命的错误。
+
+### 本地账号名 ≠ 竹云登录名
+
+本地用户名是**推导**出来的（`normalize_username`：转小写、替换非法字符、可加前缀），
+反推不回去。所以建号和登录时会把竹云登录名原样存在 `maitux_oauth2_username` 上，
+验证时用它。
+
+属性是后加的，老账号上没有 —— 这种情况退回「去掉前缀」，对目前见过的所有竹云
+登录名（`mengc`、`duj2` 这种）都成立。这个回退刻意不做得更聪明：猜错了就等于
+把别人的登录名发给竹云。
+
+## 10. 排错
 
 ```bash
 docker compose logs -f instance | grep maitux.oauth2
@@ -365,7 +439,7 @@ docker compose logs -f instance | grep maitux.oauth2
 **万一被锁在外面**：`https://<域名>/<站点id>/@@oauth2-local-login`
 永远可以打开本地登录表单；再不行就把 `enabled` 用环境变量置为 `false` 重启。
 
-## 10. 与竹云官方文档的对照（默认值来源）
+## 11. 与竹云官方文档的对照（默认值来源）
 
 **生产环境是竹云,所有默认值以竹云官方文档为准。**
 
