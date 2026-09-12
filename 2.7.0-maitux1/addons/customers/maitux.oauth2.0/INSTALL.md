@@ -81,8 +81,8 @@ docker compose -f docker-compose.yml up -d --build
 
 安装时会自动完成：
 
-- 注册 5 个 memberdata 属性（`maitux_oauth2_subject` / `_disabled` /
-  `_disabled_reason` / `_last_sync` / `_last_login`）
+- 注册 7 个 memberdata 属性（`maitux_oauth2_subject` / `_username` / `_disabled` /
+  `_disabled_reason` / `_revoked_groups` / `_last_sync` / `_last_login`）
 - 创建“待授权”用户组 `oauth2-pending`（无任何角色）
 - 生成 `state` 签名密钥
 - 在控制面板里加一项 **竹云统一登录 (OAuth 2.0)**
@@ -129,7 +129,7 @@ docker compose -f docker-compose.yml up -d --build
 | ClientSecret | `lAI4L84uKn0MMOnw9qlIYiXSJ9mny4KObo4NrAjy45vxoy46uixB4NfLTyRlGy3h` |
 
 接口路径、`scope=get_user_info`、字段映射也全部预置为竹云的值，
-与官方文档逐字一致（见第 10 节对照表）。
+与官方文档逐字一致（见第 11 节对照表）。
 
 > 密钥作为默认值意味着它在 git 里。如果要收紧，把
 > `interfaces.py` 里 `client_secret` 的 `default` 改成 `u""`，部署时用
@@ -220,30 +220,94 @@ location = /api/sso/callback {
 `external_id`。**但不需要为此去找客户配属性映射**：
 
 - 登录时取不到 `external_id` 就退回 `id`（竹云用户 ID），一样稳定唯一
-- 离职检测时，`sync_user_id_field = "external_id,user_id"` 会把 EIAM 用户列表返回的
-  **两个字段都建进索引**，所以用 `id` 存下来的身份能和 EIAM 的 `user_id` 对上
+- 离职检测时，`sync_user_id_field = "external_id,user_id"` 会把用户详情返回的
+  **两个字段都建进索引**，所以用 `id` 存下来的身份能和竹云的 `user_id` 对上
 
 也就是说“用外部 ID 作唯一键”这个需求，靠同步接口那边的双字段匹配就兜住了。
 
-⚠️ 未经真实数据验证的假设：`userinfo` 的 `id` 和 EIAM 用户列表的 `user_id` 是同一个
+⚠️ 未经真实数据验证的假设：`userinfo` 的 `id` 和用户详情的 `user_id` 是同一个
 标识符（两边格式一致，文档里都叫“用户ID”）。第一次同步跑完看 `missing` 计数即可确认
 —— 如果 `missing` 等于本地 SSO 账号总数，说明对不上，那时才需要找客户加属性映射。
+
+（生产环境已验证：用户详情的 `external_id` 形如 `602908626`，与 `userinfo` 同源。）
 
 竹云身份和本地账号的对应关系存在 portal 的 annotation 里
 （`maitux.oauth2.subjects`，一个 `subject -> userid` 的 BTree），
 所以竹云那边改了用户名也不会认错人。
 
-## 8. 每天一次的用户同步（离职处理）
+## 8. 每天一次的用户同步（建号 + 离职处理）
 
 流程：`POST /api/v2/tenant/token`（client_credentials）→
-`GET /api/v2/tenant/users` 分页拉全量 → 对每个本地 SSO 账号：
+`GET /api/v2/tenant/applications/{app_id}/accounts`（谁被授权访问本应用）→
+对名单里的每个人 `POST /api/v2/tenant/users/user-by-username`（取详情）。
 
-- 竹云里 `disabled=true` 或 `locked=true` → LIMS 停用
-- 竹云里查不到（账号被删） → LIMS 停用（可用 `sync_deactivate_missing` 关掉）
-- 竹云里正常 → 如果之前被停用则恢复，并同步姓名/邮箱
+**刻意不用 `GET /api/v2/tenant/users`。** 那个接口只有 `org_id` /
+`updated_at_greater` 两个过滤参数，拿不到应用授权维度，一次会返回全租户几千条
+员工档案（含证件号、手机号）——而实际有权访问 LIMS 的只有几十人。按授权名单逐个
+查，其余人的个人信息根本不会离开竹云。
+
+拿到名单后：
+
+| 情况 | 处理 |
+|---|---|
+| 在名单里、本地没账号 | **提前建号**（待授权状态，`sync_create_missing` 控制） |
+| 在名单里、本地账号被停用 | 恢复可用，**并把停用时摘掉的用户组还回去** |
+| 在名单里，但竹云 `disabled` / `locked` | LIMS 停用 |
+| 不在名单里（离职，或被取消授权） | LIMS 停用（`sync_deactivate_missing` 控制） |
+| 管理员 | **一律不动**；若之前被误停用，会自动恢复 |
+
+### 账号可用与否，只有一个变量
+
+`maitux_oauth2_disabled`（存在用户身上的一个布尔值）。停用置 `True`，恢复置 `False`。
+登录时就看它：
+
+```python
+if users.is_disabled(member):          # ← 唯一的「可用 / 不可用」开关
+    return 账号已被禁用页面
+if users.is_pending(portal, member):   # 另一个维度：管理员分没分权限
+    return 待授权页面
+```
+
+**「待授权」不是第二个可用标志**，它表示管理员还没给这人分配任何角色。提前建号
+建出来的账号就是这个状态：账号可用，但没权限所以进不去；管理员分配角色后自动解除。
+
+别和这两个东西搞混：
+
+| 名字 | 是什么 |
+|---|---|
+| `maitux_oauth2_disabled` | 账号可用 / 不可用（就是上面这一个） |
+| `enabled`（配置项） | 统一登录**总开关**，关掉整个插件 |
+| 同步报告里的 `reenabled` 等 | 只是**计数**，见下表 |
+
+### 同步报告里的字段
+
+| 字段 | 含义 |
+|---|---|
+| `accounts_total` | 竹云授权名单里有几个账号 |
+| `remote_total` | 其中有几个在用户目录里查到了详情 |
+| `created` | 新建了几个本地账号 |
+| `linked` | 有几个绑定到了已存在的同名本地账号 |
+| `disabled` | 停用了几个 |
+| `reenabled` | 恢复了几个 |
+| `missing` | 本地有、但竹云名单里找不到的账号数（会被停用） |
+| `protected` | 跳过了几个管理员 |
+| `unmatched_sample` | `missing` 的前几个唯一 ID，用来排查字段对不上 |
+| `aborted_deactivation` | 安全保护是否触发（触发则本次一个都不停用） |
 
 “停用”做了三件事：打 memberdata 标记、移出所有用户组、把本地密码改成随机值。
+被摘掉的用户组记在 `maitux_oauth2_revoked_groups` 上，恢复时按原样加回去 ——
+否则“恢复”等于“能登录但什么都干不了”，人会退回待授权状态。
 另外每个请求都会检查一次标记，已经拿着 Cookie 的离职员工会被立刻踢出去。
+
+⚠️ **管理员保护**：竹云的应用授权名单是给实验室人员的，管理员通常不在名单上。
+如果照着名单停用，第一晚就会把管理员自己锁在门外，而且用户组全被摘掉之后，
+网页上就没人能改回来了。所以持有 `Manager` / `Site Administrator` 角色的账号
+永不被同步停用；只通过用户组间接拿到管理角色的人，补进“永不停用的账号”即可。
+
+⚠️ **首次跑先用 dry run**。判定依据从“全公司名录”换成了“22 人授权名单”，
+所以**在职但没有 LIMS 授权的人也会被停用**——这正是想要的效果，但如果 IT 的名单
+还没配全，现有用户会被误停。`sync_max_missing_percent`（默认 50%）会兜住，
+先看一次结果再放开。
 
 ### 触发方式二选一
 
@@ -283,7 +347,81 @@ curl -s "https://lims.example.com/<站点id>/@@oauth2-sync-users?token=你的口
 
 最近一次的结果也会写回配置页的“上次同步结果”。
 
-## 9. 排错
+## 9. 电子签名的账号/密码二次验证
+
+GMP / 21 CFR Part 11 要求签名时重新输一次密码，证明人还在电脑前。
+`maitux.esignature` 自带的校验走本地 PAS —— 统一登录之后那条路是死的：
+本地账号的密码是建号时随机生成的（`users.random_password`），**没有任何人见过**，
+所以谁也输不出来。
+
+本插件因此注册了一个走竹云的校验后端。
+
+### 启用方法
+
+1. 确认两个插件都已安装（本插件的注册是条件加载，没装 `maitux.esignature`
+   时不会生效，也不会报错）
+2. 打开**电子签名控制面板**，把“认证后端”从「Local accounts (Plone PAS)」
+   改成「**竹云统一登录**」
+
+下拉框里的选项是自动枚举出来的，`maitux.esignature` 并不知道竹云的存在 ——
+依赖方向是单向的：本插件引用签名插件的接口，反过来没有。
+
+### 用的什么接口
+
+```
+POST /api/v2/sdk/login    {"user_name": "...", "password": "..."}
+```
+
+认证方式是请求头 `X-client-id`（**不是** Basic），用的就是现有 ClientId，
+不需要额外开通。文档：<https://docs.bccastle.com/api/eiam/userapi/login/username-pwd>
+
+> 标准 OAuth2 的密码模式（`grant_type=password`）看起来更对路，但本租户实测返回
+> `unsupported_grant_type: Unauthorized grant type: password` —— 该应用没被授权
+> 使用密码模式，走不通。
+
+⚠️ `X-device-fingerprint` / `X-operating-sys-version` / `X-agent` 三个请求头**是必填的**。
+只带 `X-client-id` 会被拒：`SDK.COMMON.1003 设备信息不完整`（实测）。
+
+### ⚠️ 账号锁定风险（这是本节最重要的部分）
+
+密码错误时竹云会返回「剩余登录尝试次数:N」，**次数耗尽会锁定账号**
+（`SDK.LOGIN.1003`）。竹云是公司统一登录，**锁的不只是 LIMS，是这个人所有公司
+系统** —— 邮箱、OA 一起进不去。
+
+而签名是高频操作（每次复核、审批都签），手滑输错完全正常。所以做了两道防护，
+刻意是两种不同性质的：
+
+| 防护 | 机制 | 局限 |
+|---|---|---|
+| 本地限流 | 连续错 `esign_max_attempts` 次（默认 3）后进入冷却，期间**根本不发请求给竹云** | 存在进程内存里。两个 Zope 实例就有两份，额度翻倍 |
+| 竹云剩余次数 | 竹云返回的 N 降到 `esign_min_remaining_attempts`（默认 3）时立即停手 | 权威、共享、不需要我们存状态 |
+
+第二道才是真正兜底的：那个数字是竹云自己算的，不管请求打到哪个实例都准。
+
+剩余次数还会**原样告诉签名的人**：
+
+> 密码错误，还可尝试 8 次；次数用尽将锁定您的竹云账号（公司所有系统一并无法登录）
+
+（`maitux.esignature` 会把 `failure_reason` 直接显示出来，所以提示能送到真正
+能处理它的人眼前。）
+
+### 身份核对
+
+竹云验证通过后返回的 `id_token` 里带着**实际通过认证的是谁**。插件会解开它
+（`id_token` → JWT payload → `api` 字段是个 JSON 字符串 → 再解一层 → `userName`），
+和请求的账号比对，**对不上就拒绝**。签名归错人是审计追溯最致命的错误。
+
+### 本地账号名 ≠ 竹云登录名
+
+本地用户名是**推导**出来的（`normalize_username`：转小写、替换非法字符、可加前缀），
+反推不回去。所以建号和登录时会把竹云登录名原样存在 `maitux_oauth2_username` 上，
+验证时用它。
+
+属性是后加的，老账号上没有 —— 这种情况退回「去掉前缀」，对目前见过的所有竹云
+登录名（`mengc`、`duj2` 这种）都成立。这个回退刻意不做得更聪明：猜错了就等于
+把别人的登录名发给竹云。
+
+## 10. 排错
 
 ```bash
 docker compose logs -f instance | grep maitux.oauth2
@@ -301,10 +439,15 @@ docker compose logs -f instance | grep maitux.oauth2
 **万一被锁在外面**：`https://<域名>/<站点id>/@@oauth2-local-login`
 永远可以打开本地登录表单；再不行就把 `enabled` 用环境变量置为 `false` 重启。
 
-## 10. 与竹云官方文档的对照（默认值来源）
+## 11. 与竹云官方文档的对照（默认值来源）
 
-**生产环境是竹云,所有默认值以竹云官方文档为准。** 参考文档:
-<https://open.bccastle.com/development/>
+**生产环境是竹云,所有默认值以竹云官方文档为准。**
+
+竹云有**两个文档站**,内容不一样:
+
+- <https://docs.bccastle.com/> —— **新站,以它为准**。应用账号那组接口只有这里有。
+- <https://open.bccastle.com/development/> —— 旧站,页面顶部自己挂着「访问新开放平台 →」。
+  旧站**没有**应用账号接口,只照着它找会漏掉,最后只能用租户级用户列表把全公司拉下来。
 
 | 配置项 | 默认值 | 竹云文档原文 |
 |---|---|---|
@@ -314,10 +457,16 @@ docker compose logs -f instance | grep maitux.oauth2
 | 检查 Token 有效性 | `/api/v1/oauth2/introspect` | `POST {your_domain}/api/v1/oauth2/introspect` |
 | 全局退出 | `/api/v1/logout` | `GET  {your_domain}/api/v1/logout` |
 | EIAM 鉴权 | `/api/v2/tenant/token` | `POST {your_domain}/api/v2/tenant/token` |
-| EIAM 用户列表 | `/api/v2/tenant/users` | `GET  {your_domain}/api/v2/tenant/users` |
+| 应用账号列表 | `/api/v2/tenant/applications/{app_id}/accounts` | `GET  {your_domain}/api/v2/tenant/applications/{app_id}/accounts`（权限码 `account_read`） |
+| 按用户名查用户 | `/api/v2/tenant/users/user-by-username` | `POST {your_domain}/api/v2/tenant/users/user-by-username`（权限码 `user_read`） |
 | `scope` | `get_user_info` | 文档:「此值固定为 get_user_info」 |
 | 唯一 ID 字段 | `external_id,id` | 需求:外部 ID 作唯一 ID;userinfo 无 external_id 时退回 `id` |
-| 同步比对字段 | `external_id,user_id` | EIAM 用户列表同时返回 `external_id` 和 `user_id` |
+| 同步比对字段 | `external_id,user_id` | 用户详情同时返回 `external_id` 和 `user_id` |
+
+文档链接:
+[应用账号列表](https://docs.bccastle.com/api/eiam/api/account/obtain-accountlist) ·
+[按用户名查用户](https://docs.bccastle.com/api/eiam/api/user/username) ·
+[API 权限码](https://docs.bccastle.com/api/eiam/api/permission-range)
 
 **token 端点的客户端认证方式**:竹云文档明确要求
 「使用 client_id 和 client_secret 进行 basic64 认证,格式为 base64(client_id:client_secret)」,

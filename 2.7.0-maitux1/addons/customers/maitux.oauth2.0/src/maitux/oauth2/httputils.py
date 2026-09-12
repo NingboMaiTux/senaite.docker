@@ -79,20 +79,27 @@ def _build_opener(verify_ssl, use_system_proxy):
     return build_opener(*handlers)
 
 
-def request_json(url, method="GET", form=None, headers=None, timeout=15,
-                 verify_ssl=True, use_system_proxy=False):
+def request_json(url, method="GET", form=None, json_body=None, headers=None,
+                 timeout=15, verify_ssl=True, use_system_proxy=False):
     """Perform an HTTP request and decode the JSON body.
 
     Returns a ``(status, data)`` tuple.  ``data`` is the decoded JSON body, or
     ``{"_raw": <text>}`` when the body is not valid JSON.  Non-2xx responses are
     returned too (竹云 puts ``error``/``error_description`` in the body), only
     transport level problems raise :class:`HttpError`.
+
+    ``form`` sends ``application/x-www-form-urlencoded`` (the OAuth2 endpoints),
+    ``json_body`` sends ``application/json`` (the 身份管理 API).  They are
+    mutually exclusive; ``form`` wins if both are given.
     """
     body = None
     all_headers = {"Accept": "application/json"}
     if form is not None:
         body = _as_bytes(urlencode(form))
         all_headers["Content-Type"] = "application/x-www-form-urlencoded"
+    elif json_body is not None:
+        body = _as_bytes(json.dumps(json_body))
+        all_headers["Content-Type"] = "application/json; charset=utf-8"
     all_headers.update(headers or {})
 
     request = Request(url, data=body)

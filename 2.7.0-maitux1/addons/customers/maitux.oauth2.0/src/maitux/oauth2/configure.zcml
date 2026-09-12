@@ -2,6 +2,7 @@
     xmlns="http://namespaces.zope.org/zope"
     xmlns:five="http://namespaces.zope.org/five"
     xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    xmlns:zcml="http://namespaces.zope.org/zcml"
     i18n_domain="maitux.oauth2">
 
   <include package="Products.Five" />
@@ -21,6 +22,22 @@
   <five:registerPackage package="." />
 
   <include package=".browser" />
+
+  <!-- Re-authentication backend for maitux.esignature.
+       Once login moves to 竹云 the local account has no password anyone could
+       type, so the signature re-check has to go back to the IdP.
+
+       Registered under the backend_id, which is how maitux.esignature looks a
+       provider up; it then appears by itself in that add-on's "认证后端"
+       dropdown.  Conditional, because e-signatures are a separate product:
+       without them this package must still install, and .reauth imports the
+       contract from maitux.esignature at module level. -->
+  <configure zcml:condition="installed maitux.esignature">
+    <utility
+        name="bccastle"
+        factory=".reauth.BCastleReAuthenticationProvider"
+        provides="maitux.esignature.interfaces.IReAuthenticationProvider" />
+  </configure>
 
   <!-- Kick out sessions of accounts the daily sync has disabled. -->
   <subscriber
@@ -52,6 +69,16 @@
       description="Adds registry records for configuration options introduced after the initial install (require_state, sync_max_missing_percent)."
       source="1"
       destination="2"
+      handler=".setuphandlers.upgrade_registry"
+      sortkey="1"
+      profile="maitux.oauth2:default"
+      />
+
+  <genericsetup:upgradeStep
+      title="Switch the daily sync to the application authorisation list"
+      description="Adds the settings for the new sync endpoints (eiam_app_accounts_path, eiam_user_by_username_path, sync_create_missing, sync_protected_users), for the e-signature password check (sdk_login_path, esign_*, sdk_*), and the member properties that remember a disabled account's groups and its 竹云 login name. The obsolete eiam_users_path / sync_org_id records are left in place; they are simply no longer read."
+      source="2"
+      destination="3"
       handler=".setuphandlers.upgrade_registry"
       sortkey="1"
       profile="maitux.oauth2:default"
