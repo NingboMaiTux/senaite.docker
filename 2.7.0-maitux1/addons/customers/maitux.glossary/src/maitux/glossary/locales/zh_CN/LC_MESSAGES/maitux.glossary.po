@@ -1,0 +1,136 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: maitux.glossary\n"
+"POT-Creation-Date: 2026-09-11 00:00+0000\n"
+"PO-Revision-Date: 2026-09-11 00:00+0000\n"
+"Last-Translator: Admin <admin@example.com>\n"
+"Language-Team: zh_CN <admin@example.com>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0\n"
+"Language-Code: zh_CN\n"
+"Language-Name: Simplified Chinese\n"
+"Preferred-Encodings: utf-8 latin1\n"
+"Domain: maitux.glossary\n"
+
+# ---------------------------------------------------------------------------
+# 容器 / 标题
+# ---------------------------------------------------------------------------
+msgid "Keyword glossary"
+msgstr "检查项目关键词对照表"
+
+msgid "Inspection item keyword glossary (middle table)"
+msgstr "检查项目关键词中英文对照表（中间表）"
+
+# ---------------------------------------------------------------------------
+# 列头
+# ---------------------------------------------------------------------------
+msgid "Analysis category"
+msgstr "分析类别"
+
+msgid "Analysis Keyword"
+msgstr "检测项目关键词"
+
+msgid "Analysis Service"
+msgstr "检测项目"
+
+msgid "calc keyword"
+msgstr "公式字段关键词"
+
+msgid "zh"
+msgstr "中文名"
+
+msgid "en"
+msgstr "英文名"
+
+msgid "State"
+msgstr "状态"
+
+msgid "Site Field title (reference)"
+msgstr "站点 Field title（参考）"
+
+msgid "First seen"
+msgstr "首次收录"
+
+msgid "State changed on"
+msgstr "状态变更时间"
+
+msgid "Last sync by"
+msgstr "最后同步触发人"
+
+msgid "Note"
+msgstr "备注"
+
+# ---------------------------------------------------------------------------
+# 工具栏 / 同步结果
+# ---------------------------------------------------------------------------
+msgid "Refresh from site"
+msgstr "从站点刷新"
+
+msgid "Sync finished: ${summary} (${elapsed}s)"
+msgstr "同步完成：${summary}（耗时 ${elapsed}s）"
+
+msgid "Sync failed: ${error}"
+msgstr "同步失败：${error}"
+
+msgid "Keyword glossary container not found"
+msgstr "未找到关键词对照表容器"
+
+# 表格上方的固定提示（view.description）。HTML 由代码加，别写进 msgstr。
+msgid ""
+"zh / en are editable in place. Changes are kept in the page (this listing "
+"does NOT autosave): click the Save button at the bottom of the table, or "
+"tick the row, to store them. Unsaved changes are lost when you leave the "
+"page."
+msgstr ""
+"「中文名」「英文名」可直接编辑，改动只暂存在当前页面上（本表不做自动保存）："
+"请点表格最下方的 Save 按钮保存，或**勾选该行**即保存；离开本页会丢失。"
+
+# ---------------------------------------------------------------------------
+# 状态值（活跃 / 未激活）
+# ---------------------------------------------------------------------------
+msgid "Active"
+msgstr "活跃"
+
+msgid "Inactive"
+msgstr "未激活"
+
+msgid "All"
+msgstr "全部"
+
+# ---------------------------------------------------------------------------
+# 字段说明（编辑表单里显示）
+# ---------------------------------------------------------------------------
+msgid "Keyword glossary entry"
+msgstr "对照表条目"
+
+msgid "One (Analysis Keyword, calc keyword) combination"
+msgstr "一个（检测项目关键词 + 公式字段关键词）组合"
+
+msgid "Keyword of the Analysis Service this row belongs to. Part of the row key; written by the sync and never changed."
+msgstr "本行所属检测项目（Analysis Service）的关键词。属于行键的一部分，由同步写入，之后不再改动。"
+
+msgid "Keyword of the Calculation interim field (the 'Keyword' column on the Calculation edit page). Part of the row key."
+msgstr "计算公式中间字段（Calculation 编辑页 Interim Fields 的 Keyword 列）的关键词。属于行键的一部分。"
+
+msgid "Analysis category of the Analysis Service."
+msgstr "检测项目所属的分析类别。"
+
+msgid "Chinese name of the formula field. Empty by default - filled in by hand. Editing it applies to every row of the same calc keyword."
+msgstr "公式字段的中文名。**默认为空**，由人工填写；改动会按 calc keyword 批量应用到所有同关键词的行。"
+
+msgid "English name of the formula field. Empty by default - filled in by hand. Editing it applies to every row of the same calc keyword."
+msgstr "公式字段的英文名。**默认为空**，由人工填写；改动会按 calc keyword 批量应用到所有同关键词的行。"
+
+msgid "Whether the combination still exists on the site. Maintained by the sync; the only field the sync is allowed to change on an existing row."
+msgstr "该组合在站点上是否仍然存在。由同步维护 —— 也是同步唯一允许修改既有行的字段。"
+
+msgid "When the sync appended this row."
+msgstr "同步首次收录本行的时间。"
+
+msgid "When the sync set the current state. Written only when the row is created or its state changes - existing rows are never touched otherwise."
+msgstr "同步设定当前状态的时间。只在本行被创建或状态发生变化时写入，其余情况不会改动已有行。"
+
+msgid "Who triggered the sync that wrote or re-stated this row. The write itself is performed with elevated privileges, so this is the only attribution available."
+msgstr "触发这次同步（写入或改状态）的人。写入本身是提权执行的，所以这是唯一可用的归因信息。"

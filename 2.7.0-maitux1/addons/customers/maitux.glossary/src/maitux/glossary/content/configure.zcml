@@ -1,0 +1,19 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    i18n_domain="maitux.glossary">
+
+  <class class=".glossaryentries.GlossaryEntries">
+    <require
+        permission="zope2.View"
+        interface="zope.interface.Interface"
+        />
+  </class>
+
+  <class class=".glossaryentry.GlossaryEntry">
+    <require
+        permission="zope2.View"
+        interface="maitux.glossary.interfaces.IGlossaryEntry"
+        />
+  </class>
+
+</configure>

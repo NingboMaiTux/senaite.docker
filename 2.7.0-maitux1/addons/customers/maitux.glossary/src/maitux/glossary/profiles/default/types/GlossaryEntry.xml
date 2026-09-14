@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<object name="GlossaryEntry" meta_type="Dexterity FTI"
+        i18n:domain="maitux.glossary"
+        xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+        purge="True">
+
+  <property name="title" i18n:translate="">Keyword glossary entry</property>
+  <property name="description" i18n:translate="">One (Analysis Keyword, calc keyword) combination</property>
+
+  <property name="icon_expr">senaite_theme/icon/folder</property>
+  <property name="factory">GlossaryEntry</property>
+  <property name="add_view_expr">string:${folder_url}/++add++GlossaryEntry</property>
+  <property name="immediate_view">view</property>
+
+  <property name="global_allow">False</property>
+  <property name="filter_content_types">True</property>
+  <property name="allowed_content_types"/>
+  <property name="allow_discussion">False</property>
+
+  <property name="default_view">view</property>
+  <property name="view_methods">
+    <element value="view"/>
+  </property>
+  <property name="default_view_fallback">False</property>
+
+  <property name="add_permission">cmf.AddPortalContent</property>
+
+  <property name="schema">maitux.glossary.interfaces.IGlossaryEntrySchema</property>
+  <property name="klass">maitux.glossary.content.glossaryentry.GlossaryEntry</property>
+
+  <!-- 注意：**不能**加 bika.lims.interfaces.IAutoGenerateID —
+       行的 ID 必须是 keys.make_entry_id 算出的确定性 ID，
+       否则同步的幂等与 O(1) 定位都会失效。 -->
+  <property name="behaviors">
+    <element value="plone.app.referenceablebehavior.referenceable.IReferenceable" />
+  </property>
+
+  <alias from="(Default)" to="(dynamic view)"/>
+  <alias from="edit" to="@@edit"/>
+  <alias from="sharing" to="@@sharing"/>
+  <alias from="view" to="(selected layout)"/>
+
+</object>
