@@ -1351,8 +1351,20 @@ def main(argv=None):
                      - sum(n for k, n in out_of_scope),
                      sum(n for k, n in out_of_scope)))
     elif not args.no_baseline:
-        print(u"基线：无（%s 不存在）—— 按「有 ERROR 即拦」判定。"
-              u"要把现存欠账固化成基线：--write-baseline" % bpath)
+        # ★ 这里有**两种**状态，此前印的是同一句话。
+        #   `load_baseline` 对「文件不存在」和「文件在但 entries 为空」
+        #   都返回 {}，于是欠账清零的情况也被印成「基线：无（…不存在）」
+        #   —— 而那个路径明明存在。读的人会去找一个根本没丢的文件，
+        #   并以为门禁没在工作（2026-09-12 实测被骗过一轮）。
+        #   `bmeta` 只有在文件读成功时才非 None，拿它区分。
+        if bmeta is not None:
+            print(u"基线：%s —— **0 条已知欠账**（recorded=%s）。\n"
+                  u"  门禁仍是「不新增 ERROR」；当前没有任何欠账被抑制，"
+                  u"所以效果与严格模式相同。**这是清零，不是缺基线。**"
+                  % (bpath, (bmeta or {}).get("recorded", u"?")))
+        else:
+            print(u"基线：无（%s **不存在**）—— 按「有 ERROR 即拦」判定。"
+                  u"要把现存欠账固化成基线：--write-baseline" % bpath)
     print(u"")
 
     # --- 逐条明细（--summary 时跳过）---------------------------------------
