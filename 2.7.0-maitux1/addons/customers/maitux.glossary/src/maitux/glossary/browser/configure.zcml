@@ -1,0 +1,52 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    i18n_domain="maitux.glossary">
+
+  <!-- 列表页：容器默认视图。permission 用 Zope 内置的 zope2.View，
+       不涉及 senaite 自定义权限，因此不需要 overrides.zcml（规则 R1/R5）。 -->
+  <browser:page
+      for="maitux.glossary.interfaces.IGlossaryEntries"
+      name="glossary-listing"
+      class=".listing.GlossaryListingView"
+      permission="zope2.View"
+      />
+
+  <browser:page
+      for="maitux.glossary.interfaces.IGlossaryEntries"
+      name="view"
+      class=".listing.GlossaryListingView"
+      permission="zope2.View"
+      />
+
+  <browser:page
+      for="maitux.glossary.interfaces.IGlossaryEntry"
+      name="view"
+      class=".listing.GlossaryEntryView"
+      permission="zope2.View"
+      />
+
+  <!-- 工具栏「刷新」按钮的目标：手动重新与站点对账 -->
+  <browser:page
+      for="maitux.glossary.interfaces.IGlossaryEntries"
+      name="glossary-sync"
+      class=".sync.GlossarySyncView"
+      permission="zope2.View"
+      />
+
+  <!-- 列表页自己的静态资源（"勾选行即保存"的注入脚本） -->
+  <browser:resourceDirectory
+      name="maitux.glossary"
+      directory="static"
+      />
+
+  <!-- 只在本容器的列表页里把上面的脚本插到表格上方 -->
+  <browser:viewlet
+      name="maitux.glossary.listing_assets"
+      manager="senaite.core.browser.viewlets.interfaces.IAboveListingTable"
+      class=".assets.GlossaryListingAssetsViewlet"
+      for="maitux.glossary.interfaces.IGlossaryEntries"
+      permission="zope2.View"
+      />
+
+</configure>
