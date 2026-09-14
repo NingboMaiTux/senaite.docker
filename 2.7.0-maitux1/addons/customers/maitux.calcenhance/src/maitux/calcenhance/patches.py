@@ -4902,6 +4902,34 @@ def _evaluate_calculatedlist_interims(self, only=None):
         d = _dec_quantize(val, digits, ROUND_UP)
         return _PLACEHOLDER if d is None else float(d)
 
+    def _round_down(val, digits=0):
+        """Truncate TOWARD ZERO at `digits` decimals -- discard, never carry.
+
+        The mirror image of _round_up: that one never discards a
+        remainder (只进不舍), this one never adds one (只舍不进) --
+        straight truncation, not "round toward -inf" (that would be
+        decimal.ROUND_FLOOR, which is not symmetric around zero and is
+        NOT what was asked for here). Returns a NUMBER.
+
+        rs_stab_pct1 asked for exactly this: 保留一位小数、后面位数舍弃
+        不进位. None of ROUND / ROUND_EVEN / ROUND_UP has that semantic,
+        and bare floor() has the same list-vs-float crash _round_up's
+        docstring describes for ceil() -- the array functions this feeds
+        (RSD_ROWS / GROUP_RSDlist / ...) return a LIST, and
+        `floor(list * 10) / 10` throws "a float is required" the same
+        way `ceil(...)` did.
+
+        ★ Symmetric truncation, like ROUND_DOWN in every other language's
+        decimal library: -1.69 -> -1.6, not -1.7. Nobody has asked for a
+        negative-valued caller yet; written down for the same reason the
+        away-from-zero choice is written down on _round_up.
+        """
+        if isinstance(val, list):
+            return [_round_down(v, digits) for v in val]
+        from decimal import ROUND_DOWN
+        d = _dec_quantize(val, digits, ROUND_DOWN)
+        return _PLACEHOLDER if d is None else float(d)
+
     def _format_digits(val, digits=0):
         """Fixed number of decimals, TRAILING ZEROS KEPT.  Returns a STRING.
 
@@ -5613,6 +5641,7 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "ROUND": _round_half_up,
         "ROUND_EVEN": _round_half_even,
         "ROUND_UP": _round_up,
+        "ROUND_DOWN": _round_down,
         "FORMAT": _format_digits,
         "INDEX_BY": _index_by,
         "SLOPE": _slope,
