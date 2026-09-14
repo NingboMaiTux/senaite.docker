@@ -6,26 +6,42 @@ from plone.registry.interfaces import IRegistry
 from Products.Five.browser import BrowserView
 from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
 from zope.component import getUtility
+from zope.i18n import translate as ztranslate
 
 from maitux.reviewerassignment.config import REGISTRY_PREFIX
 from maitux.reviewerassignment.settings import DEFAULTS
+from maitux.reviewerassignment import _
 
 
 FIELDS = (
     ("require_reviewer_on_worksheet_submit",
-     u"工作表提交前必须已分配审核人",
-     u"关闭后，未分配审核人的工作表也可以提交。"),
+     _(u"label_require_reviewer_on_worksheet_submit",
+       default=u"Require reviewer before worksheet submit"),
+     _(u"help_require_reviewer_on_worksheet_submit",
+       default=u"When disabled, worksheets can be submitted without an "
+               u"assigned reviewer.")),
     ("require_reviewer_on_analysis_submit",
-     u"工作表内分析项提交前必须已分配审核人",
-     u"关闭后，工作表未分配审核人时，其中的分析项仍可单独提交。"),
+     _(u"label_require_reviewer_on_analysis_submit",
+       default=u"Require reviewer before analysis submit"),
+     _(u"help_require_reviewer_on_analysis_submit",
+       default=u"When disabled, analyses in the worksheet can still be "
+               u"submitted even if no reviewer is assigned to the worksheet.")),
     ("restrict_verify_to_assigned_reviewer",
-     u"只有被指派的审核人本人可以审核",
-     u"关闭后不再校验「必须是被指派的那个人」，审核权限回落到 SENAITE 自身的判断"
-     u"（Verify 权限、自审限制、依赖项等仍然生效）。"),
+     _(u"label_restrict_verify_to_assigned_reviewer",
+       default=u"Restrict verification to the assigned reviewer"),
+     _(u"help_restrict_verify_to_assigned_reviewer",
+       default=u"When disabled, the add-on no longer checks whether the "
+               u"current user is the assigned reviewer. Verification still "
+               u"follows SENAITE's own permission, self-verification and "
+               u"dependency rules.")),
     ("exclude_submitter_from_reviewers",
-     u"审核人候选中剔除未来的提交人",
-     u"依据 SENAITE 的「允许自审」设置：不允许自审时，把工作表的分析员从审核人"
-     u"下拉框中剔除，避免选完提交后到审核那一步才失败。"),
+     _(u"label_exclude_submitter_from_reviewers",
+       default=u"Exclude the future submitter from reviewer options"),
+     _(u"help_exclude_submitter_from_reviewers",
+       default=u"Follows SENAITE's self-verification setting. When "
+               u"self-verification is not allowed, the worksheet analyst is "
+               u"removed from the reviewer dropdown so the submission does "
+               u"not fail later during verification.")),
 )
 
 
@@ -65,8 +81,8 @@ class ReviewerAssignmentControlPanelView(BrowserView):
                 value = DEFAULTS.get(name, True)
             items.append({
                 "name": name,
-                "title": title,
-                "description": description,
+                "title": self.translate_message(title),
+                "description": self.translate_message(description),
                 "value": bool(value),
             })
         return items
@@ -88,12 +104,26 @@ class ReviewerAssignmentControlPanelView(BrowserView):
         if not allow_not_assigned:
             return {
                 "ok": True,
-                "message": u"站点已关闭「允许提交未指派的分析项」，审核人规则覆盖提交路径。",
+                "message": self.translate_message(_(
+                    u"prerequisite_allow_to_submit_not_assigned_disabled",
+                    default=u'The site has disabled "Allow to submit '
+                            u'unassigned analyses", so reviewer rules cover '
+                            u'the submission path.',
+                )),
             }
         return {
             "ok": False,
-            "message": (
-                u"站点开启了「允许提交未指派的分析项」。分析项不建工作表也能提交，"
-                u"而审核人规则只覆盖工作表内的分析项 —— 本插件的约束可被完全绕过。"
-                u"请在 设置 > 分析 中关闭该项。"),
+            "message": self.translate_message(_(
+                u"prerequisite_allow_to_submit_not_assigned_enabled",
+                default=u'The site has enabled "Allow to submit unassigned '
+                        u'analyses". Analyses can be submitted without '
+                        u'creating a worksheet, while reviewer rules only '
+                        u'cover analyses inside worksheets, so this add-on can '
+                        u'be bypassed completely. Please disable the option in '
+                        u'Setup > Analyses.',
+            )),
         }
+
+    def translate_message(self, msg):
+        translated = ztranslate(msg, context=self.request)
+        return api.safe_unicode(translated)

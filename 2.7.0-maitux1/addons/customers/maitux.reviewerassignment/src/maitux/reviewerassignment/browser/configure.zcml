@@ -51,4 +51,16 @@
       layer="maitux.reviewerassignment.interfaces.IReviewerAssignmentLayer"
       />
 
+  <!-- 覆盖 senaite.core 的侧边栏导航 JSON：只为本 addon 根目录的条目注入
+       Message，让标题走本 addon 的翻译域（core 默认用 senaite.core 域，查不到
+       本 addon 的 msgid，会把 msgid 原样显示）。
+       本 layer 继承 ISenaiteCore，比 core 的注册更具体，因此优先级更高。 -->
+  <browser:page
+      name="sidebar-navigation-json"
+      for="*"
+      class="maitux.reviewerassignment.browser.sidebar.SidebarNavigationAPI"
+      permission="zope2.View"
+      layer="maitux.reviewerassignment.interfaces.IReviewerAssignmentLayer"
+      />
+
 </configure>

@@ -5,6 +5,8 @@
     xmlns:plone="http://namespaces.plone.org/plone"
     i18n_domain="maitux.reviewerassignment">
 
+  <i18n:registerTranslations directory="locales" />
+
   <include package="plone.behavior" file="meta.zcml"/>
 
   <!-- 显式 include：本包 ZCML 引用了 senaite.core 的权限，而 senaite.core 的
@@ -41,9 +43,9 @@
   <!-- 注册安装 Profile -->
   <genericsetup:registerProfile
       name="default"
-      title="Maitux 审核分配"
+      title="Maitux Reviewer Assignment"
       directory="profiles/default"
-      description="工作表审核分配与审核队列功能"
+      description="Reviewer assignment and review queue for worksheets"
       provides="Products.GenericSetup.interfaces.EXTENSION"
       />
 
@@ -59,9 +61,9 @@
   <!-- 注册卸载 Profile -->
   <genericsetup:registerProfile
       name="uninstall"
-      title="卸载 Maitux 审核分配"
+      title="Uninstall Maitux Reviewer Assignment"
       directory="profiles/uninstall"
-      description="卸载 maitux.reviewerassignment 包"
+      description="Uninstall the maitux.reviewerassignment package"
       provides="Products.GenericSetup.interfaces.EXTENSION"
       />
 

@@ -6,10 +6,12 @@ from bika.lims import api
 from senaite.core.browser.worksheets.worksheet.manage_results import (
     ManageResultsView as BaseManageResultsView,
 )
+from zope.i18n import translate as ztranslate
 
 from bika.lims.api.security import check_permission
 from bika.lims.api.user import get_user_id
 
+from maitux.reviewerassignment import _
 from maitux.reviewerassignment.assignment import get_member_fullname
 from maitux.reviewerassignment.assignment import get_reviewer_userid
 from maitux.reviewerassignment.assignment import iter_reviewer_options
@@ -72,27 +74,38 @@ class ManageResultsView(BaseManageResultsView):
         # 校验必须在写入路径上，不能只靠模板控制显隐 —— 模板管渲染，
         # 构造请求可以绕过它。这里是唯一的写入入口。
         if not self.can_assign_reviewer():
-            self.add_status_message(
-                u"没有权限修改本工作表的审核人，或当前状态不允许修改。",
-                "error")
+            self.add_status_message(self.translate_message(_(
+                u"reviewer_assignment_not_allowed",
+                default=u"You cannot change the reviewer for this worksheet, "
+                        u"or the current state does not allow changes.",
+            )), "error")
             return
 
         reviewer_userid = self.request.form.get("reviewer_userid", u"")
         reviewer_userid = api.safe_unicode(reviewer_userid).strip()
         if not reviewer_userid:
-            self.add_status_message(u"请选择审核人后再点击 Apply。", "warning")
+            self.add_status_message(self.translate_message(_(
+                u"reviewer_assignment_select_before_apply",
+                default=u"Select a reviewer before clicking Apply.",
+            )), "warning")
             return
 
         # 候选名单本身已按站点自审设置过滤，这里再挡一次直接构造请求的情况。
         allowed = [item[0] for item in self.get_reviewer_options()]
         if reviewer_userid not in allowed:
-            self.add_status_message(
-                u"该用户不在本工作表的可选审核人名单内。", "error")
+            self.add_status_message(self.translate_message(_(
+                u"reviewer_assignment_invalid_option",
+                default=u"The selected user is not in the reviewer options "
+                        u"for this worksheet.",
+            )), "error")
             return
 
         set_reviewer_userid(self.context, reviewer_userid)
         self.context.reindexObject(idxs=["getReviewerUserId"])
-        self.add_status_message(u"审核人已保存。", "info")
+        self.add_status_message(self.translate_message(_(
+            u"reviewer_assignment_saved",
+            default=u"Reviewer saved.",
+        )), "info")
 
     def get_reviewer_options(self):
         """返回审核人下拉框选项"""
@@ -108,4 +121,14 @@ class ManageResultsView(BaseManageResultsView):
     def get_selected_reviewer_title(self):
         """返回当前已分配审核人显示名"""
         reviewer_userid = get_reviewer_userid(self.context)
-        return get_member_fullname(self.context, reviewer_userid)
+        title = get_member_fullname(self.context, reviewer_userid)
+        if title:
+            return title
+        return self.translate_message(_(
+            u"reviewer_unassigned",
+            default=u"Unassigned",
+        ))
+
+    def translate_message(self, msg):
+        translated = ztranslate(msg, context=self.request)
+        return api.safe_unicode(translated)

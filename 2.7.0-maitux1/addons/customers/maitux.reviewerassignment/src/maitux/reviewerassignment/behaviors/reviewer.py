@@ -10,14 +10,19 @@ from zope import schema
 from zope.interface import implementer
 from zope.interface import provider
 
+from maitux.reviewerassignment import _
+
 
 @provider(IFormFieldProvider)
 class IWorksheetReviewerBehavior(model.Schema):
     """工作表审核人字段定义"""
 
     reviewer_userid = schema.TextLine(
-        title=u"审核人",
-        description=u"保存被分配审核人的用户 ID，供过滤和权限校验使用",
+        title=_(u"field_reviewer", default=u"Reviewer"),
+        description=_(
+            u"help_reviewer_field",
+            default=u"Stores the assigned reviewer's user ID for filtering "
+                    u"and permission checks."),
         required=False,
         default=u"",
     )

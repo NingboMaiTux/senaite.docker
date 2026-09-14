@@ -1,15 +1,17 @@
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh"
+<html xmlns="http://www.w3.org/1999/xhtml"
       xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      i18n:domain="maitux.reviewerassignment"
       metal:use-macro="context/main_template/macros/master">
 <body>
 <metal:title fill-slot="content-title">
-  <h1>审核工作表</h1>
+  <h1 i18n:translate="">Review Worksheets</h1>
 </metal:title>
 <metal:description fill-slot="content-description">
-  <p>默认页面已切换为审核工作表队列。</p>
+  <p i18n:translate="">The default page now points to the review worksheet queue.</p>
 </metal:description>
 <metal:main fill-slot="content-core">
-  <p>如果你看到这个占位页，说明默认视图注册尚未生效。</p>
+  <p i18n:translate="">If you can still see this placeholder page, the default view registration has not taken effect yet.</p>
 </metal:main>
 </body>
 </html>

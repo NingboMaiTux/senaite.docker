@@ -6,9 +6,11 @@ import collections
 from bika.lims import api
 from senaite.core.browser.listing.base import ListingView
 from senaite.core.browser.worksheets.view import WorksheetsView
+from zope.i18n import translate as ztranslate
 
 from maitux.reviewerassignment.assignment import get_member_fullname
 from maitux.reviewerassignment.config import REVIEWER_INDEX
+from maitux.reviewerassignment import _
 
 
 class ReviewerQueueView(WorksheetsView):
@@ -18,38 +20,63 @@ class ReviewerQueueView(WorksheetsView):
 
     def __init__(self, context, request):
         super(ReviewerQueueView, self).__init__(context, request)
-        self.title = u"审核工作表"
-        self.description = u"仅显示当前审核人被分配的待审核工作表"
+        self.title = self.translate_message(_(
+            u"review_queue_title",
+            default=u"Review Worksheets",
+        ))
+        self.description = self.translate_message(_(
+            u"review_queue_description",
+            default=u"Shows only worksheets assigned to the current reviewer "
+                    u"and waiting for verification.",
+        ))
         self.context_actions = {}
         self.show_workflow_action_buttons = True
         self.show_select_column = True
         self.show_select_all_checkbox = True
         self.columns = collections.OrderedDict((
             ("Title", {
-                "title": u"工作表",
+                "title": self.translate_message(_(
+                    u"column_worksheet",
+                    default=u"Worksheet",
+                )),
                 "index": "getId",
             }),
             ("Analyst", {
-                "title": u"分析员",
+                "title": self.translate_message(_(
+                    u"column_analyst",
+                    default=u"Analyst",
+                )),
                 "index": "getAnalyst",
             }),
             (REVIEWER_INDEX, {
-                "title": u"审核人",
+                "title": self.translate_message(_(
+                    u"column_reviewer",
+                    default=u"Reviewer",
+                )),
                 "index": REVIEWER_INDEX,
             }),
             ("CreationDate", {
-                "title": u"创建时间",
+                "title": self.translate_message(_(
+                    u"column_created",
+                    default=u"Created",
+                )),
                 "index": "created",
             }),
             ("state_title", {
-                "title": u"状态",
+                "title": self.translate_message(_(
+                    u"column_status",
+                    default=u"Status",
+                )),
                 "index": "review_state",
                 "attr": "state_title",
             }),
         ))
         self.review_states = [{
             "id": "to_be_verified",
-            "title": u"待审核",
+            "title": self.translate_message(_(
+                u"state_to_be_verified",
+                default=u"To be verified",
+            )),
             "contentFilter": {
                 "review_state": "to_be_verified",
                 "sort_on": "created",
@@ -58,7 +85,10 @@ class ReviewerQueueView(WorksheetsView):
             "transitions": [],
             "custom_transitions": [{
                 "id": "verify_assigned",
-                "title": u"审核",
+                "title": self.translate_message(_(
+                    u"action_verify",
+                    default=u"Verify",
+                )),
             }],
             "columns": self.columns.keys(),
         }]
@@ -101,3 +131,7 @@ class ReviewerQueueView(WorksheetsView):
     def show_only_mine(self):
         """该页面只按审核人过滤，不叠加分析员限制"""
         return False
+
+    def translate_message(self, msg):
+        translated = ztranslate(msg, context=self.request)
+        return api.safe_unicode(translated)

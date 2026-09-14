@@ -4,9 +4,12 @@
         xmlns:i18n="http://xml.zope.org/namespaces/i18n"
         purge="True">
 
-  <!-- 基本信息 -->
-  <property name="title" i18n:translate="">审核工作表</property>
-  <property name="description" i18n:translate="">审核人专用的工作表待审核菜单</property>
+  <!-- 基本信息。
+       title/description 必须 ASCII：界面文案在运行时按 Message 翻译，
+       中文见 locales/zh_CN/LC_MESSAGES/maitux.reviewerassignment.po。
+       比照 maitux.projects 的 types/Projects.xml。 -->
+  <property name="title" i18n:translate="">Review Worksheets</property>
+  <property name="description" i18n:translate="">Reviewer-specific queue of worksheets waiting for verification.</property>
 
   <!-- 图标 -->
   <property name="icon_expr">string:${portal_url}/++plone++senaite.core.static/assets/icons/setup.svg</property>

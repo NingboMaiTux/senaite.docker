@@ -1,0 +1,156 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: maitux.reviewerassignment\n"
+"POT-Creation-Date: 2026-09-11 00:00+0000\n"
+"PO-Revision-Date: 2026-09-11 00:00+0000\n"
+"Last-Translator: Admin <admin@example.com>\n"
+"Language-Team: zh-cn <admin@example.com>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0\n"
+"Language-Code: zh-cn\n"
+"Language-Name: Simplified Chinese\n"
+"Preferred-Encodings: utf-8 latin1\n"
+"Domain: maitux.reviewerassignment\n"
+
+msgid "label_require_reviewer_on_worksheet_submit"
+msgstr "工作表提交前必须已分配审核人"
+
+msgid "help_require_reviewer_on_worksheet_submit"
+msgstr "关闭后，未分配审核人的工作表也可以提交。"
+
+msgid "label_require_reviewer_on_analysis_submit"
+msgstr "工作表内分析项提交前必须已分配审核人"
+
+msgid "help_require_reviewer_on_analysis_submit"
+msgstr "关闭后，工作表未分配审核人时，其中的分析项仍可单独提交。"
+
+msgid "label_restrict_verify_to_assigned_reviewer"
+msgstr "只有被指派的审核人本人可以审核"
+
+msgid "help_restrict_verify_to_assigned_reviewer"
+msgstr "关闭后不再校验“必须是被指派的那个人”，审核权限回落到 SENAITE 自身的判断（Verify 权限、自审限制、依赖项等仍然生效）。"
+
+msgid "label_exclude_submitter_from_reviewers"
+msgstr "审核人候选中剔除未来的提交人"
+
+msgid "help_exclude_submitter_from_reviewers"
+msgstr "依据 SENAITE 的“允许自审”设置：不允许自审时，把工作表的分析员从审核人下拉框中剔除，避免选完提交后到审核那一步才失败。"
+
+msgid "prerequisite_allow_to_submit_not_assigned_disabled"
+msgstr "站点已关闭“允许提交未指派的分析项”，审核人规则覆盖提交路径。"
+
+msgid "prerequisite_allow_to_submit_not_assigned_enabled"
+msgstr "站点开启了“允许提交未指派的分析项”。分析项不建工作表也能提交，而审核人规则只覆盖工作表内的分析项，所以本插件的约束可被完全绕过。请在 设置 > 分析 中关闭该项。"
+
+msgid "review_queue_title"
+msgstr "审核工作表"
+
+msgid "review_queue_description"
+msgstr "仅显示当前审核人被分配且待审核的工作表。"
+
+msgid "column_worksheet"
+msgstr "工作表"
+
+msgid "column_analyst"
+msgstr "分析员"
+
+msgid "column_reviewer"
+msgstr "审核人"
+
+msgid "column_created"
+msgstr "创建时间"
+
+msgid "column_status"
+msgstr "状态"
+
+msgid "state_to_be_verified"
+msgstr "待审核"
+
+msgid "action_verify"
+msgstr "审核"
+
+msgid "reviewer_assignment_not_allowed"
+msgstr "没有权限修改本工作表的审核人，或当前状态不允许修改。"
+
+msgid "reviewer_assignment_select_before_apply"
+msgstr "请选择审核人后再点击应用。"
+
+msgid "reviewer_assignment_invalid_option"
+msgstr "该用户不在本工作表的可选审核人名单内。"
+
+msgid "reviewer_assignment_saved"
+msgstr "审核人已保存。"
+
+msgid "reviewer_unassigned"
+msgstr "未分配"
+
+msgid "submit_no_analyses_selected"
+msgstr "未找到待提交的分析项。"
+
+msgid "submit_select_reviewer_first"
+msgstr "请先在页面顶部选择审核人并点击应用，再执行提交。"
+
+msgid "verify_select_worksheets_first"
+msgstr "请先勾选待审核工作表。"
+
+msgid "verify_worksheet_not_assigned_to_current_reviewer"
+msgstr "工作表 ${worksheet} 未分配给当前登录审核人。"
+
+msgid "verify_worksheet_has_no_pending_analyses"
+msgstr "工作表 ${worksheet} 没有可审核的分析项。"
+
+msgid "verify_analysis_failed"
+msgstr "工作表 ${worksheet} 的分析 ${analysis} 审核失败：${message}"
+
+msgid "unknown_error"
+msgstr "未知错误"
+
+msgid "verify_partial_success"
+msgstr "已完成 ${count} 张工作表审核；${message}"
+
+msgid "verify_success_count"
+msgstr "已完成 ${count} 张工作表审核。"
+
+msgid "Maitux Reviewer Assignment"
+msgstr "Maitux 审核分配"
+
+msgid "Site prerequisite not met"
+msgstr "站点前置条件未满足"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Reviewer"
+msgstr "审核人"
+
+msgid "Select reviewer"
+msgstr "请选择审核人"
+
+msgid "Apply"
+msgstr "应用"
+
+msgid "Review Worksheets"
+msgstr "审核工作表"
+
+msgid "The default page now points to the review worksheet queue."
+msgstr "默认页面已切换为审核工作表队列。"
+
+msgid "If you can still see this placeholder page, the default view registration has not taken effect yet."
+msgstr "如果你看到这个占位页，说明默认视图注册尚未生效。"
+
+msgid "field_reviewer"
+msgstr "审核人"
+
+msgid "help_reviewer_field"
+msgstr "保存被分配审核人的用户 ID，供过滤和权限校验使用。"
+
+msgid "folder_title_review_worksheets"
+msgstr "审核工作表"
+
+msgid "folder_description_review_worksheets"
+msgstr "审核人专用的工作表待审核队列。"
+
+msgid "Reviewer-specific queue of worksheets waiting for verification."
+msgstr "审核人专用的工作表待审核队列。"

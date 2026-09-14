@@ -9,7 +9,9 @@ from bika.lims.browser.workflow.analysis import WorkflowActionSubmitAdapter
 from bika.lims.interfaces import IWorkflowActionUIDsAdapter
 from bika.lims.workflow import doActionFor
 from zope.interface import implements
+from zope.i18n import translate as ztranslate
 
+from maitux.reviewerassignment import _
 from maitux.reviewerassignment.assignment import get_reviewer_userid
 from maitux.reviewerassignment.review_logic import has_selected_reviewer
 
@@ -27,12 +29,21 @@ class WorkflowActionSubmitReviewerAdapter(RequestContextAware):
     def __call__(self, action, uids):
         uids = list(uids or [])
         if not uids:
-            return self.redirect(message=u"未找到待提交的分析项。", level="warning")
+            return self.redirect(
+                message=self.translate_message(_(
+                    u"submit_no_analyses_selected",
+                    default=u"No analyses were found for submission.",
+                )),
+                level="warning")
 
         reviewer_userid = get_reviewer_userid(self.context)
         if not has_selected_reviewer(reviewer_userid):
             return self.redirect(
-                message=u"请先在页面顶部选择审核人并点击 Apply，再执行提交。",
+                message=self.translate_message(_(
+                    u"submit_select_reviewer_first",
+                    default=u"Select a reviewer at the top of the page and "
+                            u"click Apply before submitting.",
+                )),
                 level="warning")
 
         # 这里曾经把工作表的审核人复制一份写到每个分析项的 annotation 上。
@@ -48,6 +59,10 @@ class WorkflowActionSubmitReviewerAdapter(RequestContextAware):
         brains = api.search(dict(UID=uids), UID_CATALOG)
         return map(api.get_object, brains)
 
+    def translate_message(self, msg):
+        translated = ztranslate(msg, context=self.request)
+        return api.safe_unicode(translated)
+
 
 class WorkflowActionVerifyAssignedAdapter(RequestContextAware):
     """审核队列中的批量审核动作"""
@@ -57,7 +72,12 @@ class WorkflowActionVerifyAssignedAdapter(RequestContextAware):
     def __call__(self, action, uids):
         worksheets = self.get_objects(uids)
         if not worksheets:
-            return self.redirect(message=u"请先勾选待审核工作表。", level="warning")
+            return self.redirect(
+                message=self.translate_message(_(
+                    u"verify_select_worksheets_first",
+                    default=u"Select review worksheets first.",
+                )),
+                level="warning")
 
         current_userid = get_user_id()
         all_pending_analyses = []
@@ -67,8 +87,12 @@ class WorkflowActionVerifyAssignedAdapter(RequestContextAware):
             reviewer_userid = get_reviewer_userid(worksheet)
             worksheet_title = api.get_title(worksheet) or api.get_id(worksheet)
             if reviewer_userid != current_userid:
-                failed_messages.append(
-                    u"工作表 %s 未分配给当前登录审核人。" % worksheet_title)
+                failed_messages.append(self.translate_message(_(
+                    u"verify_worksheet_not_assigned_to_current_reviewer",
+                    default=u"Worksheet ${worksheet} is not assigned to the "
+                            u"current reviewer.",
+                    mapping={"worksheet": worksheet_title},
+                )))
                 continue
 
             pending = []
@@ -77,14 +101,18 @@ class WorkflowActionVerifyAssignedAdapter(RequestContextAware):
                     pending.append(analysis)
 
             if not pending:
-                failed_messages.append(
-                    u"工作表 %s 没有可审核的分析项。" % worksheet_title)
+                failed_messages.append(self.translate_message(_(
+                    u"verify_worksheet_has_no_pending_analyses",
+                    default=u"Worksheet ${worksheet} has no analyses ready "
+                            u"for verification.",
+                    mapping={"worksheet": worksheet_title},
+                )))
                 continue
             
             all_pending_analyses.extend(pending)
 
         if failed_messages and not all_pending_analyses:
-            message = u"；".join(failed_messages)
+            message = u"; ".join(failed_messages)
             return self.redirect(message=message, level="warning")
 
         # ADD(2026-08-30) - 对接电子签名插件。
@@ -115,9 +143,19 @@ class WorkflowActionVerifyAssignedAdapter(RequestContextAware):
             if not success:
                 worksheet_title = api.get_title(worksheet) or api.get_id(worksheet)
                 analysis_title = api.get_title(analysis) or api.get_id(analysis)
-                failed_messages.append(
-                    u"工作表 %s 的分析 %s 审核失败：%s"
-                    % (worksheet_title, analysis_title, message or u"未知错误"))
+                failed_messages.append(self.translate_message(_(
+                    u"verify_analysis_failed",
+                    default=u"Verification failed for analysis ${analysis} "
+                            u"in worksheet ${worksheet}: ${message}",
+                    mapping={
+                        "worksheet": worksheet_title,
+                        "analysis": analysis_title,
+                        "message": message or self.translate_message(_(
+                            u"unknown_error",
+                            default=u"Unknown error",
+                        )),
+                    },
+                )))
                 continue
             
             if worksheet and worksheet not in processed_worksheets:
@@ -125,13 +163,28 @@ class WorkflowActionVerifyAssignedAdapter(RequestContextAware):
                 success_count += 1
 
         if failed_messages:
-            message = u"；".join(failed_messages)
+            message = u"; ".join(failed_messages)
             if success_count:
-                message = u"已完成 %s 张工作表审核；%s" % (success_count, message)
+                message = self.translate_message(_(
+                    u"verify_partial_success",
+                    default=u"Verified ${count} worksheets; ${message}",
+                    mapping={
+                        "count": success_count,
+                        "message": message,
+                    },
+                ))
             return self.redirect(message=message, level="warning")
 
-        return self.redirect(message=u"已完成 %s 张工作表审核。" % success_count)
+        return self.redirect(message=self.translate_message(_(
+            u"verify_success_count",
+            default=u"Verified ${count} worksheets.",
+            mapping={"count": success_count},
+        )))
 
     def get_objects(self, uids):
         brains = api.search(dict(UID=uids), UID_CATALOG)
         return map(api.get_object, brains)
+
+    def translate_message(self, msg):
+        translated = ztranslate(msg, context=self.request)
+        return api.safe_unicode(translated)
