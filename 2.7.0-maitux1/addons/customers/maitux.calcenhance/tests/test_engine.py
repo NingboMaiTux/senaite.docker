@@ -279,7 +279,9 @@ def test_count_values_rows(p, r):
 #              -> 66 (ROUND_UP, array table only -- completes the
 #                     rounding family; array table because that is
 #                     where ROUND / ROUND_EVEN already live)
-EXPECTED_SAFE_ENTRIES = 66
+#              -> 67 (ROUND_DOWN, array table only -- rs_stab_pct1's
+#                     truncate-don't-carry requirement, mirrors ROUND_UP)
+EXPECTED_SAFE_ENTRIES = 67
 EXPECTED_SCALAR_ENTRIES = 26
 
 
@@ -837,6 +839,59 @@ def test_round_up(p, r):
     r.check("negative rounds away from zero", f(-1.51, 1), -1.6)
 
 
+def _rebuild_round_down(p):
+    """Rebuild ROUND_DOWN.  Same shape as _rebuild_round_up: it recurses on
+    the list branch, so the self-reference goes in as a trampoline."""
+    box = {}
+    fn = rebuild(p, "_round_down", defaults=(0,), freevars={
+        "_round_down": lambda *a, **kw: box["fn"](*a, **kw),
+        "_dec_quantize": rebuild(p, "_dec_quantize")})
+    box["fn"] = fn
+    return fn
+
+
+def test_round_down(p, r):
+    """ROUND_DOWN: 只舍不进, truncate toward zero -- rs_stab_pct1's actual
+    ask (保留一位小数、后面位数舍弃不进位), which none of ROUND / ROUND_EVEN /
+    ROUND_UP express.  Mirrors test_round_up: the list branch is the case
+    that matters, because RSD_ROWS / GROUP_RSDlist hand this a list, and
+    bare floor() crashes on it the same way bare ceil() crashed ROUND_UP's
+    caller before this function existed.
+    """
+    safe = _registry_keys(p, "_SAFE")
+    r.check("ROUND_DOWN registered in _SAFE", "ROUND_DOWN" in safe, True)
+
+    f = _rebuild_round_down(p)
+    r.check("rebuilt ROUND_DOWN", f is not None, True)
+    if f is None:
+        return
+
+    # -- scalars -------------------------------------------------------
+    r.check("1.606 -> 1.6", f(1.606, 1), 1.6)
+    r.check("1.699 -> 1.6", f(1.699, 1), 1.6)
+    # Already at the target precision -- truncating nothing is not carrying.
+    r.check("1.6 stays 1.6", f(1.6, 1), 1.6)
+    r.check("2.0 stays 2.0", f(2.0, 1), 2.0)
+    r.check("0.09 -> 0.0", f(0.09, 1), 0.0)
+    r.check("digits=0", f(1.9999, 0), 1.0)
+
+    # -- the list branch, i.e. what GROUP_RSDlist / RSD_ROWS hand it ----
+    r.check("maps over a list",
+            f([1.606, 2.699, 0.09], 1), [1.6, 2.6, 0.0])
+
+    # -- non-numeric members degrade per element, not per column -------
+    r.check("placeholder per element",
+            f([1.606, None, u"", u"N.D."], 1),
+            [1.6, p._PLACEHOLDER, p._PLACEHOLDER, p._PLACEHOLDER])
+    r.check("scalar non-numeric", f(u"N.D.", 1), p._PLACEHOLDER)
+
+    # -- toward zero, NOT toward -inf ----------------------------------
+    # Pins the documented decision: floor(-1.69) would give -1.7 (ROUND_FLOOR
+    # semantics). ROUND_DOWN truncates symmetrically around zero, so -1.69
+    # gives -1.6, matching the away-from-zero pairing ROUND_UP already has.
+    r.check("negative truncates toward zero", f(-1.69, 1), -1.6)
+
+
 def test_baseline_bylist(p, r):
     """S1: the baseline is the earliest RUN, not each group's first row."""
     logger = install_engine_stubs()
@@ -1119,6 +1174,7 @@ def main():
     test_group_ci_whole_column(p, r)
     test_s7_registration(p, r)
     test_round_up(p, r)
+    test_round_down(p, r)
     test_baseline_bylist(p, r)
     test_baseline_registration(p, r)
     test_baseline_through_the_engine(p, r)
