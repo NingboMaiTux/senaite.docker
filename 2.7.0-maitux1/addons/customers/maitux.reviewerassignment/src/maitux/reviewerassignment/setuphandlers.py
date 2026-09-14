@@ -18,8 +18,10 @@ from maitux.reviewerassignment.config import PROJECTNAME
 from maitux.reviewerassignment.config import REGISTRY_PREFIX
 from maitux.reviewerassignment.config import REVIEWER_FIELD
 from maitux.reviewerassignment.config import REVIEWER_INDEX
+from maitux.reviewerassignment.config import ROOT_DESCRIPTION
 from maitux.reviewerassignment.config import ROOT_ID
 from maitux.reviewerassignment.config import ROOT_TITLE
+from maitux.reviewerassignment.config import ROOT_TYPE
 from maitux.reviewerassignment.config import VERIFIER_ROLE
 from maitux.reviewerassignment.config import WORKSHEET_REVIEWER_BEHAVIOR
 
@@ -71,8 +73,58 @@ def run_install_steps(portal):
     root_container = setup_site_structure(portal)
     setup_permissions(root_container)
     setup_sidebar()
+    migrate_root_titles(portal)
     register_registry_defaults()
     check_site_prerequisites()
+
+
+def migrate_root_titles(portal):
+    """把根容器与 FTI 的 title/description 归一成英文基准值。
+
+    这里只写**纯字符串**：Dexterity 存 title 时会把 Message 拍平成字符串
+    （domain 一并丢失），存 Message 没有意义。界面上的中英显示由
+    browser/sidebar.py 在读取侧边栏数据时按本 addon 的域翻译。
+    幂等：重复设置无副作用。
+    """
+    updated = 0
+    types_tool = getattr(portal, "portal_types", None)
+    fti = getattr(types_tool, ROOT_TYPE, None) if types_tool else None
+    if fti is not None:
+        for prop, value in (("title", ROOT_TITLE),
+                            ("description", ROOT_DESCRIPTION)):
+            try:
+                fti._updateProperty(prop, value)
+            except Exception:
+                pass
+            try:
+                fti.manage_changeProperties(**{prop: value})
+            except Exception:
+                pass
+            setattr(fti, prop, value)
+        try:
+            fti._p_changed = 1
+        except Exception:
+            pass
+        updated += 1
+        logger.info("reviewerassignment: FTI %s title normalized", ROOT_TYPE)
+
+    root_container = portal.get(ROOT_ID)
+    if root_container is not None:
+        try:
+            root_container.setTitle(ROOT_TITLE)
+        except Exception as exc:
+            logger.warn("reviewerassignment: setTitle failed: %s", exc)
+        try:
+            root_container.setDescription(ROOT_DESCRIPTION)
+        except Exception as exc:
+            logger.warn("reviewerassignment: setDescription failed: %s", exc)
+        try:
+            root_container.reindexObject(idxs=["Title", "sortable_title"])
+        except Exception:
+            pass
+        updated += 1
+        logger.info("reviewerassignment: folder %s title normalized", ROOT_ID)
+    return updated
 
 
 def register_registry_defaults():
@@ -174,7 +226,7 @@ def setup_site_structure(portal):
         if ROOT_ID not in portal:
             root_container = ploneapi.content.create(
                 container=portal,
-                type='ReviewerassignmentContainer',
+                type=ROOT_TYPE,
                 id=ROOT_ID,
                 title=ROOT_TITLE
             )

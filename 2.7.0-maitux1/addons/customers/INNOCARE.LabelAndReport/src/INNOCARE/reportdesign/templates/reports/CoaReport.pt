@@ -4,14 +4,16 @@
               T                python:lambda o,d=u'': (d if o is None else (lambda vv,dd=u'': (dd if (vv is None or vv==u'' or vv=='') else (vv if isinstance(vv,unicode) else (vv.decode('utf-8','ignore') if isinstance(vv,str) else unicode(vv)))))(((o.Title() if (hasattr(o,'Title') and callable(o.Title) and o.Title()) else getattr(o,'title',None)) if (hasattr(o,'Title') and callable(o.Title)) else getattr(o,'title',None)),d));
               FMTDT            python:lambda d,fmt,dflt=u'': (dflt if d is None else (unicode(d.strftime(fmt)) if (hasattr(d,'strftime') and callable(d.strftime)) else (lambda vv,dd=u'': (dd if (vv is None or vv==u'' or vv=='') else (vv if isinstance(vv,unicode) else (vv.decode('utf-8','ignore') if isinstance(vv,str) else unicode(vv)))))(d,dflt)));
               VG_NORM          python:lambda v: ([] if not v else (list(v) if isinstance(v,(list,tuple)) else ([v] if isinstance(v,(str,unicode)) and (v is not None and v!=u'' and v!='') else [])));
-CTX              python:context;
+CTX              python:(getattr(getattr(view, 'model', None), 'instance', None) or context);
               cmf_mod          python:__import__('Products.CMFCore.utils', fromlist=['getToolByName']);
               dt_mod_coa       python:__import__('DateTime');
+              pkg_mod          python:__import__('pkg_resources', fromlist=['resource_string']);
               is_ar            python:(True if (hasattr(CTX,'getAnalyses') and callable(CTX.getAnalyses) and hasattr(CTX,'getClientReference') and callable(CTX.getClientReference)) else False);
               ar               python:(CTX if is_ar else None);
               portal           python:CTX.portal_url.getPortalObject();
               portal_url       python:portal.absolute_url();
               pm               python:cmf_mod.getToolByName(CTX, 'portal_membership');
+              inline_css       python:pkg_mod.resource_string('INNOCARE.reportdesign', 'templates/reports/coa.css').decode('utf-8', 'ignore');
               _empty           python:u'';
 
               ar_id_raw        python:((ar.getId() if (ar is not None and hasattr(ar,'getId') and callable(ar.getId)) else getattr(ar,'id',u'')) or u'') if ar else u'';
@@ -24,7 +26,8 @@ CTX              python:context;
 
               project_obj      python:((FLD('ProjectNo').getRaw(ar) if (FLD('ProjectNo') is not None and hasattr(FLD('ProjectNo'),'getRaw') and callable(FLD('ProjectNo').getRaw)) else None) if ar else None);
               project_gen      python:(T((ar.getProject() if (ar is not None and hasattr(ar,'getProject') and callable(ar.getProject)) else None), u'') if ar else u'');
-              project_title    python:(((T(project_obj, u'') or project_gen) or u'N/A') if ar else u'N/A');
+              project_id_raw   python:(((project_obj.getId() if (project_obj is not None and hasattr(project_obj,'getId') and callable(project_obj.getId)) else getattr(project_obj,'id',u'')) if project_obj is not None else u''));
+              project_id       python:(((S(project_id_raw, u'') or T(project_obj, u'')) or project_gen) or u'N/A');
               compound_raw     python:((FLD('MaterialCode').getAccessor(ar)() if (FLD('MaterialCode') is not None and hasattr(FLD('MaterialCode'),'getAccessor') and callable(FLD('MaterialCode').getAccessor)) else (getattr(ar,'MaterialCode',u'') if (ar is not None and hasattr(ar,'MaterialCode')) else u'')) if ar else u'');
               compound_id      python:(S(compound_raw, u'') or ar_id);
               qty_raw          python:((FLD('Quantity').getAccessor(ar)() if (FLD('Quantity') is not None and hasattr(FLD('Quantity'),'getAccessor') and callable(FLD('Quantity').getAccessor)) else (getattr(ar,'Quantity',u'') if (ar is not None and hasattr(ar,'Quantity')) else u'')) if ar else u'');
@@ -41,7 +44,7 @@ CTX              python:context;
               material_name    python:(S(material_raw, u'') or sampletype_t or u'N/A');
               mfg_raw          python:((FLD('ManufactureDate').getAccessor(ar)() if (FLD('ManufactureDate') is not None and hasattr(FLD('ManufactureDate'),'getAccessor') and callable(FLD('ManufactureDate').getAccessor)) else (getattr(ar,'ManufactureDate',None) if (ar is not None and hasattr(ar,'ManufactureDate')) else None)) if ar else None);
               manufacture_date python:(FMTDT(mfg_raw, '%Y.%m.%d', u'') or FMTDT(date_recv_raw, '%Y.%m.%d', u'') or FMTDT(date_samp_raw, '%Y.%m.%d', u'N/A'));
-              batch_no         python:report_id;
+              batch_no         python:(client_ref or ar_id or u'N/A');
               datepub_raw      python:((ar.getDatePublished() if (ar is not None and hasattr(ar,'getDatePublished') and callable(ar.getDatePublished)) else None) if ar else None);
               date_respub_raw  python:((ar.getDateResultPublished() if (ar is not None and hasattr(ar,'getDateResultPublished') and callable(ar.getDateResultPublished)) else None) if ar else None);
               date_published   python:(FMTDT(datepub_raw, '%Y.%m.%d', u'') or FMTDT(date_samp_raw, '%Y.%m.%d', u'') or FMTDT(date_recv_raw, '%Y.%m.%d', u'N/A'));
@@ -49,7 +52,7 @@ CTX              python:context;
               samplepoint_t    python:(T((ar.getSamplePoint() if (ar is not None and hasattr(ar,'getSamplePoint') and callable(ar.getSamplePoint)) else None), u'') if ar else u'');
               strength         python:(S(str_raw, u'') or samplepoint_t or u'N/A');
               ret_raw          python:((FLD('RetentionTime').getAccessor(ar)() if (FLD('RetentionTime') is not None and hasattr(FLD('RetentionTime'),'getAccessor') and callable(FLD('RetentionTime').getAccessor)) else (getattr(ar,'RetentionTime',u'') if (ar is not None and hasattr(ar,'RetentionTime')) else u'')) if ar else u'');
-              retest_date      python:(S(ret_raw, u'') or FMTDT(date_respub_raw, '%Y.%m.%d', u'N/A'));
+              retest_date      python:((FMTDT(ret_raw, '%Y.%m.%d', u'') if (ret_raw is not None and hasattr(ret_raw,'strftime') and callable(ret_raw.strftime)) else S(ret_raw, u'')) or FMTDT(date_respub_raw, '%Y.%m.%d', u'N/A'));
               contact_t        python:(T((ar.getContact() if (ar is not None and hasattr(ar,'getContact') and callable(ar.getContact)) else None), u'') if ar else u'');
               manufacturer     python:(contact_t or u'N/A');
               storage_obj      python:((FLD('StorageConditions').getRaw(ar) if (FLD('StorageConditions') is not None and hasattr(FLD('StorageConditions'),'getRaw') and callable(FLD('StorageConditions').getRaw)) else None) if ar else None);
@@ -72,7 +75,19 @@ CTX              python:context;
               created_date     python:FMTDT(created_obj, '%Y.%m.%d', u'');
               created_date_str python:S(created_date);
               report_suffix    python:(created_date_str.replace('.','').replace('-','')[:8] if created_date_str else u'');
-              report_no        python:(u'COA-' + S(report_id) + u'-' + report_suffix);
+              report_no        python:(u'COA-' + (S(ar_id, u'') or S(report_id, u'N/A')));
+
+              WLIST            python:lambda a: (list(a.getBackReferences('WorksheetAnalysis')) if (hasattr(a,'getBackReferences') and callable(a.getBackReferences)) else ([a.getWorksheet()] if (hasattr(a,'getWorksheet') and callable(a.getWorksheet) and a.getWorksheet() is not None) else []));
+              WSUID            python:lambda w: ((w.UID() if (hasattr(w,'UID') and callable(w.UID)) else u'') or (w.getId() if (hasattr(w,'getId') and callable(w.getId)) else getattr(w,'id',u'')) or unicode(id(w)));
+              ws_candidates    python:[w for a in (analyses or []) for w in WLIST(a) if w is not None];
+              ws_index         python:dict([(WSUID(w), w) for w in ws_candidates if w is not None]);
+              ws_pairs         python:[(((w.created() if (hasattr(w,'created') and callable(w.created)) else None) or getattr(w,'creation_date',None)), w) for w in ws_index.values()];
+              ws_pairs2        python:[((FMTDT(p[0], '%Y%m%d%H%M%S', u'00000000000000') or u'00000000000000'), p[1]) for p in ws_pairs];
+              ws_obj           python:(sorted(ws_pairs2, reverse=True)[0][1] if ws_pairs2 else None);
+              reviewerid       python:(S(getattr((ws_obj if ws_obj is not None else (ar if ar is not None else CTX)), 'reviewer_userid', u'')) or u'');
+              reviewer_mem     python:(pm.getMemberById(reviewerid) if (reviewerid and pm is not None and hasattr(pm,'getMemberById') and callable(pm.getMemberById)) else None);
+              reviewerfull_raw python:(reviewer_mem.getProperty('fullname') if (reviewer_mem is not None and hasattr(reviewer_mem,'getProperty') and callable(reviewer_mem.getProperty)) else u'');
+              reviewerfull     python:(S(reviewerfull_raw) or reviewerid);
 
               vids_per_a       python:[VG_NORM((a.getVerificators() if (hasattr(a,'getVerificators') and callable(a.getVerificators)) else [])) for a in analyses];
               vids_flat        python:[S(x) for sublist in vids_per_a for x in sublist if S(x)];
@@ -80,8 +95,12 @@ CTX              python:context;
               vid0             python:(vids_uniq[0] if vids_uniq else u'');
               verifier_mem     python:(pm.getMemberById(vid0) if (vid0 and pm is not None and hasattr(pm,'getMemberById') and callable(pm.getMemberById)) else None);
               verifier_raw     python:(verifier_mem.getProperty('fullname') if (verifier_mem is not None and hasattr(verifier_mem,'getProperty') and callable(verifier_mem.getProperty)) else u'');
-              verifier_name    python:S(verifier_raw);
+              verifier_name    python:(reviewerfull or S(verifier_raw));
               approver_name    python:u'';">
+
+    <style type="text/css" tal:content="structure inline_css"></style>
+
+    <div id="coa-wrapper">
 
     <!-- PAGE 1 -->
     <div class="coa-page coa-page-1">
@@ -141,7 +160,7 @@ CTX              python:context;
         <tbody>
           <tr>
             <td class="m-label"><div class="zh">项目号</div><div class="en">Project ID</div></td>
-            <td class="m-value" tal:content="project_title"></td>
+            <td class="m-value" tal:content="project_id"></td>
             <td class="m-label"><div class="zh">CoA版本号</div><div class="en">CoA Version</div></td>
             <td class="m-value" tal:content="coa_version"></td>
           </tr>
@@ -339,5 +358,7 @@ CTX              python:context;
 
     </div>
     <!-- END PAGE 2/3 -->
+
+    </div>
 
 </tal:coa>

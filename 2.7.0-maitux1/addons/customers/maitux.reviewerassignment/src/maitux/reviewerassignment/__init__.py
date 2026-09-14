@@ -2,6 +2,7 @@
 from zope.i18nmessageid import MessageFactory
 
 reviewerassignmentMessageFactory = MessageFactory('maitux.reviewerassignment')
+_ = reviewerassignmentMessageFactory
 
 # Allow importing this package's modules from restricted page-template code
 # (e.g. modules['maitux.reviewerassignment.assignment'] in print templates).

@@ -62,12 +62,13 @@
                 <form id="reviewerassignment_form"
                       name="reviewerassignment_form"
                       class="form-inline"
+                      i18n:domain="maitux.reviewerassignment"
                       enctype="multipart/form-data"
                       method="post">
                   <div class="input-group input-group-sm flex-nowrap d-inline-flex w-auto">
                     <div class="input-group-prepend">
-                      <span class="input-group-text">
-                        审核人
+                      <span class="input-group-text" i18n:translate="">
+                        Reviewer
                       </span>
                     </div>
                     <span tal:condition="view/can_assign_reviewer">
@@ -76,11 +77,11 @@
                               class="selectpicker"
                               data-style="dropdown-toggle btn-sm btn-light border rounded-0"
                               data-live-search="true">
-                        <option value="">请选择审核人</option>
+                        <option value="" i18n:translate="">Select reviewer</option>
                         <tal:reviewer repeat="item view/get_reviewer_options">
                           <option tal:attributes="value python:item[0];
                                                   selected python:item[0] == view.get_selected_reviewer() and 'selected' or ''"
-                                  tal:content="python:item[1]">审核人</option>
+                                  tal:content="python:item[1]">Reviewer</option>
                         </tal:reviewer>
                       </select>
                     </span>
@@ -88,7 +89,7 @@
                           tal:condition="not: view/can_assign_reviewer">
                       <span class="input-group-text"
                             tal:content="view/get_selected_reviewer_title">
-                        未分配
+                        Unassigned
                       </span>
                     </span>
                     <div class="input-group input-group-append"
@@ -96,6 +97,7 @@
                       <button class="btn btn-sm btn-outline-secondary"
                               type="submit"
                               name="reviewer_assignment_apply"
+                              i18n:translate=""
                               value="1">
                         Apply
                       </button>

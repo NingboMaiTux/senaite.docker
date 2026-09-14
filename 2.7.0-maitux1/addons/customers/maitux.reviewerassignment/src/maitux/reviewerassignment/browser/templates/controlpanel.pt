@@ -1,14 +1,16 @@
 <html xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      i18n:domain="maitux.reviewerassignment"
       metal:use-macro="context/main_template/macros/master">
 <body>
 <metal:content fill-slot="content">
   <div class="container-fluid">
-    <h1 class="documentFirstHeading">Maitux 审核分配</h1>
+    <h1 class="documentFirstHeading" i18n:translate="">Maitux Reviewer Assignment</h1>
 
     <div tal:define="status view/get_prerequisite_status">
       <div class="alert alert-warning"
            tal:condition="not: status/ok">
-        <strong>站点前置条件未满足</strong>
+        <strong i18n:translate="">Site prerequisite not met</strong>
         <div tal:content="status/message">message</div>
       </div>
       <div class="alert alert-success"
@@ -38,7 +40,7 @@
         </div>
       </tal:fields>
 
-      <button type="submit" class="btn btn-primary">保存</button>
+      <button type="submit" class="btn btn-primary" i18n:translate="">Save</button>
     </form>
   </div>
 </metal:content>

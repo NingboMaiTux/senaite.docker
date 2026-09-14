@@ -6,6 +6,8 @@ from senaite.core.interfaces import ISenaiteCore
 from zope import schema
 from zope.interface import Interface
 
+from maitux.reviewerassignment import _
+
 
 class IReviewerAssignmentLayer(ISenaiteCore):
     """审核分配浏览器层"""
@@ -23,33 +25,50 @@ class IReviewerAssignmentControlPanelSettings(model.Schema):
     """
 
     require_reviewer_on_worksheet_submit = schema.Bool(
-        title=u"工作表提交前必须已分配审核人",
-        description=u"关闭后，未分配审核人的工作表也可以提交。",
+        title=_(u"label_require_reviewer_on_worksheet_submit",
+               default=u"Require reviewer before worksheet submit"),
+        description=_(
+            u"help_require_reviewer_on_worksheet_submit",
+            default=u"When disabled, worksheets can be submitted without an "
+                    u"assigned reviewer."),
         default=True,
         required=False,
     )
 
     require_reviewer_on_analysis_submit = schema.Bool(
-        title=u"工作表内分析项提交前必须已分配审核人",
-        description=u"关闭后，工作表未分配审核人时，其中的分析项仍可单独提交。",
+        title=_(u"label_require_reviewer_on_analysis_submit",
+               default=u"Require reviewer before analysis submit"),
+        description=_(
+            u"help_require_reviewer_on_analysis_submit",
+            default=u"When disabled, analyses in the worksheet can still be "
+                    u"submitted even if no reviewer is assigned to the "
+                    u"worksheet."),
         default=True,
         required=False,
     )
 
     restrict_verify_to_assigned_reviewer = schema.Bool(
-        title=u"只有被指派的审核人本人可以审核",
-        description=(
-            u"关闭后不再校验「必须是被指派的那个人」，审核权限回落到 SENAITE "
-            u"自身的判断（Verify 权限、自审限制、依赖项等仍然生效）。"),
+        title=_(u"label_restrict_verify_to_assigned_reviewer",
+               default=u"Restrict verification to the assigned reviewer"),
+        description=_(
+            u"help_restrict_verify_to_assigned_reviewer",
+            default=u"When disabled, the add-on no longer checks whether the "
+                    u"current user is the assigned reviewer. Verification "
+                    u"still follows SENAITE's own permission, self-verification "
+                    u"and dependency rules."),
         default=True,
         required=False,
     )
 
     exclude_submitter_from_reviewers = schema.Bool(
-        title=u"审核人候选中剔除未来的提交人",
-        description=(
-            u"依据 SENAITE 的「允许自审」设置：不允许自审时，把工作表的分析员"
-            u"从审核人下拉框中剔除，避免选完提交后到审核那一步才失败。"),
+        title=_(u"label_exclude_submitter_from_reviewers",
+               default=u"Exclude the future submitter from reviewer options"),
+        description=_(
+            u"help_exclude_submitter_from_reviewers",
+            default=u"Follows SENAITE's self-verification setting. When "
+                    u"self-verification is not allowed, the worksheet analyst "
+                    u"is removed from the reviewer dropdown so the submission "
+                    u"does not fail later during verification."),
         default=True,
         required=False,
     )

@@ -1,0 +1,156 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: maitux.reviewerassignment\n"
+"POT-Creation-Date: 2026-09-11 00:00+0000\n"
+"PO-Revision-Date: 2026-09-11 00:00+0000\n"
+"Last-Translator: Admin <admin@example.com>\n"
+"Language-Team: en <admin@example.com>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0\n"
+"Language-Code: en\n"
+"Language-Name: English\n"
+"Preferred-Encodings: utf-8 latin1\n"
+"Domain: maitux.reviewerassignment\n"
+
+msgid "label_require_reviewer_on_worksheet_submit"
+msgstr "Require reviewer before worksheet submit"
+
+msgid "help_require_reviewer_on_worksheet_submit"
+msgstr "When disabled, worksheets can be submitted without an assigned reviewer."
+
+msgid "label_require_reviewer_on_analysis_submit"
+msgstr "Require reviewer before analysis submit"
+
+msgid "help_require_reviewer_on_analysis_submit"
+msgstr "When disabled, analyses in the worksheet can still be submitted even if no reviewer is assigned to the worksheet."
+
+msgid "label_restrict_verify_to_assigned_reviewer"
+msgstr "Restrict verification to the assigned reviewer"
+
+msgid "help_restrict_verify_to_assigned_reviewer"
+msgstr "When disabled, the add-on no longer checks whether the current user is the assigned reviewer. Verification still follows SENAITE's own permission, self-verification and dependency rules."
+
+msgid "label_exclude_submitter_from_reviewers"
+msgstr "Exclude the future submitter from reviewer options"
+
+msgid "help_exclude_submitter_from_reviewers"
+msgstr "Follows SENAITE's self-verification setting. When self-verification is not allowed, the worksheet analyst is removed from the reviewer dropdown so the submission does not fail later during verification."
+
+msgid "prerequisite_allow_to_submit_not_assigned_disabled"
+msgstr "The site has disabled \"Allow to submit unassigned analyses\", so reviewer rules cover the submission path."
+
+msgid "prerequisite_allow_to_submit_not_assigned_enabled"
+msgstr "The site has enabled \"Allow to submit unassigned analyses\". Analyses can be submitted without creating a worksheet, while reviewer rules only cover analyses inside worksheets, so this add-on can be bypassed completely. Please disable the option in Setup > Analyses."
+
+msgid "review_queue_title"
+msgstr "Review Worksheets"
+
+msgid "review_queue_description"
+msgstr "Shows only worksheets assigned to the current reviewer and waiting for verification."
+
+msgid "column_worksheet"
+msgstr "Worksheet"
+
+msgid "column_analyst"
+msgstr "Analyst"
+
+msgid "column_reviewer"
+msgstr "Reviewer"
+
+msgid "column_created"
+msgstr "Created"
+
+msgid "column_status"
+msgstr "Status"
+
+msgid "state_to_be_verified"
+msgstr "To be verified"
+
+msgid "action_verify"
+msgstr "Verify"
+
+msgid "reviewer_assignment_not_allowed"
+msgstr "You cannot change the reviewer for this worksheet, or the current state does not allow changes."
+
+msgid "reviewer_assignment_select_before_apply"
+msgstr "Select a reviewer before clicking Apply."
+
+msgid "reviewer_assignment_invalid_option"
+msgstr "The selected user is not in the reviewer options for this worksheet."
+
+msgid "reviewer_assignment_saved"
+msgstr "Reviewer saved."
+
+msgid "reviewer_unassigned"
+msgstr "Unassigned"
+
+msgid "submit_no_analyses_selected"
+msgstr "No analyses were found for submission."
+
+msgid "submit_select_reviewer_first"
+msgstr "Select a reviewer at the top of the page and click Apply before submitting."
+
+msgid "verify_select_worksheets_first"
+msgstr "Select review worksheets first."
+
+msgid "verify_worksheet_not_assigned_to_current_reviewer"
+msgstr "Worksheet ${worksheet} is not assigned to the current reviewer."
+
+msgid "verify_worksheet_has_no_pending_analyses"
+msgstr "Worksheet ${worksheet} has no analyses ready for verification."
+
+msgid "verify_analysis_failed"
+msgstr "Verification failed for analysis ${analysis} in worksheet ${worksheet}: ${message}"
+
+msgid "unknown_error"
+msgstr "Unknown error"
+
+msgid "verify_partial_success"
+msgstr "Verified ${count} worksheets; ${message}"
+
+msgid "verify_success_count"
+msgstr "Verified ${count} worksheets."
+
+msgid "Maitux Reviewer Assignment"
+msgstr "Maitux Reviewer Assignment"
+
+msgid "Site prerequisite not met"
+msgstr "Site prerequisite not met"
+
+msgid "Save"
+msgstr "Save"
+
+msgid "Reviewer"
+msgstr "Reviewer"
+
+msgid "Select reviewer"
+msgstr "Select reviewer"
+
+msgid "Apply"
+msgstr "Apply"
+
+msgid "Review Worksheets"
+msgstr "Review Worksheets"
+
+msgid "The default page now points to the review worksheet queue."
+msgstr "The default page now points to the review worksheet queue."
+
+msgid "If you can still see this placeholder page, the default view registration has not taken effect yet."
+msgstr "If you can still see this placeholder page, the default view registration has not taken effect yet."
+
+msgid "field_reviewer"
+msgstr "Reviewer"
+
+msgid "help_reviewer_field"
+msgstr "Stores the assigned reviewer's user ID for filtering and permission checks."
+
+msgid "folder_title_review_worksheets"
+msgstr "Review Worksheets"
+
+msgid "folder_description_review_worksheets"
+msgstr "Reviewer-specific queue of worksheets waiting for verification."
+
+msgid "Reviewer-specific queue of worksheets waiting for verification."
+msgstr "Reviewer-specific queue of worksheets waiting for verification."
