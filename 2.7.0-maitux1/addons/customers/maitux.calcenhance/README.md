@@ -2,13 +2,70 @@
 
 为 SENAITE LIMS 的计算公式（Calculation）模块增加三种新的 Interim Field 控件类型，支持 HPLC 含量测定、装量差异、杂质含量等复杂计算场景。
 
-**版本：** 1.7.0
+**版本：** 1.9.0
 **兼容：** SENAITE 2.x（实测 2.7.0 / Plone 5.2 / Python 2.7）
 
 > **关于 `ISSUES.md`**：本文多处写着「详见 `ISSUES.md` ISSUE-0xx」，但**该文件
 > 不在本仓库里**（2026-09-03 核实，git 全历史也没有提交记录）。那些
 > `ISSUE-0xx` 编号仍可作为问题标识使用，但**不要指望在本包目录下找到对应文档**。
 > 若有人手上留着这份台账，值得补进仓库。
+
+---
+
+## 1.9.0 更新概要（2026-09-14）
+
+需求来源：`静态数据整理/残留溶剂方法验证/` 手工填写对照表，`rs_stab_pct1`
+一行标注「保留一位小数、后面位数舍弃不进位」，ROUND / ROUND_EVEN / ROUND_UP
+都不是这个语义。
+
+### 函数表规模
+
+| | 条目 | = 常量 | + 函数 |
+| -- | ---- | ---- | ---- |
+| CalculatedList `_SAFE` | **67** | 3 | **64** |
+| 标量 `safe_globals` | **26** | 3 | **23** |
+
+较 v1.8.0：CalculatedList 66 -> 67（新增 1 个）。标量表未变动
+（原因与 `ROUND_UP` 相同：这条也只对整列有意义）。
+
+### 新增函数（1 个）
+
+| 函数 | 用途 |
+| ---- | ---- |
+| `ROUND_DOWN(x, n)` | 朝零截断（只舍不进），返回**数值**。与 `ROUND_UP` 同形、方向相反 |
+
+**为什么不是 `floor()`**：`RSD_ROWS` / `GROUP_RSDlist` 这类返回 list，
+`floor(list * 10) / 10` 在乘法上做列表重复，`math.floor` 抛
+"a float is required" —— 与 `ROUND_UP` 引入前 `ceil()` 崩的是同一个坑。
+
+**语义选择**：朝零截断，不是 `floor` 的朝 `-∞`。`-1.69 -> -1.6`，不是
+`-1.7`。与 `ROUND_UP` 的「远离零」对称，当前无负数调用方，差异钉在测试里。
+
+---
+
+## 1.8.0 更新概要（2026-09-12）
+
+需求来源：实验人员对 `loq_rsd` 等 RSD 字段提出「保留1位小数、向上进位」；
+`ceil(RSD_ROWS(...)*10)/10` 在数组列上抛 `a float is required`，整列 `---`。
+
+### 函数表规模
+
+| | 条目 | = 常量 | + 函数 |
+| -- | ---- | ---- | ---- |
+| CalculatedList `_SAFE` | **66** | 3 | **63** |
+| 标量 `safe_globals` | **26** | 3 | **23** |
+
+较 v1.7.0：CalculatedList 65 -> 66（新增 1 个）。标量表未变动
+（本函数只对整列有意义，标量表注册它没有意义）。
+
+### 新增函数（1 个）
+
+| 函数 | 用途 |
+| ---- | ---- |
+| `ROUND_UP(x, n)` | 远离零只进不舍（GB/T 8170 只进不舍），返回**数值**。补上 `ceil()` 吃不下数组列的缺口 |
+
+命中字段：`loq_rsd`、`imp_pct_a_rsd`、`imp_ns_rec_rsd`、`imp_ns_rec_rsd_all`、
+`imp_rec_spec_rsd`、`imp_rec_spec_type_rsd`。
 
 ---
 
@@ -715,6 +772,8 @@ bin/instance restart
 | `RESULT_NUM(val,name?,main?)`   | 逐元素数值化：主成分/限下标记→0     | `RESULT_NUM([rep],[name],[main_ref])`   |
 | `ROUND(x,n)`                    | 四舍五入，返回**数值**               | `ROUND([A], 3)`                         |
 | `ROUND_EVEN(x,n)`               | 四舍六入五留双（GB/T 8170），**数值** | `ROUND_EVEN([A], 3)`                    |
+| `ROUND_UP(x,n)`                 | 远离零只进不舍，**数值**             | `ROUND_UP([A], 1)`                      |
+| `ROUND_DOWN(x,n)`               | 朝零只舍不进，**数值**               | `ROUND_DOWN([A], 1)`                    |
 | `FORMAT(x,n)`                   | 定位数格式化保留尾随零，返回**字符串** | `FORMAT([A], 4)` → `"0.0400"`        |
 | `TIME_ELAPSED_HOURS(t,n=1)`     | 距数组内最早时间的小时差（数组）     | `TIME_ELAPSED_HOURS([inj_time], 1)`     |
 | `GROUP_AVGlist(v,*k)`           | 按组平均（广播）                     | `GROUP_AVGlist([val],[grp])`            |
