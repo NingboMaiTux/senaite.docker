@@ -28,7 +28,18 @@
             </div>
           </tal:block>
 
-          <tal:block tal:condition="not:row/is_interim_fields">
+          <!-- 工作表布局 / 通用 JSON 数据：同样前后对照着看 -->
+          <tal:block tal:condition="row/is_structured">
+            <div class="audit-structured-diff">
+              <div><strong>修改前</strong></div>
+              <div tal:replace="structure d/before_html" />
+              <div style="padding: 0.5em 0;"><strong>&rarr;</strong></div>
+              <div><strong>修改后</strong></div>
+              <div tal:replace="structure d/after_html" />
+            </div>
+          </tal:block>
+
+          <tal:block tal:condition="row/is_text">
             <code class="value">
               <span tal:content="d/before_text" />
             </code>

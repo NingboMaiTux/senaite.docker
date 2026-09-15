@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Calculation Interim Fields 审计展示格式化工具"""
+"""审计追踪里的结构化数据（Interim Fields / 工作表布局 / JSON）展示格式化工具"""
 
 import json
 
@@ -7,6 +7,12 @@ try:
     from html import escape
 except ImportError:
     from cgi import escape
+
+
+try:
+    string_types = (basestring,)
+except NameError:
+    string_types = (str,)
 
 
 RESULT_TYPE_TITLES = {
@@ -205,6 +211,334 @@ def render_interim_fields_html(value):
 """.strip()
 
     return u"\n".join([header] + body + [footer])
+
+
+# --------------------------------------------------------------------------
+# Worksheet 布局（layout_view）在审计追踪页面的呈现
+#
+# 工作表快照里的 Layout 是一个 DataGridField，值是 JSON 意义上的
+# "list of dict"：
+#
+#     [{"position": 1, "type": "a",
+#       "container_uid": "…", "analysis_uid": "…"}, …]
+#
+# 原生 compare_snapshots 走 _process_value 的字典分支，把它打印成
+# json.dumps 的原始串；两个 UID 都是 32 位裸串，读者看不出"哪个分析项、
+# 在哪个样品、第几格"变了 —— 记是记全了，可读性为零。这里摊成表格，
+# 并把 UID 换成可读标题。
+#
+# UID 的解析由调用方注入 `uid_resolver`：本模块刻意不 import bika.lims.api，
+# 保持脱离 Plone 就能跑单元测试（与 Interim Fields 一节同样的取舍）。
+# --------------------------------------------------------------------------
+
+#: 快照里出现过的工作表布局字段名（大小写不敏感）
+WORKSHEET_LAYOUT_FIELDS = ("layout_view", "layout")
+
+#: 布局行的判据键。position / type 太通用（Interim Fields、模板布局也有同名的
+#: 键），两个 *_uid 才是布局独有的特征。
+LAYOUT_ROW_KEYS = ("container_uid", "analysis_uid")
+
+#: 布局行的 type 取值（见 senaite.core: Worksheet.get_analysis_type）
+ANALYSIS_TYPE_TITLES = {
+    "a": u"常规分析",
+    "b": u"空白",
+    "c": u"质控",
+    "d": u"平行样",
+}
+
+
+def get_analysis_type_title(value):
+    """把布局行的 type 单字母转成可读文案"""
+    text = safe_text(value).strip().lower()
+    if not text:
+        return u""
+    return ANALYSIS_TYPE_TITLES.get(text, text)
+
+
+def resolve_uid(value, uid_resolver=None):
+    """把 UID 换成可读标题；换不动就原样显示 UID
+
+    审计页面宁可显示裸 UID，也不能因为解析失败把值吞掉。
+    """
+    text = clean_no_value(value)
+    if not text or uid_resolver is None:
+        return text
+    try:
+        title = uid_resolver(text)
+    except Exception:
+        # 解析器已经自己兜过底了，这里只是不让任何意外冒到渲染层
+        return text
+    title = clean_no_value(title)
+    return title or text
+
+
+def looks_like_layout_rows(value):
+    """判断值是不是工作表布局行（list of dict）"""
+    if not isinstance(value, (list, tuple)) or not value:
+        return False
+
+    keys = set()
+    for item in value:
+        row = item_to_dict(item)
+        if not row:
+            return False
+        keys.update(row.keys())
+    return any(key in keys for key in LAYOUT_ROW_KEYS)
+
+
+def is_worksheet_layout(field, value):
+    """工作表布局：行结构命中，或字段名命中且值为空
+
+    字段名命中时不直接认，仍要看行结构 —— 同名字段存了别的列表就不能抢过来。
+    唯一的例外是空列表：此时按布局渲染，界面显示"未设置"而不是 "[]"。
+    """
+    if isinstance(value, (list, tuple)) and not value:
+        return safe_text(field).strip().lower() in WORKSHEET_LAYOUT_FIELDS
+    return looks_like_layout_rows(value)
+
+
+def normalize_layout_rows(value, uid_resolver=None):
+    """把布局行整理成审计表格需要的列"""
+    rows = []
+    if not isinstance(value, (list, tuple)):
+        return rows
+
+    for num, item in enumerate(value):
+        row = item_to_dict(item)
+        if not row:
+            continue
+        rows.append({
+            "index": safe_text(num + 1),
+            "position": clean_no_value(row.get("position")),
+            "type": get_analysis_type_title(row.get("type")),
+            "container": resolve_uid(row.get("container_uid"), uid_resolver),
+            "analysis": resolve_uid(row.get("analysis_uid"), uid_resolver),
+        })
+    return rows
+
+
+def render_worksheet_layout_html(value, uid_resolver=None):
+    """把工作表布局渲染成可读表格，替代原始 JSON 串"""
+    rows = normalize_layout_rows(value, uid_resolver=uid_resolver)
+    if not rows:
+        return u'<span class="audit-layout-empty">未设置</span>'
+
+    header = u"""
+<table class="table table-condensed table-bordered audit-layout-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>位置</th>
+      <th>类型</th>
+      <th>样品</th>
+      <th>分析项</th>
+    </tr>
+  </thead>
+  <tbody>
+""".strip()
+
+    body = []
+    for row in rows:
+        body.append(u"""
+    <tr>
+      <td>{index}</td>
+      <td>{position}</td>
+      <td>{type}</td>
+      <td>{container}</td>
+      <td>{analysis}</td>
+    </tr>
+""".format(
+            index=safe_html(row["index"]),
+            position=safe_html(row["position"]),
+            type=safe_html(row["type"]),
+            container=safe_html(row["container"]),
+            analysis=safe_html(row["analysis"]),
+        ).strip())
+
+    footer = u"""
+  </tbody>
+</table>
+""".strip()
+
+    return u"\n".join([header] + body + [footer])
+
+
+# --------------------------------------------------------------------------
+# 通用 JSON 数据可视化
+#
+# 快照里凡是 dict / list[dict] / JSON 串形态的值，原生 _process_value 都会
+# 打印成 json.dumps 的原始串（dict 分支）或按 "; " 拼接（list 分支）。
+# 对审计读者来说那是一堵读不动的墙。这里统一摊开：
+#
+#   - dict        → 键 / 值 两列
+#   - list[dict]  → 以键的并集为列头的记录表
+#   - list[标量]  → 项目符号列表
+#
+# 嵌套结构递归渲染，超过 JSON_MAX_DEPTH 层退回转义后的 JSON 文本 ——
+# 任何数据都必须渲染得出来，格式化的底线是"不丢内容"。
+# --------------------------------------------------------------------------
+
+#: 递归渲染的最大层数，再深就退回原始 JSON 文本
+JSON_MAX_DEPTH = 3
+
+#: 看起来像 JSON 容器的首字符
+JSON_CONTAINER_CHARS = (u"[", u"{")
+
+
+def is_string(value):
+    """跨 Python 2 / 3 的字符串判断"""
+    return isinstance(value, string_types)
+
+
+def maybe_decode_json(value, depth=0):
+    """看起来像 JSON 容器就解回来，解不动原样返回
+
+    只在首字符是 [ 或 { 时才尝试；解析失败一律原样返回 ——
+    审计记录不允许因为"格式化"把原始值弄丢。
+    """
+    if not is_string(value) or depth > JSON_MAX_DEPTH:
+        return value
+
+    text = value.strip()
+    if not text or text[0] not in JSON_CONTAINER_CHARS:
+        return value
+
+    try:
+        decoded = json.loads(text)
+    except (ValueError, TypeError):
+        return value
+
+    if isinstance(decoded, (dict, list, tuple)):
+        return decoded
+    return value
+
+
+def is_json_data(value):
+    """判断一个快照值是否值得结构化展示
+
+    纯标量不进来：审计页面里绝大多数字段都是标量，走 code 分支更好读。
+    纯字符串列表（如 analyses 的 UID 列表）也不进来：_process_value 已经
+    把它拼成可读的一行了。
+
+    例外是**字面就是 JSON 的字符串** —— 它已经解出来了，就一定要摊开。
+    多选类型 interim 的默认值正是这种形态，原样打印会连中文都露成 \\uXXXX。
+    """
+    if is_string(value):
+        decoded = maybe_decode_json(value)
+        return isinstance(decoded, (dict, list, tuple)) and bool(decoded)
+    if isinstance(value, dict):
+        return bool(value)
+    if isinstance(value, (list, tuple)):
+        return any(isinstance(item, (dict, list, tuple)) for item in value)
+    return False
+
+
+def render_json_raw_html(value):
+    """兜底：转义后的 JSON 文本，绝不丢内容"""
+    try:
+        text = json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False)
+    except (ValueError, TypeError):
+        # ensure_ascii=False 下非 ASCII 字节串解不开会走到这里，也照接
+        text = safe_text(value)
+    return u'<pre class="audit-json-raw">{}</pre>'.format(safe_html(text))
+
+
+def render_json_mapping_html(mapping, depth=0):
+    """dict → 键 / 值 两列"""
+    if not isinstance(mapping, dict) or not mapping:
+        return u'<span class="audit-json-empty">未设置</span>'
+
+    if depth >= JSON_MAX_DEPTH:
+        return render_json_raw_html(mapping)
+
+    rows = []
+    # key=safe_text 保证键类型混杂（unicode 与 str）时也不会比较崩
+    for key in sorted(mapping.keys(), key=safe_text):
+        rows.append(u"""
+    <tr>
+      <th class="audit-json-key">{key}</th>
+      <td>{value}</td>
+    </tr>
+""".format(
+            key=safe_html(key),
+            value=render_json_html(mapping[key], depth + 1),
+        ).strip())
+
+    return u"""
+<table class="table table-condensed table-bordered audit-json-table">
+  <tbody>
+{}
+  </tbody>
+</table>
+""".format(u"\n".join(rows)).strip()
+
+
+def render_json_records_html(records, depth=0):
+    """list[dict] → 以键的并集为列头的记录表"""
+    columns = []
+    for record in records:
+        for key in record.keys():
+            if key not in columns:
+                columns.append(key)
+    columns = sorted(columns, key=safe_text)
+
+    head = u"".join(
+        u"<th>{}</th>".format(safe_html(column)) for column in columns)
+
+    body = []
+    for num, record in enumerate(records):
+        cells = u"".join(
+            u"<td>{}</td>".format(
+                render_json_html(record.get(column, u""), depth + 1))
+            for column in columns)
+        body.append(
+            u'<tr><td class="audit-json-index">{}</td>{}</tr>'.format(
+                safe_html(num + 1), cells))
+
+    return u"""
+<table class="table table-condensed table-bordered audit-json-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      {head}
+    </tr>
+  </thead>
+  <tbody>
+    {body}
+  </tbody>
+</table>
+""".format(head=head, body=u"\n    ".join(body)).strip()
+
+
+def render_json_array_html(sequence, depth=0):
+    """list → 记录表（全是字典时）或项目符号列表"""
+    if not isinstance(sequence, (list, tuple)) or not sequence:
+        return u'<span class="audit-json-empty">未设置</span>'
+
+    if depth >= JSON_MAX_DEPTH:
+        return render_json_raw_html(list(sequence))
+
+    records = [item_to_dict(item) for item in sequence]
+    if all(records):
+        return render_json_records_html(records, depth)
+
+    items = [
+        u'<li class="audit-json-item">{}</li>'.format(
+            render_json_html(item, depth + 1))
+        for item in sequence
+    ]
+    return u'<ul class="audit-json-list">{}</ul>'.format(u"".join(items))
+
+
+def render_json_html(value, depth=0):
+    """JSON 数据可视化的统一入口：dict / list / JSON 串都从这里进"""
+    value = maybe_decode_json(value, depth)
+
+    if isinstance(value, dict):
+        return render_json_mapping_html(value, depth)
+    if isinstance(value, (list, tuple)):
+        return render_json_array_html(value, depth)
+    return safe_html(value)
 
 
 # --------------------------------------------------------------------------
