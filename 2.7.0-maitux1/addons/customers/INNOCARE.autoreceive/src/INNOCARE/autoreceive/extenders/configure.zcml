@@ -1,0 +1,18 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:i18n="http://namespaces.zope.org/i18n"
+    i18n_domain="INNOCARE.autoreceive">
+
+  <!-- Client：新增「自动接收」开关（layer 门控，未装本 addon 的站点不生效） -->
+  <adapter
+      factory=".client.ClientSchemaExtender"
+      provides="archetypes.schemaextender.interfaces.ISchemaExtender"
+      name="INNOCARE.autoreceive.client" />
+
+  <!-- 样品：新增只读「接收人」展示字段（同上，layer 门控） -->
+  <adapter
+      factory=".analysisrequest.ARSchemaExtender"
+      provides="archetypes.schemaextender.interfaces.ISchemaExtender"
+      name="INNOCARE.autoreceive.analysisrequest" />
+
+</configure>

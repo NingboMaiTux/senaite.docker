@@ -1,0 +1,59 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    xmlns:i18n="http://namespaces.zope.org/i18n"
+    i18n_domain="INNOCARE.autoreceive">
+
+  <i18n:registerTranslations directory="locales" />
+
+  <include package="Products.GenericSetup" file="meta.zcml" />
+
+  <!-- Client 的「自动接收」开关 + 样品（AR）的「接收人」展示字段 -->
+  <include package=".extenders" />
+
+  <!-- 登样后按 Client 自动接收。
+
+       ★ handler= 而不是 factory=：这里注册的是普通函数（事件处理器），
+       与 senaite.core 的 on_client_created 同一写法；
+       用 factory= 会被当作 adapter 工厂处理，缺 provides 直接 ZCML 报错。
+
+       ★ 签名里没有 request，ZCML 插不了 layer=；
+       门控在 subscribers.is_addon_installed() 里做（判 IAutoReceiveLayer）。
+       不判的话没装本 addon 的站点也会被自动接收。 -->
+  <subscriber
+      for="bika.lims.interfaces.IAnalysisRequest
+           Products.Archetypes.interfaces.IObjectInitializedEvent"
+      handler="INNOCARE.autoreceive.subscribers.after_sample_created"
+      />
+
+  <!-- 样品列表新增「接收人」列：走官方 IListingViewAdapter 扩展点，
+       不覆盖视图、不声明 permission。
+
+       ★ 同上，这个签名（view, context）不含 request，ZCML 里插不了 layer=；
+       门控在 adapters.SamplesReceivedByAdapter.before_render() 里做
+       （判 IAutoReceiveLayer），否则没装本 addon 的站点也会多出一列。 -->
+  <subscriber
+      for="senaite.core.interfaces.ISamplesView *"
+      factory="INNOCARE.autoreceive.adapters.SamplesReceivedByAdapter"
+      provides="senaite.app.listing.interfaces.IListingViewAdapter"
+      />
+
+  <genericsetup:registerProfile
+      name="default"
+      title="INNOCARE.autoreceive"
+      directory="profiles/default"
+      description="Installs the INNOCARE.autoreceive package"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      post_handler=".setuphandlers.setup_handler"
+      />
+
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="INNOCARE.autoreceive (uninstall)"
+      directory="profiles/uninstall"
+      description="Uninstalls INNOCARE.autoreceive"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      post_handler=".setuphandlers.uninstall"
+      />
+
+</configure>

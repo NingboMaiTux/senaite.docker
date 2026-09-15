@@ -17,8 +17,12 @@ python 2.7.0-maitux1/addons/customers/lint_addon.py                      # 全�
 ```
 
 从哪个目录跑都行，它按自身位置找 `addons` 根。**改完 addon、重启容器之前跑一遍**；
-`ERROR` 为 0 才进部署。当前覆盖 R1 / R4 / R4b / R5b / R5c / R5d / R14 / R16
+`ERROR` 为 0 才进部署。当前覆盖 R1 / R4 / R4b / R5b / R5c / R5d / R12 / R14
 以及若干 Python 2.7 编码陷阱。
+
+> 订正（2026-09-15）：这里原先写作「R14 / R16」，但规则表里从未有过 R16
+> （`E16_WIDGET_QUERY_LEAK` / `W16_WIDGET_QUERY_LEAK` 对应的是 **R12**，见 R12 节）。
+> 现按实际覆盖改回 R12；R15 / R16 是 2026-09-15 新补的两条规则，**暂无机器判据**。
 
 > 这份 `lint_addon.py` 有两份拷贝，内容保持一致：本仓库这份是给团队用的，
 > 另一份在维护者的个人工具库里。改任一份都要同步另一份 —— 文件头的注释里
@@ -669,6 +673,70 @@ Worksheets 列表底部的「仪器采集」按钮由 `IListingViewAdapter` 订�
 
 ---
 
+### R15. 注册普通事件处理函数用 `handler=`，不要用 `factory=`
+
+**规则**：`<subscriber>` 指向一个**普通函数**（事件处理器）时，必须写
+`handler="模块.函数"`；只有指向**类工厂 / adapter 工厂**时才用 `factory=`
+且**必须同时给 `provides=`**。
+
+```xml
+<!-- ✓ 普通函数 -->
+<subscriber
+    for="bika.lims.interfaces.IAnalysisRequest
+         Products.Archetypes.interfaces.IObjectInitializedEvent"
+    handler="INNOCARE.autoreceive.subscribers.after_sample_created" />
+
+<!-- ✓ 类工厂：factory= 必须配 provides= -->
+<subscriber
+    for="senaite.core.interfaces.ISamplesView *"
+    factory="INNOCARE.autoreceive.adapters.SamplesReceivedByAdapter"
+    provides="senaite.app.listing.interfaces.IListingViewAdapter" />
+```
+
+**配套**：用 `handler=` 的函数**不要**再加 `@adapter(...)` —— 与 senaite.core
+自己的 `subscribers.client.on_client_created` 同写法（普通函数 + `handler=`）。
+
+**违反后果**：ZCML 加载期直接报错，**整站起不来**，且因为 compose 里是
+`restart: unless-stopped`，容器会一直重启（看起来像镜像 / 网络问题）：
+
+```
+TypeError: You must specify a provided interface when registering a factory
+```
+
+**机器判据**：暂无。
+
+---
+
+### R16. 布尔控件不要传 `render_own_label=True`
+
+**规则**：`BooleanWidget` 里不要写 `render_own_label`（保持默认 False）。
+字段的标签和 `description` 交给 Archetypes / SENAITE 的字段模板渲染。
+
+**依据**：两处字段模板（`Products.Archetypes/widgets/field.pt` 与 SENAITE 的
+`senaite_templates/senaite_widgets/field.pt`）的 edit 宏都是
+
+```xml
+<tal:ifLabel tal:condition="not: widget/render_own_label | nothing">
+    <label class="formQuestion">widget.Label + widget.Description（formHelp）</label>
+</tal:ifLabel>
+```
+
+`render_own_label=True` 意为「标签由控件自己渲染」，但
+`Products.Archetypes/widgets/boolean.pt` **只渲染 checkbox + hidden，不渲染标签**。
+
+**违反后果**：字段在页面上只剩一个**孤立勾选框** —— 没有标签、没有说明文字；
+若它恰是页签的最后一个字段，看起来就像"贴在保存按钮左上角的勾选框"。
+不报任何错（R9「静默失效」的又一种）。
+
+**注意**：`INNOCARE.arextension` 的 AR 扩展字段传了 `render_own_label=True`
+且正常 —— 那些控件（`ReferenceWidget` / SENAITE `DateTimeWidget` 等）会自渲染标签，
+且 AR 字段标题主要走 `sampleheader.pt`（用 `fieldinfo['label']`）而非字段模板。
+**换控件类型时要重新判断这一条。**
+
+**机器判据**：暂无。
+
+---
+
 ## 附：新建 addon 检查清单
 
 - [ ] `package-includes/` 下 configure + overrides **两个** slug 都建了
@@ -687,3 +755,5 @@ Worksheets 列表底部的「仪器采集」按钮由 `IListingViewAdapter` 订�
 - [ ] 静态数据维护型 addon 只提供内容/列表维护入口，不往附加产品配置区注册 configlet（R11）
 - [ ] 引用控件（ReferenceWidget / QuerySelectWidget）传了 `query=` 的地方，都同时传了 `base_query={}`（R12）
 - [ ] 指向外来内容/视图接口的 `subscriber` / `adapter` 都做了 layer 门控：签名里有 request 的换成自己的 layer，没 request 的（`IListingViewAdapter`）在工厂里判 `providedBy(request)`（R14）
+- [ ] `<subscriber>` 指向普通函数时用 `handler=`（不是 `factory=`）；用 `factory=` 的一律配了 `provides=`，且函数上没有 `@adapter` 装饰器（R15）
+- [ ] 布尔字段的 `BooleanWidget` 没传 `render_own_label=True`，标签与说明由字段模板渲染（R16）
