@@ -10,6 +10,7 @@ CONFIGURE_ZCML = os.path.join(PACKAGE_DIR, "browser", "configure.zcml")
 PACKAGE_CONFIGURE_ZCML = os.path.join(PACKAGE_DIR, "configure.zcml")
 INTERFACES_SOURCE = os.path.join(PACKAGE_DIR, "interfaces.py")
 VIEW_SOURCE = os.path.join(PACKAGE_DIR, "browser", "auditlog.py")
+FORMATTER_SOURCE = os.path.join(PACKAGE_DIR, "browser", "formatter.py")
 TEMPLATE_SOURCE = os.path.join(
     PACKAGE_DIR, "browser", "templates", "auditlog_diff.pt")
 SETUPHANDLERS_SOURCE = os.path.join(PACKAGE_DIR, "setuphandlers.py")
@@ -106,6 +107,83 @@ class TestAuditLogSource(unittest.TestCase):
         self.assertIn("row/is_interim_fields", source)
         self.assertIn("structure d/before_html", source)
         self.assertIn("structure d/after_html", source)
+
+    def test_view_renders_worksheet_layout_and_json(self):
+        """Worksheet 的 JSON 数据（布局 + 通用 JSON）也要可视化"""
+        with open(VIEW_SOURCE, "r") as handle:
+            source = handle.read()
+
+        self.assertIn("from maitux.audittrail.browser.formatter import "
+                      "render_worksheet_layout_html", source)
+        self.assertIn("from maitux.audittrail.browser.formatter import "
+                      "render_json_html", source)
+        self.assertIn("from maitux.audittrail.browser.formatter import "
+                      "is_json_data", source)
+        self.assertIn("from maitux.audittrail.browser.formatter import "
+                      "is_worksheet_layout", source)
+        self.assertIn("def is_layout_field(self, field, value):", source)
+        self.assertIn("def is_structured_json(self, value):", source)
+        self.assertIn("uid_resolver=self.resolve_uid_title", source)
+
+    def test_view_resolves_uids_with_fallback(self):
+        """UID 解析必须能降级
+
+        布局行存的是样品/分析项的 UID。解析不出来时要回落显示裸 UID，
+        不能因为对象已删除就把整格变成空白 —— 那是审计记录的丢失。
+        """
+        with open(VIEW_SOURCE, "r") as handle:
+            source = handle.read()
+
+        self.assertIn("def resolve_uid_title(self, uid):", source)
+        self.assertIn("def _lookup_uid_title(self, uid):", source)
+        self.assertIn("api.get_object_by_uid(uid, default=None)", source)
+        # 同一行里前后两个值常常引用同一个样品，必须复用解析结果
+        self.assertIn("self._uid_title_cache = {}", source)
+        self.assertIn("if uid not in self._uid_title_cache:", source)
+
+    def test_view_row_modes_are_mutually_exclusive(self):
+        """三种渲染模式必须互斥，否则一行会被渲染两遍
+
+        模板里三个 tal:block 是各自独立的 tal:condition，靠视图给出的
+        三个布尔量互斥。原来第三个分支写的是 not:row/is_interim_fields，
+        加了结构化分支之后它会把结构化行也渲染成 code —— 这条测试钉住它。
+        """
+        with open(VIEW_SOURCE, "r") as handle:
+            source = handle.read()
+
+        self.assertIn('ROW_MODE_STRUCTURED = "structured"', source)
+        self.assertIn("def get_row_mode(self, field, current_value, "
+                      "previous_value):", source)
+        self.assertIn("def merge_row_mode(self, current_mode, new_mode):", source)
+        self.assertIn('row["is_text"] = row["mode"] == ROW_MODE_TEXT', source)
+
+        with open(TEMPLATE_SOURCE, "r") as handle:
+            template = handle.read()
+
+        self.assertIn("row/is_structured", template)
+        self.assertIn("row/is_text", template)
+        self.assertIn("audit-structured-diff", template)
+        self.assertNotIn("not:row/is_interim_fields", template)
+
+    def test_formatter_stays_free_of_plone_imports(self):
+        """formatter 不许 import bika.lims / senaite.core
+
+        UID 解析是注入进来的（uid_resolver），就是为了让这个模块能脱离
+        Plone / Zope 直接跑单元测试。这条测试是那个取舍的护栏。
+
+        只判真正的 import 语句行：注释里出现这些字样不算（本模块的说明
+        里就写着为什么不 import）。
+        """
+        with open(FORMATTER_SOURCE, "r") as handle:
+            source = handle.read()
+
+        imports = [line.strip() for line in source.splitlines()
+                   if line.strip().startswith(("import ", "from "))]
+        for line in imports:
+            self.assertFalse(line.startswith("from bika.lims"), line)
+            self.assertFalse(line.startswith("import bika.lims"), line)
+            self.assertFalse(line.startswith("from senaite.core"), line)
+            self.assertFalse(line.startswith("import senaite.core"), line)
 
     def test_package_configure_registers_uninstall_profile(self):
         """包级配置要补齐标准卸载 profile 和 importStep"""
