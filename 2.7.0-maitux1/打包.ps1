@@ -17,6 +17,10 @@
     打包前自动更新：git pull 拉代码；docker pull 拉镜像（只在含镜像的模式做 ——
     模式 1/2 的产物里没有镜像，拉 1GB 没意义）。
 
+    打包前清理：调 清理孤儿addon.ps1 删掉 addons\customers 下「只剩构建产物」的
+    空壳目录，否则 Copy-Tree 的 robocopy /E 会把它们建成空目录打进交付包
+    （/XF 排除文件，但目录照建）。-SkipCleanup 可跳过。
+
     产物落在 dist\，每个产物旁边带一个 .sha256 校验文件（Linux 上可
     sha256sum -c 直接验）。
 
@@ -47,6 +51,9 @@
 
 .PARAMETER SkipDockerPull
     跳过 docker pull，直接用本机现有镜像。
+
+.PARAMETER SkipCleanup
+    跳过孤儿 addon 目录的检查与清理（见下面「打包前清理」）。
 
 .PARAMETER Yes
     所有确认一律按「是」，用于无人值守。
@@ -90,6 +97,7 @@ param(
     [switch]$IncludeDevFiles,
     [switch]$SkipGitPull,
     [switch]$SkipDockerPull,
+    [switch]$SkipCleanup,
     [switch]$Yes,
     [switch]$NoPause
 )
@@ -356,6 +364,45 @@ function Copy-Tree {
     & robocopy @roboArgs | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy 拷贝失败（退出码 $LASTEXITCODE）：$Source -> $Destination" }
     $global:LASTEXITCODE = 0
+}
+
+# ★★ 硬约束：git 里有的 addon 文件，必须出现在包里。★★
+#
+# 这是出包前的最后一道闸，拦的是「少东西」这一类故障，不管上游是什么原因：
+# 清理脚本误删、robocopy 少拷、排除规则写宽了、有人手滑删了本地目录……
+# 只要包里少了任何一个被 git 跟踪的文件，就地 throw，绝不出一个残包。
+#
+# 逐【文件】核对而不是逐目录：目录在、里面少一半文件，同样是残包。
+# 2026-09-15 实测 customers 下 838 个跟踪文件，没有任何一个命中 ExcludeDirs /
+# ExcludeFiles，所以「跟踪文件全集」就该等于「包内文件全集」，可以严格比对。
+# 唯一的例外是 Remove-DevFile 主动删掉的那批根目录开发件，单独排除掉。
+function Assert-AddonsComplete([string]$StagedCustomers) {
+    $src = Join-Path $script:Root 'addons\customers'
+    # ★ core.quotepath=false 不能省：默认 git 会把非 ASCII 文件名转义成
+    #   "Addon\346\221\230\350\246\201.xlsx"（带引号、带八进制），拿去拼路径直接
+    #   "Illegal characters in path"。customers 下有好几个中文名文件。
+    #   Update-Repository 里也是这么调的，保持一致。
+    $tracked = @(& git -c core.quotepath=false -C $src ls-files 2>$null)
+    $code = $LASTEXITCODE
+    $global:LASTEXITCODE = 0
+    # 查不了就不许出包 —— 核对不了完整性，等于没有这道闸。
+    if ($code -ne 0) { throw 'git ls-files 失败，无法核对 addon 是否齐全，已中止出包。' }
+    if ($tracked.Count -eq 0) { throw 'git 里一个 addon 文件都查不到，结果可疑，已中止出包。' }
+
+    $missing = @()
+    foreach ($rel in $tracked) {
+        # 根目录下的开发件是 Remove-DevFile 有意删掉的，不算缺失
+        if ($rel -notmatch '/' -and $script:AddonDevFiles -contains $rel) { continue }
+        if (-not (Test-Path -LiteralPath (Join-Path $StagedCustomers ($rel -replace '/', '\')))) {
+            $missing += $rel
+        }
+    }
+    if ($missing.Count -gt 0) {
+        $head = ($missing | Select-Object -First 10) -join "`n      "
+        throw ("包里缺少 {0} 个 git 跟踪的文件，已中止出包：`n      {1}{2}" -f `
+               $missing.Count, $head, $(if ($missing.Count -gt 10) { "`n      ...（其余 $($missing.Count - 10) 个略）" } else { '' }))
+    }
+    Write-Ok "完整性核对通过：$($tracked.Count) 个 git 跟踪文件全部在包里"
 }
 
 # 包内所有文本文件：不带 BOM 的 UTF-8、行尾 LF。
@@ -895,6 +942,7 @@ function New-AddonPackage {
 
     $customers = Join-Path $stage 'customers'
     Remove-DevFile $customers
+    Assert-AddonsComplete $customers
 
     $addons = Get-AddonInventory $customers
     Write-Ok "共 $($addons.Count) 个 add-on"
@@ -958,6 +1006,7 @@ function New-LimsPackage {
               -ExcludeDirs $script:ExcludeDirs -ExcludeFiles $script:ExcludeFiles
     $customers = Join-Path $stage 'addons\customers'
     Remove-DevFile $customers
+    Assert-AddonsComplete $customers
 
     # common addon 已经编进镜像（Dockerfile 里的 /opt/addons/common），compose 也没
     # 挂它，包里给个空目录只是让结构看起来完整。
@@ -1112,6 +1161,16 @@ try {
     Write-Step '更新代码（git pull）'
     Update-Repository $script:RepoRoot
     $script:Git = Get-GitInfo $script:RepoRoot
+
+    # ★ 必须在 git pull 之后：pull 删掉某个 addon 的源码时，本地的 .pyc /
+    #   .egg-info 是 gitignore 的、git 删不掉，于是当场留下一个孤儿目录。
+    #   放在 pull 之前检查，正好漏掉本次 pull 新产生的那些。
+    # 判据与删除逻辑全在那个脚本里，这里不重复实现（两份判据一定会漂开）。
+    Write-Step '清理孤儿 addon 目录'
+    $cleaner = Join-Path $script:Root '清理孤儿addon.ps1'
+    if ($SkipCleanup)                          { Write-Warn2 '按参数跳过' }
+    elseif (-not (Test-Path -LiteralPath $cleaner)) { Write-Warn2 '找不到 清理孤儿addon.ps1，跳过' }
+    else { & $cleaner -Root $script:Root -Embedded -Apply; $global:LASTEXITCODE = 0 }
 
     # 版本号：参数 > VERSION 文件 > 目录名
     $script:PkgVersion = $Version
