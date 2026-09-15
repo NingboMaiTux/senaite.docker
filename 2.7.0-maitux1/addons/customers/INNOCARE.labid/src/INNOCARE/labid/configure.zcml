@@ -1,0 +1,42 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:plone="http://namespaces.plone.org/plone"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    i18n_domain="INNOCARE.labid">
+
+  <include package="plone.behavior" file="meta.zcml" />
+  <include package="Products.GenericSetup" file="meta.zcml" />
+
+  <!-- Lab ID：Laboratory（Setup -> Laboratory Information）的扩展字段。
+       只注册 behavior 本体；是否在对象上启用由 assignable.LabIDBehaviorAssignable
+       决定（它读实验室信息时用到的 Lab ID 见 README）。 -->
+  <plone:behavior
+      title="Lab ID"
+      description="Adds a Lab ID field to the Laboratory"
+      provides=".behaviors.ILabIDSchema"
+      marker=".interfaces.ILabIDMarker"
+      factory=".behaviors.LabIDSchema"
+      for="senaite.core.interfaces.ILaboratory"
+      />
+
+  <!-- 动态挂载：不改 senaite.core 的 Laboratory FTI。
+       启用与否在工厂内按本 add-on 的 layer 做运行时门控（R14）。 -->
+  <adapter factory=".assignable.LabIDBehaviorAssignable" />
+
+  <genericsetup:registerProfile
+      name="default"
+      title="INNOCARE.labid"
+      directory="profiles/default"
+      description="Adds the Lab ID field to the Laboratory"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="INNOCARE.labid (uninstall)"
+      directory="profiles/uninstall"
+      description="Uninstalls INNOCARE.labid"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+</configure>

@@ -14,7 +14,10 @@ INNOCARE 检验申请（Analysis Request, AR）定制扩展包，是本项目多
   - 等字段的添加、显示与实际控件调整。
 - **AR 新增页（ar_add2）右侧控件去重**：隐藏冗余 label（补丁见 `src/INNOCARE/arextension/patches.py`）。
 - **字段标签/备注文案**：locale 目录 `en/zh/zh-cn/zh_CN` 遵循 ASCII msgid + `.po/.mo` 翻译（避免 `UnicodeEncodeError`）。
-- **ID Server**（`src/INNOCARE/arextension/idserver.py`）：样品编号 `URs-025` 提供 `deptCode` 变量。
+- **ID Server**（`src/INNOCARE/arextension/idserver.py`）：样品编号 `URs-025` 提供
+  `deptCode`（部门简码）与 `labId`（实验室编号，取 Laboratory 的 `Lab ID`，
+  字段由 add-on `INNOCARE.labid` 提供；未配置时回退 `deptCode`）两个变量。
+  用哪个由 Setup → ID Formatting 的模板决定：`{deptCode}...` 或 `{labId}...`。
 - **补丁**（`src/INNOCARE/arextension/patches.py`）：
   - senaite i18n `translate` 对其它 addon 域（`maitux.projects`、`maitux.hazardcategories`、`maitux.roles`）做附加域回退；
   - `AnalysisRequestAddView.get_input_widget` 对 AR 新增页右侧重复标签做清理；
