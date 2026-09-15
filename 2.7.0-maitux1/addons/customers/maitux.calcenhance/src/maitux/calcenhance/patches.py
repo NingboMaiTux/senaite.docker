@@ -1817,6 +1817,13 @@ def _collect_cross_referenceable_data(analysis):
 # JSON arrays (instead of being dropped and misaligning the review table).
 _PLACEHOLDER = u"---"
 
+# XAGG_* sentinel: "the whole result must be reported as _PLACEHOLDER",
+# distinct from "collected zero rows because nothing has been entered yet"
+# (an ordinary empty list).  A dedicated object rather than None/[] because
+# both of those are legitimate VALUES a collected column can hold; identity
+# comparison (`is _XAGG_FAIL`) can never be confused with data.
+_XAGG_FAIL = object()
+
 
 # Two-sided 95% Student t, keyed by DEGREES OF FREEDOM -- not by n.  The
 # caller works out its own df, because the two users disagree: a confidence
@@ -4491,6 +4498,26 @@ def _evaluate_calculatedlist_interims(self, only=None):
     sibling_data = _collect_cross_referenceable_data(self)
     _LOOKUP = _make_lookup(sibling_data)
 
+    # Every service keyword actually present in this sample, UNFILTERED by
+    # the cross_referenceable flag -- XAGG_* needs this to tell "that
+    # source AS was never run" apart from "the AS exists but the field
+    # isn't flagged cross-referenceable", which look identical through
+    # sibling_data alone.  See _xagg_collect's docstring for why that
+    # distinction matters.  A second tree walk rather than teaching
+    # _collect_cross_referenceable_data a second return value that its
+    # other two callers (LOOKUP, above) would have to ignore.
+    _xagg_existing_services = set()
+    for _xes_sibling in _sample_tree_analyses(self):
+        try:
+            if _xes_sibling.UID() == self.UID():
+                continue
+            _xes_svc = _xes_sibling.getAnalysisService()
+            _xes_kw = _xes_svc.getKeyword() if _xes_svc else ""
+        except Exception:
+            _xes_kw = ""
+        if _xes_kw:
+            _xagg_existing_services.add(_xes_kw)
+
     # Scope-safe eval globals
     _TOKEN_RE = re.compile(r'\[([A-Za-z_]\w*)\]')
     # GROUP aggregation helpers: parallel-arrays grouped by key
@@ -4823,6 +4850,361 @@ def _evaluate_calculatedlist_interims(self, only=None):
             _baseline_duplicate_warn(floor, repeated, repeated_order)
 
         return [baseline.get(key, _PLACEHOLDER) for key in row_keys]
+
+    # ---- cross-AS aggregation (XAGG_*) ----------------------------------
+    #
+    # Needs doc: Docs/Cal增加/maitux.calcenhance-跨AS聚合-需求与方案.md.
+    # Two building blocks; only the first is implemented here:
+    #   XAGG_KEYS / APPEND     -- define a statistics table's ROW SPACE
+    #     from the substances that have a reference standard, so the row
+    #     list is never hand-typed (needs doc §3.1/§3.2, this slice).
+    #   XAGG_<OP> / _OFSUM     -- aggregate a value column across those
+    #     rows, reading OTHER analyses on the same sample (needs doc
+    #     §3.3/§3.4, a later slice -- not defined in this file yet).
+    #
+    # _group_apply groups WITHIN one analysis's own columns; it has no way
+    # to reach another AS's interim fields at all, which is exactly the
+    # gap this family exists to fill.  _xagg_collect below is the shared
+    # plumbing both this slice and the later one build on.
+
+    def _xagg_warn(message):
+        """Log one WARNING-level line, UTF-8 encoded once at the boundary.
+
+        [PY2-UNICODE] Same rule as _baseline_duplicate_warn above: build
+        the whole message as unicode and encode ONCE, or an
+        already-encoded str argument sitting next to a unicode one
+        promotes the format string and then fails to decode the encoded
+        half as ASCII (R13)."""
+        from bika.lims import logger as _xagg_logger
+        _xagg_logger.warn(message.encode("utf-8"))
+
+    def _xagg_resolve_sources(fn_label, source_kws):
+        """Dedupe `source_kws`, preserving first-seen order.
+
+        A source AS repeated in the argument list is a configuration
+        mistake -- a copy-paste that was not updated -- not an
+        intentional double-count (needs doc §3.6 point 6).  It must not
+        silently double that source's weight in the aggregate, and it
+        must not stay silent either (R9), so it warns once naming every
+        duplicate."""
+        seen = []
+        dups = []
+        for source_kw in source_kws:
+            if source_kw in seen:
+                if source_kw not in dups:
+                    dups.append(source_kw)
+                continue
+            seen.append(source_kw)
+        if dups:
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: source AS %s given more "
+                u"than once in the argument list -- using each only "
+                u"once."
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   u", ".join(_safe_text(d) for d in dups)))
+        return seen
+
+    def _xagg_collect(fn_label, field_kw, source_kws):
+        """Concatenate `field_kw` across `source_kws`, first source first.
+
+        Returns a plain list on success, or _XAGG_FAIL when the caller
+        must report the whole result as the '---' placeholder (needs doc
+        §7 judgements 5 and 7; §6 risk table).  Two different failures
+        look identical through _collect_cross_referenceable_data() alone
+        -- both simply leave the field out of `sibling_data` -- so this
+        tells them apart using `_xagg_existing_services` (every service
+        keyword actually present in the sample, gathered once above,
+        unfiltered by the cross_referenceable flag):
+
+        - A source AS absent from this sample tree altogether is a
+          perfectly ordinary "that technician has not run yet".  It is
+          skipped without a warning and without failing the OTHER
+          sources -- failing only when EVERY requested source is absent
+          keeps e.g. XAGG_AVG(..., "imp_chrom", "imp_ip_spiked") usable
+          while the second technician's run has not started yet.
+        - A source AS that DOES exist but never had `field_kw` flagged
+          cross_referenceable is a configuration mistake, not a missing
+          measurement: it is not safe to quietly report on fewer sources
+          than the formula asked for, so this fails the WHOLE result and
+          warns once, naming every such source.
+        """
+        sources = _xagg_resolve_sources(fn_label, source_kws)
+        out = []
+        any_existing = False
+        not_flagged = []
+        for src_kw in sources:
+            if src_kw not in _xagg_existing_services:
+                continue
+            any_existing = True
+            src_data = sibling_data.get(src_kw)
+            if src_data is None or field_kw not in src_data:
+                not_flagged.append(src_kw)
+                continue
+            arr = src_data[field_kw]
+            if isinstance(arr, list):
+                out.extend(arr)
+            else:
+                out.append(arr)
+        if not_flagged:
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: field '%s' is not "
+                u"flagged cross_referenceable on %s -- fix the interim "
+                u"field config, this is not a missing-data problem."
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   _safe_text(field_kw),
+                   u", ".join(_safe_text(s) for s in not_flagged)))
+            return _XAGG_FAIL
+        if not any_existing:
+            return _XAGG_FAIL
+        return out
+
+    def _xagg_keys(field_kw, *source_kws):
+        """Distinct values of `field_kw` across the given source AS.
+
+            XAGG_KEYS(键字段, 源AS1 [, 源AS2 ...])
+
+        First-seen order, normalised through _norm_key so CJK values
+        compare the way _group_apply's own keys do (needs doc §3.6.5).
+        Written for a reference-standard AS: the substances that have
+        one defined ARE the ones worth a row on a cross-AS statistics
+        table (needs doc §3.1) -- so this reads the KEY field's values,
+        not the value being statisticised.
+        """
+        raw = _xagg_collect("XAGG_KEYS", field_kw, list(source_kws))
+        if raw is _XAGG_FAIL:
+            return [_PLACEHOLDER]
+        seen = []
+        for v in raw:
+            k = _norm_key(v)
+            if k not in seen:
+                seen.append(k)
+        return seen if seen else [_PLACEHOLDER]
+
+    def _append(lst, value):
+        """`lst` plus one literal row, as a NEW list -- `lst` is untouched.
+
+            APPEND(XAGG_KEYS("imp_name", "imp_std_weigh"), "总杂（指定杂质合计）")
+
+        A separate function rather than a trailing XAGG_KEYS argument on
+        purpose (needs doc §3.2): mixing "source AS to scan" and
+        "literal row name" in one vararg list means a typo'd AS name is
+        silently taken as one more literal row instead of raising
+        anywhere.
+
+        [PY2-UNICODE] A STRING `value` is a literal written straight into
+        the formula text, not a [bracket] substitution -- empirically,
+        on this container's Python 2.7, eval() on the already-unicode
+        formula string hands a non-ASCII literal back as a raw UTF-8
+        `str`, not `unicode` (R13).  Left as-is it would compare unequal
+        to every proper unicode row name it is supposed to match
+        downstream (in _group_apply-style key matching), without any
+        error anywhere.  _norm_key decodes it AND matches XAGG_KEYS's
+        own normalisation, so the appended row compares equal to itself
+        wherever it is looked up later.  A NUMERIC `value` (APPEND onto
+        an ordinary numeric list column) must NOT go through _norm_key,
+        or 99 silently becomes the text u"99".
+        """
+        out = list(lst) if isinstance(lst, list) else [lst]
+        if isinstance(value, basestring):
+            value = _norm_key(value)
+        out.append(value)
+        return out
+
+    def _xagg_op(fn_label, value_kw, key_kw, row_keys, source_kws, agg, empty):
+        """Shared body for XAGG_AVG / _RSD / _MAX / _MIN / _COUNT.
+
+            XAGG_<OP>(值字段, 键字段, 本行键值, 源AS1 [, 源AS2 ...])
+
+        Reuses _group_apply's own grouping AND missing-value contract
+        VERBATIM (needs doc §3.6 point 1 -- must not invent a second set
+        of semantics that could drift from GROUP_*list's): the per-key
+        aggregate is computed exactly the way GROUP_AVGlist/etc. would
+        compute it over the SAME concatenated source column, and only
+        THEN looked up by this row's own key.
+
+        That two-step shape is required because _group_apply broadcasts
+        an aggregate onto ITS OWN input length -- here, the concatenated
+        SOURCE rows (89+84 = 173 for the needs doc's worked example) --
+        and has no way to broadcast onto a DIFFERENT array of a
+        DIFFERENT length, which is exactly what XAGG needs: `row_keys`
+        is THIS analysis's own row space (e.g. imp_ip_name, 6 rows),
+        not the source's.
+
+        Two failures that must not be confused (Backlog S2 judgement 4,
+        needs doc §6 risk 2): a row whose key never appears ANYWHERE
+        among the concatenated source rows gets '---' here, for every
+        op including COUNT -- that lookup simply is not in `by_key`.  A
+        row whose key DOES appear, but with nothing numeric behind it,
+        gets whatever _group_apply's own `empty` already says for that
+        op (COUNT -> 0, everything else -> '---') -- untouched, because
+        by the time this function sees it, _group_apply has already
+        decided.
+        """
+        src_values = _xagg_collect(fn_label, value_kw, list(source_kws))
+        src_keys = _xagg_collect(fn_label, key_kw, list(source_kws))
+        rows = row_keys if isinstance(row_keys, list) else [row_keys]
+        if src_values is _XAGG_FAIL or src_keys is _XAGG_FAIL:
+            return [_PLACEHOLDER] * len(rows)
+        if len(src_values) != len(src_keys):
+            # Same AS, two fields, different row counts: the two columns
+            # were not entered together and cannot be paired by
+            # position.  Not one of the needs-doc's tested scenarios,
+            # but silently zipping mismatched columns would pair a
+            # value with the WRONG key -- a plausible wrong number, so
+            # this refuses and warns instead (R9).
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: '%s' and '%s' collected "
+                u"different row counts (%d vs %d) across %s -- the two "
+                u"columns are not aligned, refusing to guess which row "
+                u"belongs to which."
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   _safe_text(value_kw), _safe_text(key_kw),
+                   len(src_values), len(src_keys),
+                   u", ".join(_safe_text(s) for s in source_kws)))
+            return [_PLACEHOLDER] * len(rows)
+        grouped = _group_apply(src_values, (src_keys,), agg, empty=empty)
+        by_key = {}
+        for k, v in zip(src_keys, grouped):
+            by_key[_norm_key(k)] = v
+        return [by_key.get(_norm_key(rk), _PLACEHOLDER) for rk in rows]
+
+    def _xagg_avg(value_kw, key_kw, row_keys, *source_kws):
+        return _xagg_op("XAGG_AVG", value_kw, key_kw, row_keys, source_kws,
+                         lambda ns: sum(ns) / len(ns), _PLACEHOLDER)
+
+    def _xagg_rsd(value_kw, key_kw, row_keys, *source_kws):
+        return _xagg_op("XAGG_RSD", value_kw, key_kw, row_keys, source_kws,
+                         _agg_rsd, _PLACEHOLDER)
+
+    def _xagg_max(value_kw, key_kw, row_keys, *source_kws):
+        return _xagg_op("XAGG_MAX", value_kw, key_kw, row_keys, source_kws,
+                         max, _PLACEHOLDER)
+
+    def _xagg_min(value_kw, key_kw, row_keys, *source_kws):
+        return _xagg_op("XAGG_MIN", value_kw, key_kw, row_keys, source_kws,
+                         min, _PLACEHOLDER)
+
+    def _xagg_count(value_kw, key_kw, row_keys, *source_kws):
+        # empty=0: a key that DOES appear among the source rows but with
+        # nothing numeric behind it has a definite count -- zero.  Only
+        # a key absent from the source altogether falls through to
+        # _xagg_op's own '---' (see its docstring).
+        return _xagg_op("XAGG_COUNT", value_kw, key_kw, row_keys, source_kws,
+                         len, 0)
+
+    def _xagg_ofsum(fn_label, value_kw, group_kw, key_kw, whitelist_kw,
+                     source_kws, agg, is_count):
+        """Shared body for XAGG_<OP>_OFSUM.
+
+            XAGG_<OP>_OFSUM(值字段, 分组字段, 键字段, 名单源AS,
+                            源AS1 [, 源AS2 ...])   -> scalar
+
+        TWO-level reduction (needs doc §3.4), and the second level is
+        NOT a broadcast: ① within each physical sample (`group_kw`,
+        e.g. one prep), sum `value_kw` over only the rows whose
+        `key_kw` value is in the whitelist read from `whitelist_kw`
+        (the reference-standard AS -- the same list XAGG_KEYS reads);
+        ② aggregate those PER-SAMPLE SUMS with `agg`.
+
+        This exists because summing the raw per-peak column directly
+        would count PEAKS, not SAMPLES: 12 real preps carrying 89+84
+        peaks would give n=173, not n=12 (needs doc §6 risk 1 -- the
+        single most damaging way to get this wrong, since it produces
+        a plausible, only slightly different, number).  Grouping by
+        sample FIRST is what keeps n at the sample count.
+
+        Three failures, not two (S2's _xagg_op only had two):
+        - the whitelist or a source is unreadable at all (config
+          problem, same shape as _xagg_collect's own _XAGG_FAIL) ->
+          '---' for every op, COUNT included -- nothing was even
+          collected, there is no "how many samples" to report;
+        - collection succeeded but NOTHING in the data matched the
+          whitelist -- '---' for avg/rsd/max/min, but COUNT is a
+          definite 0 (needs doc §3.6 point 1's "全缺失 -> '---' but
+          COUNT is 0", applied one level up: zero SAMPLES survived,
+          not zero VALUES);
+        - some individual samples matched the whitelist but had
+          nothing numeric behind those rows -- _group_apply's own
+          empty=_PLACEHOLDER already marks that sample's sum as
+          missing, and _nums_only below drops it from the final
+          aggregate exactly the way a missing cell is dropped anywhere
+          else in this file.  Its absence is what keeps COUNT at the
+          number of samples that actually contributed a number.
+        """
+        whitelist_raw = _xagg_collect(fn_label, key_kw, [whitelist_kw])
+        src_values = _xagg_collect(fn_label, value_kw, list(source_kws))
+        src_groups = _xagg_collect(fn_label, group_kw, list(source_kws))
+        src_keys = _xagg_collect(fn_label, key_kw, list(source_kws))
+        if (whitelist_raw is _XAGG_FAIL or src_values is _XAGG_FAIL or
+                src_groups is _XAGG_FAIL or src_keys is _XAGG_FAIL):
+            return _PLACEHOLDER
+        if not (len(src_values) == len(src_groups) == len(src_keys)):
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: '%s'/'%s'/'%s' collected "
+                u"different row counts (%d/%d/%d) across %s -- the "
+                u"columns are not aligned, refusing to guess which row "
+                u"belongs to which."
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   _safe_text(value_kw), _safe_text(group_kw),
+                   _safe_text(key_kw), len(src_values), len(src_groups),
+                   len(src_keys),
+                   u", ".join(_safe_text(s) for s in source_kws)))
+            return _PLACEHOLDER
+
+        whitelist = set(_norm_key(v) for v in whitelist_raw)
+        filtered_values = []
+        filtered_groups = []
+        for v, g, k in zip(src_values, src_groups, src_keys):
+            if _norm_key(k) in whitelist:
+                filtered_values.append(v)
+                filtered_groups.append(g)
+
+        if not filtered_groups:
+            # Whitelist and sources both loaded, but not one row in
+            # them matched the whitelist -- the "全缺失" shape one
+            # level up (needs doc §3.6 point 1), not the collect
+            # failure above: there IS data, it just names none of the
+            # designated substances.
+            return 0 if is_count else _PLACEHOLDER
+
+        per_row_sums = _group_apply(filtered_values, (filtered_groups,), sum)
+        sums_by_group = {}
+        for g, s in zip(filtered_groups, per_row_sums):
+            sums_by_group[_norm_key(g)] = s
+        nums = _nums_only(sums_by_group.values())
+        if not nums:
+            return 0 if is_count else _PLACEHOLDER
+        return len(nums) if is_count else agg(nums)
+
+    def _xagg_avg_ofsum(value_kw, group_kw, key_kw, whitelist_kw,
+                         *source_kws):
+        return _xagg_ofsum("XAGG_AVG_OFSUM", value_kw, group_kw, key_kw,
+                            whitelist_kw, source_kws,
+                            lambda ns: sum(ns) / len(ns), False)
+
+    def _xagg_rsd_ofsum(value_kw, group_kw, key_kw, whitelist_kw,
+                         *source_kws):
+        return _xagg_ofsum("XAGG_RSD_OFSUM", value_kw, group_kw, key_kw,
+                            whitelist_kw, source_kws, _agg_rsd, False)
+
+    def _xagg_max_ofsum(value_kw, group_kw, key_kw, whitelist_kw,
+                         *source_kws):
+        return _xagg_ofsum("XAGG_MAX_OFSUM", value_kw, group_kw, key_kw,
+                            whitelist_kw, source_kws, max, False)
+
+    def _xagg_min_ofsum(value_kw, group_kw, key_kw, whitelist_kw,
+                         *source_kws):
+        return _xagg_ofsum("XAGG_MIN_OFSUM", value_kw, group_kw, key_kw,
+                            whitelist_kw, source_kws, min, False)
+
+    def _xagg_count_ofsum(value_kw, group_kw, key_kw, whitelist_kw,
+                           *source_kws):
+        # is_count=True: this is the ONE call in the family where the
+        # answer to "how many samples" has to survive even the "zero
+        # matched" case as a real 0, not '---' -- see _xagg_ofsum's
+        # docstring, second failure mode.
+        return _xagg_ofsum("XAGG_COUNT_OFSUM", value_kw, group_kw, key_kw,
+                            whitelist_kw, source_kws, len, True)
 
     # ---- rounding, formatting, numeric-isation -------------------------
     #
@@ -5633,6 +6015,31 @@ def _evaluate_calculatedlist_interims(self, only=None):
         # named in _ARRAY_FN_RE explicitly (see the dispatch comment
         # there) or it degrades to the per-element path.
         "BASELINE_BYlist": _baseline_bylist,
+        # Cross-AS aggregation: row space (XAGG_KEYS / APPEND) -- see the
+        # "---- cross-AS aggregation (XAGG_*) ----" block right after
+        # BASELINE_BYlist's definition for why they are array-path
+        # functions despite taking no [bracket] refs, and
+        # Docs/Cal增加/maitux.calcenhance-跨AS聚合-需求与方案.md for the
+        # feature itself.
+        "XAGG_KEYS": _xagg_keys,
+        "APPEND": _append,
+        # Cross-AS aggregation: per-key aggregate broadcast onto THIS
+        # analysis's own row space (XAGG_<OP>) -- see _xagg_op's
+        # docstring above for why _group_apply alone cannot do this.
+        "XAGG_AVG": _xagg_avg,
+        "XAGG_RSD": _xagg_rsd,
+        "XAGG_MAX": _xagg_max,
+        "XAGG_MIN": _xagg_min,
+        "XAGG_COUNT": _xagg_count,
+        # Cross-AS aggregation: sum-per-sample first, THEN aggregate
+        # across samples (XAGG_<OP>_OFSUM) -- see _xagg_ofsum's
+        # docstring for why this is a second reduction level, not a
+        # variant of XAGG_<OP> above.
+        "XAGG_AVG_OFSUM": _xagg_avg_ofsum,
+        "XAGG_RSD_OFSUM": _xagg_rsd_ofsum,
+        "XAGG_MAX_OFSUM": _xagg_max_ofsum,
+        "XAGG_MIN_OFSUM": _xagg_min_ofsum,
+        "XAGG_COUNT_OFSUM": _xagg_count_ofsum,
         "RESULT_STATUS": _result_status,
         "COALESCE": _coalesce,
         "SHIFT": _shift,
@@ -5787,15 +6194,26 @@ def _evaluate_calculatedlist_interims(self, only=None):
                     % (kw, _nad_err))
                 r = None
             if r is None:
-                out_val = _PLACEHOLDER
+                new_value = _jj.dumps([_PLACEHOLDER])
+            elif isinstance(r, list):
+                # XAGG_KEYS / APPEND define a statistics table's ROW SPACE
+                # from literal arguments alone -- e.g. XAGG_KEYS("imp_name",
+                # "imp_std_weigh") has no [bracket] refs at all, so it lands
+                # in this "no array deps" branch rather than the array path
+                # below.  Every OTHER caller of this branch (a bare
+                # LOOKUP(...), say) returns one scalar to broadcast, which
+                # is what the elif/else below still do.  A function whose
+                # RESULT is the whole column must not be squeezed through
+                # that same [out_val] wrapping, or a 6-row table collapses
+                # to one row containing "---" (2026-09 XAGG addition).
+                new_value = _jj.dumps(r)
             elif isinstance(r, (str, unicode)):
-                out_val = r
+                new_value = _jj.dumps([r])
             else:
                 try:
-                    out_val = float(r)
+                    new_value = _jj.dumps([float(r)])
                 except (ValueError, TypeError):
-                    out_val = _PLACEHOLDER
-            new_value = _jj.dumps([out_val])
+                    new_value = _jj.dumps([_PLACEHOLDER])
             if not _same_value(c.get("value", ""), new_value):
                 c["value"] = new_value
                 changed = True
@@ -5830,9 +6248,14 @@ def _evaluate_calculatedlist_interims(self, only=None):
         # so it must be spelled out here.  Left off, it would take the
         # per-element path, see one scalar at a time, and never find the
         # baseline row at all.
+        # XAGG_* / APPEND are the same story: XAGG_\w+ covers the whole
+        # cross-AS aggregation family, but APPEND does not start with
+        # XAGG_ and must be named separately, or a formula that is ONLY
+        # `APPEND(...)` -- with no XAGG_KEYS(...) call inside it -- would
+        # degrade to the per-element path.
         _ARRAY_FN_RE = re.compile(
             r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS|COALESCE|SHIFT'
-            r'|BASELINE_BYlist)\s*\(')
+            r'|BASELINE_BYlist|XAGG_\w+|APPEND)\s*\(')
         if _ARRAY_FN_RE.search(formula):
             expr = formula
             if isinstance(expr, str):
