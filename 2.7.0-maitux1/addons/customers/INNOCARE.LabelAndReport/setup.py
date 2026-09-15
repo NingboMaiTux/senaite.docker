@@ -48,7 +48,6 @@ setup(
         "senaite.core",
         "senaite.lims",
         "maitux.stock",
-        "INNOCARE.arextension",
     ],
     entry_points="""
     [z3c.autoinclude.plugin]
