@@ -281,7 +281,15 @@ def test_count_values_rows(p, r):
 #                     where ROUND / ROUND_EVEN already live)
 #              -> 67 (ROUND_DOWN, array table only -- rs_stab_pct1's
 #                     truncate-don't-carry requirement, mirrors ROUND_UP)
-EXPECTED_SAFE_ENTRIES = 67
+#              -> 69 (XAGG_KEYS, APPEND -- array table only; row-space
+#                     builders for cross-AS aggregation, 跨AS聚合 S1)
+#              -> 74 (XAGG_AVG/_RSD/_MAX/_MIN/_COUNT -- array table only;
+#                     ride S1's XAGG_\w+ entry in _ARRAY_FN_RE, no regex
+#                     change needed, 跨AS聚合 S2)
+#              -> 79 (XAGG_AVG_OFSUM/_RSD_OFSUM/_MAX_OFSUM/_MIN_OFSUM/
+#                     _COUNT_OFSUM -- array table only, all literal-arg
+#                     "no array deps" like XAGG_KEYS; 跨AS聚合 S3)
+EXPECTED_SAFE_ENTRIES = 79
 EXPECTED_SCALAR_ENTRIES = 26
 
 
@@ -1146,6 +1154,955 @@ def test_baseline_through_the_engine(p, r):
                 u"不能写成一行" in text, True)
 
 
+def _xagg_fixture():
+    """Sibling data for the XAGG_KEYS / APPEND unit tests, built by hand
+    rather than through build_sample() -- these are direct-call tests of
+    the closures, not of the engine, so the fixture only needs to look
+    like what _collect_cross_referenceable_data() would have returned.
+
+        std   -- has imp_name flagged, 6 raw values with one repeat
+                 (Z7 twice) to exercise dedup + first-seen order together
+        std2  -- has imp_name flagged, overlaps std on "Z14"
+        std3  -- EXISTS in the sample (existing_services) but imp_name is
+                 NOT in its sibling_data entry -- the "field exists on
+                 the AS but nobody ticked cross_referenceable" case
+        ghost_as -- requested by name in some tests but never a sibling
+                 at all -- the "source AS was never run" case
+    """
+    sibling_data = {
+        u"std": {u"imp_name": [u"Z7", u"Z10", u"Z7", u"Z13", u"B", u"Z14"]},
+        u"std2": {u"imp_name": [u"Z14", u"NEW1"]},
+    }
+    existing_services = set([u"std", u"std2", u"std3"])
+    return sibling_data, existing_services
+
+
+def _rebuild_xagg(p, owner, sibling_data, existing_services):
+    """Rebuild XAGG_KEYS / APPEND bottom-up through their shared cells."""
+    norm_key = rebuild(p, "_norm_key")
+    xagg_warn = rebuild(p, "_xagg_warn")
+    resolve_sources = rebuild(p, "_xagg_resolve_sources", freevars={
+        "self": owner, "_xagg_warn": xagg_warn})
+    collect = rebuild(p, "_xagg_collect", freevars={
+        "self": owner,
+        "_xagg_existing_services": existing_services,
+        "sibling_data": sibling_data,
+        "_xagg_resolve_sources": resolve_sources,
+        "_xagg_warn": xagg_warn,
+    })
+    xagg_keys = rebuild(p, "_xagg_keys", freevars={
+        "_xagg_collect": collect, "_norm_key": norm_key})
+    append_fn = rebuild(p, "_append", freevars={"_norm_key": norm_key})
+    return xagg_keys, append_fn
+
+
+def test_xagg_keys_and_append(p, r):
+    """S1 (跨AS聚合): XAGG_KEYS defines the row space, APPEND adds the
+    literal total row -- see needs doc §3.1/§3.2 and Backlog S1."""
+    logger = install_engine_stubs()
+    owner = _FakeOwner()
+    sibling_data, existing_services = _xagg_fixture()
+    xagg_keys, append_fn = _rebuild_xagg(p, owner, sibling_data, existing_services)
+    r.check("rebuilt XAGG_KEYS", xagg_keys is not None, True)
+    r.check("rebuilt APPEND", append_fn is not None, True)
+    if xagg_keys is None or append_fn is None:
+        return
+
+    # -- ①（先写死预期）+ ② dedup and first-seen order ------------------
+    #    std's raw column has Z7 twice; the result must still be 5, in the
+    #    order the names first appeared, and must not contain S1919 (this
+    #    fixture never mentions it -- the point is that XAGG_KEYS only
+    #    ever echoes what it was given, it does not know about "the main
+    #    component" as a special case).
+    base = xagg_keys(u"imp_name", u"std")
+    r.check("single source: five distinct rows",
+            base, [u"Z7", u"Z10", u"Z13", u"B", u"Z14"])
+    r.check("does not contain the main component",
+            u"S1919" in base, False)
+
+    # -- ③ multi-source merge: overlap collapses, new rows append --------
+    merged = xagg_keys(u"imp_name", u"std", u"std2")
+    r.check("two sources merge, overlap not duplicated", merged,
+            [u"Z7", u"Z10", u"Z13", u"B", u"Z14", u"NEW1"])
+
+    # -- ④ APPEND: one literal row, new list, original untouched ---------
+    before_base = list(base)
+    appended = append_fn(base, u"总杂（指定杂质合计）")
+    r.check("APPEND: six rows, total row last",
+            appended, before_base + [u"总杂（指定杂质合计）"])
+    r.check("APPEND does not mutate its input list", base, before_base)
+
+    # -- ⑤ ★ field exists on the AS but is not cross_referenceable -------
+    #    Kept apart from ⑥ on purpose (Backlog S1 risk): this must warn,
+    #    ⑥ must not.
+    before = len(logger.lines)
+    unflagged = xagg_keys(u"imp_name", u"std3")
+    r.check("unflagged field -> placeholder, not empty/zero",
+            unflagged, [p._PLACEHOLDER])
+    new_lines = logger.lines[before:]
+    r.check("unflagged field warns exactly once", len(new_lines), 1)
+    r.check("warn names the function",
+            bool(new_lines) and "XAGG_KEYS" in new_lines[0], True)
+    r.check("warn names the field",
+            bool(new_lines) and "imp_name" in new_lines[0], True)
+    r.check("warn names the offending source",
+            bool(new_lines) and "std3" in new_lines[0], True)
+
+    #    One good source plus one unflagged source still fails the WHOLE
+    #    result -- a config mistake is not something to paper over by
+    #    quietly reporting on fewer sources than the formula asked for.
+    before = len(logger.lines)
+    mixed = xagg_keys(u"imp_name", u"std", u"std3")
+    r.check("one unflagged source fails the combined result too",
+            mixed, [p._PLACEHOLDER])
+    r.check("mixed case still warns exactly once",
+            len(logger.lines) - before, 1)
+
+    # -- ⑥ source AS absent from the sample entirely: silent -------------
+    before = len(logger.lines)
+    absent = xagg_keys(u"imp_name", u"ghost_as")
+    r.check("absent source AS -> placeholder", absent, [p._PLACEHOLDER])
+    r.check("absent source AS does NOT warn",
+            len(logger.lines), before)
+
+    #    Partial existence is tolerated: an absent source is a normal
+    #    "not run yet", so it is skipped rather than failing the sources
+    #    that DO exist (design decision recorded in _xagg_collect's
+    #    docstring; not literally spelled out in the needs doc, which
+    #    only tests the single-source case for ⑥).
+    before = len(logger.lines)
+    partial = xagg_keys(u"imp_name", u"std", u"ghost_as")
+    r.check("one absent source among several does not fail the rest",
+            partial, [u"Z7", u"Z10", u"Z13", u"B", u"Z14"])
+    r.check("partial existence does not warn", len(logger.lines), before)
+
+    # -- ⑦ same source AS given twice: dedup + exactly one warn ----------
+    before = len(logger.lines)
+    dup = xagg_keys(u"imp_name", u"std", u"std")
+    r.check("duplicate source: result unaffected",
+            dup, [u"Z7", u"Z10", u"Z13", u"B", u"Z14"])
+    new_lines = logger.lines[before:]
+    r.check("duplicate source warns exactly once", len(new_lines), 1)
+    r.check("dup warn names the function",
+            bool(new_lines) and "XAGG_KEYS" in new_lines[0], True)
+    r.check("dup warn names the repeated source",
+            bool(new_lines) and "std" in new_lines[0], True)
+
+
+def test_xagg_row_space_registration(p, r):
+    """S1: XAGG_KEYS / APPEND take the array path despite having NO
+    [bracket] refs of their own -- see the "no array deps" branch fix in
+    patches.py (list results used to be squeezed into a one-element
+    list) and the _ARRAY_FN_RE addition (for the OTHER call shape, an
+    existing list field appended to directly: APPEND([field], "x"))."""
+    safe = _registry_keys(p, "_SAFE")
+    for name in ("XAGG_KEYS", "APPEND"):
+        r.check("%s registered in _SAFE" % name, name in safe, True)
+
+    # The pre-existing family patterns (as of BASELINE_BYlist) must NOT
+    # cover either name -- if they already did, the two dedicated fixes
+    # in this slice would not be provably necessary.
+    family_only = re.compile(
+        r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS'
+        r'|COALESCE|SHIFT|BASELINE_BYlist)\s*\(')
+    for name in ("XAGG_KEYS", "APPEND"):
+        r.check("pre-existing family patterns do not cover %s" % name,
+                bool(family_only.search(u"%s(a,b)" % name)), False)
+
+    src = open(p.__source_path__, "rb").read().decode("utf-8")
+    r.check("XAGG_\\w+ named in the dispatch regex in source",
+            u"|XAGG_\\w+" in src, True)
+    r.check("APPEND named in the dispatch regex in source",
+            u"|APPEND)" in src, True)
+
+    array_fn_re = re.compile(
+        r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS'
+        r'|COALESCE|SHIFT|BASELINE_BYlist|XAGG_\w+|APPEND)\s*\(')
+    for formula in (u'XAGG_KEYS("imp_name","std")',
+                    u'APPEND(XAGG_KEYS("imp_name","std"), "x")',
+                    u'APPEND([imp_x], 99)'):
+        r.check("takes the array path: %s" % formula,
+                bool(array_fn_re.search(formula)), True)
+
+
+def test_xagg_through_the_engine(p, r):
+    """S1: drive the REAL engine on both call shapes that matter.
+
+    1. The needs-doc shape -- APPEND(XAGG_KEYS(...), "literal") -- has NO
+       [bracket] refs at all, so it never reaches _ARRAY_FN_RE; it is the
+       "no array deps" branch's list-vs-scalar fix that this proves,
+       end to end, including the literal CJK total-row name written
+       straight into the formula text (the R13 risk _append's docstring
+       records: eval() on the unicode formula hands that literal back as
+       raw UTF-8 bytes, not unicode, confirmed empirically in this
+       container -- if _norm_key were dropped from _append, this
+       assertion would still show the right CHARACTERS today and then
+       fail every later comparison against a proper unicode row name
+       without any error anywhere).
+    2. APPEND([existing_list_field], literal) -- HAS a [bracket] ref, so
+       it depends on APPEND being in _ARRAY_FN_RE.  Left out, this would
+       take the per-element path and call APPEND once per existing row
+       with a bare scalar, producing a list of 3 two-element lists
+       instead of one 4-element column.
+    """
+    import json
+
+    install_engine_stubs()
+
+    def run(std_name_value, stat_fields):
+        _, analyses = build_sample([
+            {"as_id": "STD", "service_kw": "std", "fields": [
+                {"keyword": "imp_name", "title": u"物质名称",
+                 "result_type": "list", "value": json.dumps(std_name_value),
+                 "cross_referenceable": True},
+            ]},
+            {"as_id": "STAT", "service_kw": "stat", "fields": stat_fields},
+        ])
+        out = evaluate(p, analyses, ("STD", "STAT"))
+        return dict((k.split(".", 1)[1], json.loads(v))
+                    for k, v in out.items() if v)
+
+    # -- shape 1: the needs-doc row-space recipe --------------------------
+    row_space_formula = (
+        u'APPEND(XAGG_KEYS("imp_name","std"), "总杂（指'
+        u'定杂质合计）")')
+    out1 = run([u"Z7", u"Z10", u"Z13", u"B", u"Z14"], [
+        {"keyword": "imp_ip_name", "title": u"统计项",
+         "result_type": "calculatedlist", "formula": row_space_formula},
+    ])
+    r.check("engine: row space is six rows, not squeezed to one",
+            len(out1.get("imp_ip_name") or []), 6)
+    r.check("engine: row space content, CJK total row intact",
+            out1.get("imp_ip_name"),
+            [u"Z7", u"Z10", u"Z13", u"B", u"Z14", u"总杂（指定杂质合计）"])
+
+    # -- shape 2: APPEND against an existing bracket-referenced column ---
+    out2 = run([u"Z7"], [
+        {"keyword": "imp_x", "title": u"x", "result_type": "list",
+         "value": json.dumps([1.0, 2.0, 3.0])},
+        {"keyword": "imp_y", "title": u"y",
+         "result_type": "calculatedlist",
+         "formula": u"APPEND([imp_x], 99)"},
+    ])
+    r.check("engine: APPEND on a bracket ref is ONE call for the column",
+            out2.get("imp_y"), [1.0, 2.0, 3.0, 99.0])
+
+
+# ---- S2: XAGG_<OP> -- per-key aggregate across sibling AS -----------------
+#
+# Two technicians' Z7 injections (needs doc §1.1's shape, not its literal
+# numbers -- round figures chosen so the expected mean/RSD are computed
+# independently below, in plain Python, rather than transcribed by hand).
+Z7_CHROM = [10.0, 12.0, 11.0, 13.0, 9.0, 11.0]
+Z7_SPIKED = [12.0, 12.5, 11.5, 12.0, 12.5, 11.5]
+
+
+def _mean(ns):
+    return sum(ns) / len(ns)
+
+
+def _sample_stdev(ns):
+    m = _mean(ns)
+    return (sum((v - m) ** 2 for v in ns) / (len(ns) - 1)) ** 0.5
+
+
+def _rsd_pct(ns):
+    return _sample_stdev(ns) / _mean(ns) * 100.0
+
+
+def _xagg_op_fixture():
+    """chrom + spiked mimic the needs doc's two technicians on Z7 --
+    single source gives n=6, both together give n=12 (Backlog S2
+    judgement 2).  MISS / ALLMISS / ZEROMEAN (chrom only) exercise the
+    four missing-value states (judgement 6).  GHOST never appears in
+    either source at all (judgement 4)."""
+    sibling_data = {
+        u"chrom": {
+            u"imp_name": (
+                [u"Z7"] * 6 + [u"MISS"] * 3 + [u"ALLMISS"] * 2 +
+                [u"ZEROMEAN"] * 2),
+            u"imp_pct_c": (
+                Z7_CHROM + [5.0, u"", None] + [u"", None] + [0.0, 0.0]),
+        },
+        u"spiked": {
+            u"imp_name": [u"Z7"] * 6,
+            u"imp_pct_c": Z7_SPIKED,
+        },
+    }
+    existing_services = set([u"chrom", u"spiked"])
+    return sibling_data, existing_services
+
+
+def _rebuild_xagg_ops(p, owner, sibling_data, existing_services):
+    """Rebuild XAGG_AVG/_RSD/_MAX/_MIN/_COUNT bottom-up through their
+    shared cells.  Returns (ops_by_name, group_apply) -- the latter so
+    callers can also rebuild GROUP_*list for the equivalence test."""
+    norm_key = rebuild(p, "_norm_key")
+    # _group_apply's 4th positional arg (`empty`) has a default in the
+    # source (empty=_PLACEHOLDER) -- rebuild() does not carry defaults
+    # across unless told to, so GROUP_AVGlist's 3-arg call would
+    # otherwise blow up with "takes exactly 4 arguments (3 given)".
+    group_apply = rebuild(p, "_group_apply", freevars={"_norm_key": norm_key},
+                          defaults=(p._PLACEHOLDER,))
+    agg_stdev = rebuild(p, "_agg_stdev")
+    agg_rsd = rebuild(p, "_agg_rsd", freevars={"_agg_stdev": agg_stdev})
+    xagg_warn = rebuild(p, "_xagg_warn")
+    resolve_sources = rebuild(p, "_xagg_resolve_sources", freevars={
+        "self": owner, "_xagg_warn": xagg_warn})
+    collect = rebuild(p, "_xagg_collect", freevars={
+        "self": owner,
+        "_xagg_existing_services": existing_services,
+        "sibling_data": sibling_data,
+        "_xagg_resolve_sources": resolve_sources,
+        "_xagg_warn": xagg_warn,
+    })
+    xagg_op = rebuild(p, "_xagg_op", freevars={
+        "_group_apply": group_apply,
+        "_norm_key": norm_key,
+        "_xagg_collect": collect,
+        "_xagg_warn": xagg_warn,
+        "self": owner,
+    })
+    ops = {
+        "avg": rebuild(p, "_xagg_avg", freevars={"_xagg_op": xagg_op}),
+        "rsd": rebuild(p, "_xagg_rsd", freevars={
+            "_xagg_op": xagg_op, "_agg_rsd": agg_rsd}),
+        "max": rebuild(p, "_xagg_max", freevars={"_xagg_op": xagg_op}),
+        "min": rebuild(p, "_xagg_min", freevars={"_xagg_op": xagg_op}),
+        "count": rebuild(p, "_xagg_count", freevars={"_xagg_op": xagg_op}),
+    }
+    return ops, group_apply
+
+
+def test_xagg_op_direct(p, r):
+    """S2 (跨AS聚合): XAGG_AVG/_RSD/_MAX/_MIN/_COUNT, direct calls."""
+    install_engine_stubs()
+    owner = _FakeOwner()
+    sibling_data, existing_services = _xagg_op_fixture()
+    ops, _ = _rebuild_xagg_ops(p, owner, sibling_data, existing_services)
+    for name in ("avg", "rsd", "max", "min", "count"):
+        r.check("rebuilt XAGG_%s" % name.upper(), ops[name] is not None, True)
+
+    row_keys = [u"Z7", u"GHOST", u"MISS", u"ALLMISS", u"ZEROMEAN"]
+    combined = Z7_CHROM + Z7_SPIKED
+
+    # -- ①（先写死预期）+ ② source count decides n, not a data column -----
+    avg_single = ops["avg"](u"imp_pct_c", u"imp_name", row_keys, u"chrom")
+    avg_combined = ops["avg"](
+        u"imp_pct_c", u"imp_name", row_keys, u"chrom", u"spiked")
+    r.check("n=6 (chrom only): Z7 mean",
+            avg_single[0], _mean(Z7_CHROM), tol=1e-9)
+    r.check("n=12 (chrom+spiked): Z7 mean",
+            avg_combined[0], _mean(combined), tol=1e-9)
+    r.check("adding a source actually changes the aggregate",
+            avg_single[0] == avg_combined[0], False)
+
+    count_single = ops["count"](u"imp_pct_c", u"imp_name", row_keys, u"chrom")
+    count_combined = ops["count"](
+        u"imp_pct_c", u"imp_name", row_keys, u"chrom", u"spiked")
+    r.check("COUNT n=6 with one source", count_single[0], 6)
+    r.check("COUNT n=12 with two sources", count_combined[0], 12)
+
+    # -- ③ mean / RSD / max / min, independently computed ----------------
+    rsd_combined = ops["rsd"](
+        u"imp_pct_c", u"imp_name", row_keys, u"chrom", u"spiked")
+    max_combined = ops["max"](
+        u"imp_pct_c", u"imp_name", row_keys, u"chrom", u"spiked")
+    min_combined = ops["min"](
+        u"imp_pct_c", u"imp_name", row_keys, u"chrom", u"spiked")
+    r.check("n=12 Z7 RSD", rsd_combined[0], _rsd_pct(combined), tol=1e-9)
+    r.check("n=12 Z7 max", max_combined[0], max(combined))
+    r.check("n=12 Z7 min", min_combined[0], min(combined))
+
+    # -- ④ ★ key absent from EVERY source: '---' for every op, incl COUNT --
+    r.check("GHOST avg -> placeholder", avg_combined[1], p._PLACEHOLDER)
+    r.check("GHOST rsd -> placeholder", rsd_combined[1], p._PLACEHOLDER)
+    r.check("GHOST max -> placeholder", max_combined[1], p._PLACEHOLDER)
+    r.check("GHOST min -> placeholder", min_combined[1], p._PLACEHOLDER)
+    r.check("GHOST count -> placeholder, NOT 0", count_combined[1],
+            p._PLACEHOLDER)
+
+    # -- ⑥ the four missing-value states (chrom only) --------------------
+    avg_chrom = ops["avg"](u"imp_pct_c", u"imp_name", row_keys, u"chrom")
+    rsd_chrom = ops["rsd"](u"imp_pct_c", u"imp_name", row_keys, u"chrom")
+    count_chrom = ops["count"](u"imp_pct_c", u"imp_name", row_keys, u"chrom")
+
+    # MISS: one real value survives out of three -- skip missing cells,
+    # still compute from what is left.
+    r.check("MISS: one survivor -- avg", avg_chrom[2], 5.0)
+    r.check("MISS: <2 survivors -- rsd is placeholder",
+            rsd_chrom[2], p._PLACEHOLDER)
+    r.check("MISS: count of survivors", count_chrom[2], 1)
+
+    # ALLMISS: the key IS matched (rows exist), but nothing numeric is
+    # behind it -- '---' for avg/rsd, and COUNT is a definite 0 (NOT the
+    # same failure as GHOST, which never matched at all -- judgement 4).
+    r.check("ALLMISS: avg is placeholder", avg_chrom[3], p._PLACEHOLDER)
+    r.check("ALLMISS: count is 0, not placeholder", count_chrom[3], 0)
+
+    # ZEROMEAN: mean is exactly 0.0 -- rsd is placeholder (division by
+    # zero would otherwise look like a real, if enormous, number).
+    r.check("ZEROMEAN: avg is 0.0", avg_chrom[4], 0.0)
+    r.check("ZEROMEAN: rsd is placeholder (mean==0)",
+            rsd_chrom[4], p._PLACEHOLDER)
+    r.check("ZEROMEAN: count is 2", count_chrom[4], 2)
+
+
+def test_xagg_op_reuses_group_apply(p, r):
+    """S2: XAGG_AVG/_RSD must BE _group_apply's own contract, not a
+    second, rewritten copy of it (needs doc §3.6 point 1)."""
+    code = _find_code(p, "_xagg_op")
+    r.check("found _xagg_op", code is not None, True)
+    if code is not None:
+        r.check("_xagg_op calls _group_apply (closes over it)",
+                "_group_apply" in code.co_freevars, True)
+
+    install_engine_stubs()
+    owner = _FakeOwner()
+    sibling_data, existing_services = _xagg_op_fixture()
+    ops, group_apply = _rebuild_xagg_ops(p, owner, sibling_data, existing_services)
+    agg_stdev = rebuild(p, "_agg_stdev")
+    agg_rsd = rebuild(p, "_agg_rsd", freevars={"_agg_stdev": agg_stdev})
+    group_avglist = rebuild(p, "_group_avglist",
+                             freevars={"_group_apply": group_apply})
+    group_rsdlist = rebuild(p, "_group_rsdlist", freevars={
+        "_group_apply": group_apply, "_agg_rsd": agg_rsd})
+
+    combined = Z7_CHROM + Z7_SPIKED
+    same_key = [u"Z7"] * len(combined)
+    group_avg = group_avglist(combined, same_key)[0]
+    group_rsd = group_rsdlist(combined, same_key)[0]
+
+    xagg_avg = ops["avg"](
+        u"imp_pct_c", u"imp_name", [u"Z7"], u"chrom", u"spiked")[0]
+    xagg_rsd = ops["rsd"](
+        u"imp_pct_c", u"imp_name", [u"Z7"], u"chrom", u"spiked")[0]
+
+    r.check("XAGG_AVG matches GROUP_AVGlist on the same 12 values",
+            xagg_avg, group_avg, tol=1e-12)
+    r.check("XAGG_RSD matches GROUP_RSDlist on the same 12 values",
+            xagg_rsd, group_rsd, tol=1e-12)
+
+
+def test_xagg_op_scope_inherited_from_s1(p, r):
+    """S2: XAGG_<OP> reads sibling data through the SAME _xagg_collect
+    path S1 already proved goes through _sample_tree_analyses (whole
+    sample tree, partitions included -- same scope as LOOKUP).  Not a
+    new code path, so partition-crossing is not re-derived from scratch
+    here; what matters is that S2 did not bypass it."""
+    code = _find_code(p, "_xagg_op")
+    r.check("found _xagg_op", code is not None, True)
+    if code is not None:
+        r.check("_xagg_op fetches through _xagg_collect (S1's helper)",
+                "_xagg_collect" in code.co_freevars, True)
+        r.check("_xagg_op does not call _sample_tree_analyses directly "
+                "(reuses S1's sibling_data/existing_services instead)",
+                "_sample_tree_analyses" in (code.co_names + code.co_freevars),
+                False)
+
+
+def test_xagg_op_registration(p, r):
+    """S2: registered in _SAFE; rides S1's XAGG_\\w+ entry in
+    _ARRAY_FN_RE -- no regex change needed for this slice."""
+    safe = _registry_keys(p, "_SAFE")
+    for name in ("XAGG_AVG", "XAGG_RSD", "XAGG_MAX", "XAGG_MIN",
+                 "XAGG_COUNT"):
+        r.check("%s registered in _SAFE" % name, name in safe, True)
+
+    array_fn_re = re.compile(
+        r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS'
+        r'|COALESCE|SHIFT|BASELINE_BYlist|XAGG_\w+|APPEND)\s*\(')
+    for name in ("XAGG_AVG", "XAGG_RSD", "XAGG_MAX", "XAGG_MIN",
+                 "XAGG_COUNT"):
+        r.check("%s takes the array path via S1's XAGG_\\w+ entry" % name,
+                bool(array_fn_re.search(u"%s(a,b,[c],d)" % name)), True)
+
+
+def test_xagg_op_through_the_engine(p, r):
+    """S2: drive the REAL engine -- the needs-doc shape,
+    XAGG_AVG("imp_pct_c","imp_name",[imp_ip_name],"chrom","spiked"),
+    with the row space itself (S1's XAGG_KEYS/APPEND) computed on the
+    SAME analysis one field earlier.  This needs the engine's own
+    cross-pass convergence (imp_ip_name is written by the "no array
+    deps" branch, which does not update list_arrays/str_arrays within
+    the same pass -- see the S1 Backlog note on that branch): the first
+    pass computes imp_ip_name, and only a LATER pass re-parses its now-
+    stored value into str_arrays for imp_ip_avg12 to reference through
+    [imp_ip_name].  Passing only one pass here would show imp_ip_avg12
+    stuck at its prior (empty) value -- this is what makes it an engine
+    test rather than a direct-call one."""
+    import json
+
+    install_engine_stubs()
+
+    def run(stat_fields):
+        _, analyses = build_sample([
+            {"as_id": "CHROM", "service_kw": "chrom", "fields": [
+                {"keyword": "imp_name", "title": u"物质名称",
+                 "result_type": "list",
+                 "value": json.dumps([u"Z7"] * 6),
+                 "cross_referenceable": True},
+                {"keyword": "imp_pct_c", "title": u"含量",
+                 "result_type": "list",
+                 "value": json.dumps(Z7_CHROM),
+                 "cross_referenceable": True},
+            ]},
+            {"as_id": "SPIKED", "service_kw": "spiked", "fields": [
+                {"keyword": "imp_name", "title": u"物质名称",
+                 "result_type": "list",
+                 "value": json.dumps([u"Z7"] * 6),
+                 "cross_referenceable": True},
+                {"keyword": "imp_pct_c", "title": u"含量",
+                 "result_type": "list",
+                 "value": json.dumps(Z7_SPIKED),
+                 "cross_referenceable": True},
+            ]},
+            {"as_id": "STAT", "service_kw": "stat", "fields": stat_fields},
+        ])
+        out = evaluate(p, analyses, ("CHROM", "SPIKED", "STAT"), passes=4)
+        return dict((k.split(".", 1)[1], json.loads(v))
+                    for k, v in out.items() if v)
+
+    row_space_formula = u'APPEND(XAGG_KEYS("imp_name","chrom"), "TOTAL")'
+    avg_formula = (u'XAGG_AVG("imp_pct_c","imp_name",[imp_ip_name],'
+                   u'"chrom","spiked")')
+    out = run([
+        {"keyword": "imp_ip_name", "title": u"统计项",
+         "result_type": "calculatedlist", "formula": row_space_formula},
+        {"keyword": "imp_ip_avg12", "title": u"合并均值",
+         "result_type": "calculatedlist", "formula": avg_formula},
+    ])
+    r.check("engine: row space", out.get("imp_ip_name"), [u"Z7", u"TOTAL"])
+    combined = Z7_CHROM + Z7_SPIKED
+    got = out.get("imp_ip_avg12") or []
+    r.check("engine: XAGG_AVG row count", len(got), 2)
+    if len(got) == 2:
+        r.check("engine: Z7 combined mean", got[0], _mean(combined), tol=1e-9)
+        r.check("engine: TOTAL row (no such key anywhere) -> placeholder",
+                got[1], p._PLACEHOLDER)
+
+
+def test_xagg_readme(p, r):
+    """S1+S2+S3: README documents all three function groups, and
+    specifically the distinctions that are easy to lose in a future
+    edit -- 'matched zero rows' (COUNT -> '---') is not the same
+    failure as 'matched rows with nothing numeric in them' (COUNT ->
+    0), at BOTH reduction levels (XAGG_<OP> and XAGG_<OP>_OFSUM).
+    Modelled on test_baseline_through_the_engine's README checks."""
+    readme = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(p.__source_path__))),
+        "..", "..", "README.md")
+    readme = os.path.normpath(readme)
+    r.check("README found at %s" % readme, os.path.exists(readme), True)
+    if not os.path.exists(readme):
+        return
+    text = open(readme, "rb").read().decode("utf-8")
+    for name in ("XAGG_KEYS", "APPEND", "XAGG_AVG", "XAGG_RSD", "XAGG_MAX",
+                 "XAGG_MIN", "XAGG_COUNT", "XAGG_AVG_OFSUM", "XAGG_RSD_OFSUM",
+                 "XAGG_MAX_OFSUM", "XAGG_MIN_OFSUM", "XAGG_COUNT_OFSUM"):
+        r.check("README mentions %s" % name, name in text, True)
+    r.check("README explains the two different '---' sources for XAGG_KEYS",
+            u"未勾" in text and u"根本不存在" in text, True)
+    r.check("README keeps the COUNT 'matched zero' vs 'matched but blank' "
+            u"distinction", u"匹配到了行" in text and u"根本不存在" in text,
+            True)
+    r.check("README warns against COALESCE on the gate column",
+            u"不要对" in text and u"做 `COALESCE` 兜底" in text, True)
+    r.check("README documents OFSUM's three '---'/0 states",
+            u"名单" in text and u"按份求和" in text, True)
+    r.check("README's COALESCE section states the CORRECTED guard rule "
+            u"(0 and '---' both invalidate a row, not just '---')",
+            u"不是一个 > 0 的正整数" in text, True)
+    r.check("README documents the known undetected-substance == total "
+            u"broadcast cost",
+            u"广播机制的必然结果" in text and u"取到的是总杂的标量" in text,
+            True)
+
+
+# ---- S3: XAGG_<OP>_OFSUM -- sum per sample, THEN aggregate across samples --
+#
+# Four synthetic samples (Backlog S3's worked example): P1/P2 from "chrom",
+# P3/P4 from "spiked", differing peak counts (3/2/2/3), each carrying one
+# substance NOT on the Z7/Z10 whitelist (OTHER/OTHER2/OTHER3) that must be
+# excluded from the sum.  P5 (chrom) is a fifth sample whose one whitelisted
+# peak has no numeric value at all -- it must vanish from the final
+# aggregate AND from COUNT, without needing its own separate test.
+SUMS_OFSUM = [3.0, 3.0, 9.0, 13.0]  # P1, P2, P3, P4 sums; P5 excluded
+
+
+def _xagg_ofsum_fixture():
+    sibling_data = {
+        u"std": {u"imp_name": [u"Z7", u"Z10"]},
+        u"chrom": {
+            u"g_sample_id": [u"P1", u"P1", u"P1", u"P2", u"P2", u"P5"],
+            u"imp_name": [u"Z7", u"Z10", u"OTHER", u"Z7", u"OTHER2", u"Z7"],
+            u"imp_pct_c": [1.0, 2.0, 100.0, 3.0, 200.0, u""],
+        },
+        u"spiked": {
+            u"g_sample_id": [u"P3", u"P3", u"P4", u"P4", u"P4"],
+            u"imp_name": [u"Z7", u"Z10", u"Z7", u"Z10", u"OTHER3"],
+            u"imp_pct_c": [4.0, 5.0, 6.0, 7.0, 300.0],
+        },
+    }
+    existing_services = set([u"std", u"chrom", u"spiked"])
+    return sibling_data, existing_services
+
+
+def _rebuild_xagg_ofsum(p, owner, sibling_data, existing_services):
+    """Rebuild XAGG_<OP>_OFSUM bottom-up through their shared cells."""
+    norm_key = rebuild(p, "_norm_key")
+    group_apply = rebuild(p, "_group_apply", freevars={"_norm_key": norm_key},
+                          defaults=(p._PLACEHOLDER,))
+    nums_only = rebuild(p, "_nums_only")
+    agg_stdev = rebuild(p, "_agg_stdev")
+    agg_rsd = rebuild(p, "_agg_rsd", freevars={"_agg_stdev": agg_stdev})
+    xagg_warn = rebuild(p, "_xagg_warn")
+    resolve_sources = rebuild(p, "_xagg_resolve_sources", freevars={
+        "self": owner, "_xagg_warn": xagg_warn})
+    collect = rebuild(p, "_xagg_collect", freevars={
+        "self": owner,
+        "_xagg_existing_services": existing_services,
+        "sibling_data": sibling_data,
+        "_xagg_resolve_sources": resolve_sources,
+        "_xagg_warn": xagg_warn,
+    })
+    xagg_ofsum = rebuild(p, "_xagg_ofsum", freevars={
+        "_group_apply": group_apply,
+        "_norm_key": norm_key,
+        "_nums_only": nums_only,
+        "_xagg_collect": collect,
+        "_xagg_warn": xagg_warn,
+        "self": owner,
+    })
+    return {
+        "avg": rebuild(p, "_xagg_avg_ofsum",
+                       freevars={"_xagg_ofsum": xagg_ofsum}),
+        "rsd": rebuild(p, "_xagg_rsd_ofsum", freevars={
+            "_xagg_ofsum": xagg_ofsum, "_agg_rsd": agg_rsd}),
+        "max": rebuild(p, "_xagg_max_ofsum",
+                       freevars={"_xagg_ofsum": xagg_ofsum}),
+        "min": rebuild(p, "_xagg_min_ofsum",
+                       freevars={"_xagg_ofsum": xagg_ofsum}),
+        "count": rebuild(p, "_xagg_count_ofsum",
+                         freevars={"_xagg_ofsum": xagg_ofsum}),
+    }
+
+
+def _call_ofsum(fn, sibling_data_key_field=u"imp_name"):
+    return fn(u"imp_pct_c", u"g_sample_id", sibling_data_key_field, u"std",
+              u"chrom", u"spiked")
+
+
+def test_xagg_ofsum_direct(p, r):
+    """S3 (跨AS聚合): XAGG_<OP>_OFSUM, direct calls on the synthetic
+    4(+1 blank)-sample fixture (Backlog S3's worked example)."""
+    install_engine_stubs()
+    owner = _FakeOwner()
+    sibling_data, existing_services = _xagg_ofsum_fixture()
+    ops = _rebuild_xagg_ofsum(p, owner, sibling_data, existing_services)
+    for name in ("avg", "rsd", "max", "min", "count"):
+        r.check("rebuilt XAGG_%s_OFSUM" % name.upper(),
+                ops[name] is not None, True)
+
+    # -- ①（先写死预期）+ ② COUNT counts SAMPLES, not rows -----------------
+    # Raw rows: chrom 6 + spiked 5 = 11.  Whitelist-matched rows: 4 (chrom:
+    # P1xZ7,P1xZ10,P2xZ7,P5xZ7) + 4 (spiked: P3xZ7,P3xZ10,P4xZ7,P4xZ10) = 8.
+    # Distinct sample GROUPS: 5 (P1..P5).  The right answer is 4 -- P5's
+    # group exists but contributed no number, so it must not count either.
+    got_count = _call_ofsum(ops["count"])
+    r.check("COUNT_OFSUM is the sample count with usable data (4)",
+            got_count, 4)
+    r.check("COUNT_OFSUM is NOT total raw rows (11)", got_count == 11, False)
+    r.check("COUNT_OFSUM is NOT whitelist-matched ROWS (8)",
+            got_count == 8, False)
+    r.check("COUNT_OFSUM is NOT total sample GROUPS incl. the blank one (5)",
+            got_count == 5, False)
+
+    # -- ⑥ mean / rsd / max / min, independently computed ----------------
+    got_avg = _call_ofsum(ops["avg"])
+    got_rsd = _call_ofsum(ops["rsd"])
+    got_max = _call_ofsum(ops["max"])
+    got_min = _call_ofsum(ops["min"])
+    r.check("AVG_OFSUM", got_avg, _mean(SUMS_OFSUM), tol=1e-9)
+    r.check("RSD_OFSUM", got_rsd, _rsd_pct(SUMS_OFSUM), tol=1e-9)
+    r.check("MAX_OFSUM", got_max, max(SUMS_OFSUM))
+    r.check("MIN_OFSUM", got_min, min(SUMS_OFSUM))
+
+    # -- ④ whitelist filtering actually changes the outcome ---------------
+    # (the fixture already excludes OTHER/OTHER2/OTHER3 from every sum --
+    # prove that is not a no-op by widening the whitelist and checking the
+    # numbers move.)
+    sibling_open, existing_open = _xagg_ofsum_fixture()
+    sibling_open[u"std"][u"imp_name"] = [u"Z7", u"Z10", u"OTHER", u"OTHER2",
+                                          u"OTHER3"]
+    ops_open = _rebuild_xagg_ofsum(p, owner, sibling_open, existing_open)
+    got_open_max = _call_ofsum(ops_open["max"])
+    r.check("widening the whitelist changes the result "
+            "(filtering is not a no-op)", got_open_max == got_max, False)
+    r.check("widening it to admit OTHER3 raises P4's sum to 313.0 -- "
+            "becomes the new max", got_open_max, 6.0 + 7.0 + 300.0)
+
+    # -- ⑤ differing peak counts per sample do not skew individual sums --
+    # already structural: P1 has 3 raw peaks, P2 has 2, P3 has 2, P4 has
+    # 3 -- SUMS_OFSUM matching exactly above proves each sample's sum
+    # depends only on ITS OWN whitelisted rows, not on peak count.
+
+    # -- ⑦ the three '---' states, kept apart ------------------------------
+    # (a) collect failure: the whitelist source does not exist at all.
+    got_ghost_wl = ops["count"](u"imp_pct_c", u"g_sample_id", u"imp_name",
+                                 u"ghost_std", u"chrom", u"spiked")
+    r.check("(a) unreadable whitelist source -> COUNT is placeholder, "
+            "not 0", got_ghost_wl, p._PLACEHOLDER)
+
+    # (b) whitelist loads, but literally nothing in the data matches it.
+    sibling_none, existing_none = _xagg_ofsum_fixture()
+    sibling_none[u"std"][u"imp_name"] = [u"NOTHING_MATCHES"]
+    ops_none = _rebuild_xagg_ofsum(p, owner, sibling_none, existing_none)
+    r.check("(b) zero matches: avg is placeholder",
+            _call_ofsum(ops_none["avg"]), p._PLACEHOLDER)
+    r.check("(b) zero matches: COUNT is 0, not placeholder",
+            _call_ofsum(ops_none["count"]), 0)
+
+    # (c) a matched sample (P5) with nothing numeric behind it: already
+    # baked into the main fixture.  COUNT==4 above already proves it is
+    # excluded; this adds that it does not drag the mean toward 0 either.
+    r.check("(c) the blank sample (P5) does not pull the mean toward 0",
+            got_avg > 0, True)
+
+
+def test_xagg_ofsum_reuses_group_apply(p, r):
+    """S3: the first reduction (sum per sample) must BE _group_apply;
+    the second reduction (aggregate across samples) must NOT be another
+    call to it -- that would re-group the per-sample sums instead of
+    just reducing them, a different and wrong operation."""
+    code = _find_code(p, "_xagg_ofsum")
+    r.check("found _xagg_ofsum", code is not None, True)
+    if code is not None:
+        r.check("_xagg_ofsum calls _group_apply for the per-sample sum",
+                "_group_apply" in code.co_freevars, True)
+        r.check("the second reduction goes through _nums_only, not a "
+                "second _group_apply call",
+                "_nums_only" in code.co_freevars, True)
+
+
+def test_xagg_ofsum_registration(p, r):
+    """S3: registered in _SAFE; needs NO _ARRAY_FN_RE change -- every
+    argument is a string literal (like XAGG_KEYS in S1), so these
+    formulas land in the "no array deps" branch, never the array path."""
+    safe = _registry_keys(p, "_SAFE")
+    for name in ("XAGG_AVG_OFSUM", "XAGG_RSD_OFSUM", "XAGG_MAX_OFSUM",
+                 "XAGG_MIN_OFSUM", "XAGG_COUNT_OFSUM"):
+        r.check("%s registered in _SAFE" % name, name in safe, True)
+
+
+def test_xagg_ofsum_through_the_engine(p, r):
+    """S3: drive the REAL engine -- a literal-only OFSUM formula takes
+    the "no array deps" branch (same as XAGG_KEYS, S1) and must come
+    back as a proper scalar, JSON-serialised as a ONE-element list (the
+    shape needs doc §3.5's COALESCE broadcast depends on)."""
+    import json
+
+    install_engine_stubs()
+
+    def run(stat_fields):
+        _, analyses = build_sample([
+            {"as_id": "STD", "service_kw": "std", "fields": [
+                {"keyword": "imp_name", "title": u"物质名称",
+                 "result_type": "list", "value": json.dumps([u"Z7", u"Z10"]),
+                 "cross_referenceable": True},
+            ]},
+            {"as_id": "CHROM", "service_kw": "chrom", "fields": [
+                {"keyword": "g_sample_id", "title": u"样品号",
+                 "result_type": "list",
+                 "value": json.dumps([u"P1", u"P1", u"P1", u"P2", u"P2"]),
+                 "cross_referenceable": True},
+                {"keyword": "imp_name", "title": u"物质名称",
+                 "result_type": "list",
+                 "value": json.dumps(
+                     [u"Z7", u"Z10", u"OTHER", u"Z7", u"OTHER2"]),
+                 "cross_referenceable": True},
+                {"keyword": "imp_pct_c", "title": u"含量",
+                 "result_type": "list",
+                 "value": json.dumps([1.0, 2.0, 100.0, 3.0, 200.0]),
+                 "cross_referenceable": True},
+            ]},
+            {"as_id": "SPIKED", "service_kw": "spiked", "fields": [
+                {"keyword": "g_sample_id", "title": u"样品号",
+                 "result_type": "list",
+                 "value": json.dumps([u"P3", u"P3", u"P4", u"P4", u"P4"]),
+                 "cross_referenceable": True},
+                {"keyword": "imp_name", "title": u"物质名称",
+                 "result_type": "list",
+                 "value": json.dumps(
+                     [u"Z7", u"Z10", u"Z7", u"Z10", u"OTHER3"]),
+                 "cross_referenceable": True},
+                {"keyword": "imp_pct_c", "title": u"含量",
+                 "result_type": "list",
+                 "value": json.dumps([4.0, 5.0, 6.0, 7.0, 300.0]),
+                 "cross_referenceable": True},
+            ]},
+            {"as_id": "STAT", "service_kw": "stat", "fields": stat_fields},
+        ])
+        out = evaluate(p, analyses, ("STD", "CHROM", "SPIKED", "STAT"))
+        return dict((k.split(".", 1)[1], json.loads(v))
+                    for k, v in out.items() if v)
+
+    avg_formula = (u'XAGG_AVG_OFSUM("imp_pct_c","g_sample_id","imp_name",'
+                   u'"std","chrom","spiked")')
+    count_formula = (u'XAGG_COUNT_OFSUM("imp_pct_c","g_sample_id","imp_name",'
+                     u'"std","chrom","spiked")')
+    # This fixture drops P5 (the blank sample) for simplicity -- P1..P4
+    # are unchanged, so SUMS_OFSUM still applies.
+    out = run([
+        {"keyword": "imp_ip_total_avg", "title": u"总杂均值",
+         "result_type": "calculatedlist", "formula": avg_formula},
+        {"keyword": "imp_ip_total_n", "title": u"总杂 n",
+         "result_type": "calculatedlist", "formula": count_formula},
+    ])
+    got = out.get("imp_ip_total_avg") or []
+    r.check("engine: AVG_OFSUM is a one-element list", len(got), 1)
+    if got:
+        r.check("engine: AVG_OFSUM value", got[0], _mean(SUMS_OFSUM),
+                tol=1e-9)
+    got_n = out.get("imp_ip_total_n") or []
+    r.check("engine: COUNT_OFSUM is a one-element list", len(got_n), 1)
+    if got_n:
+        r.check("engine: COUNT_OFSUM value is 4, not 9 raw source rows",
+                got_n[0], 4)
+
+
+# ---- S4: COALESCE(XAGG_AVG, XAGG_AVG_OFSUM) -- combining the two branches --
+#
+# No new patches.py functions: COALESCE and every XAGG_* it composes already
+# existed after S1-S3.  This slice exists to verify the COMPOSITION, and it
+# overturned the Backlog's own pre-written judgement -- see the module
+# docstrings below and the Backlog / needs-doc 【实测更正】 for the story.
+
+
+def test_xagg_coalesce(p, r):
+    """S4: drive the REAL engine on needs doc §3.5's exact composition,
+    with substance C fully undetected by BOTH technicians.
+
+    This is the test that overturned Backlog S4's original judgement
+    ("that row must NOT equal the total row").  It does, and it must --
+    COALESCE falls through to the OFSUM scalar for ANY row XAGG_AVG
+    could not answer, undetected-substance rows included, and that
+    scalar is the SAME number for every row it is broadcast to.  The
+    real guard is not "the raw value differs from the total" (it does
+    not), it is "XAGG_COUNT correctly marks that row as not to be
+    trusted" -- checked against BOTH of its failure shapes, '---' and 0,
+    not just '---' as the needs doc originally said.
+    """
+    import json
+
+    install_engine_stubs()
+
+    _, analyses = build_sample([
+        {"as_id": "STD", "service_kw": "std", "fields": [
+            {"keyword": "imp_name", "title": u"物质名称",
+             "result_type": "list", "value": json.dumps([u"A", u"B", u"C"]),
+             "cross_referenceable": True},
+        ]},
+        {"as_id": "CHROM", "service_kw": "chrom", "fields": [
+            {"keyword": "g_sample_id", "title": u"样品号",
+             "result_type": "list", "value": json.dumps([u"S1"] * 3),
+             "cross_referenceable": True},
+            {"keyword": "imp_name", "title": u"物质名称",
+             "result_type": "list", "value": json.dumps([u"A", u"B", u"C"]),
+             "cross_referenceable": True},
+            {"keyword": "imp_pct_c", "title": u"含量", "result_type": "list",
+             "value": json.dumps([1.0, 2.0, u""]),
+             "cross_referenceable": True},
+        ]},
+        {"as_id": "SPIKED", "service_kw": "spiked", "fields": [
+            {"keyword": "g_sample_id", "title": u"样品号",
+             "result_type": "list", "value": json.dumps([u"S2"] * 3),
+             "cross_referenceable": True},
+            {"keyword": "imp_name", "title": u"物质名称",
+             "result_type": "list", "value": json.dumps([u"A", u"B", u"C"]),
+             "cross_referenceable": True},
+            {"keyword": "imp_pct_c", "title": u"含量", "result_type": "list",
+             "value": json.dumps([3.0, 4.0, u""]),
+             "cross_referenceable": True},
+        ]},
+        {"as_id": "STAT", "service_kw": "stat", "fields": [
+            {"keyword": "imp_ip_name", "title": u"统计项",
+             "result_type": "calculatedlist",
+             "formula": u'APPEND(XAGG_KEYS("imp_name","std"), "总杂")'},
+            {"keyword": "imp_ip_avg", "title": u"均值",
+             "result_type": "calculatedlist",
+             "formula": (
+                 u'COALESCE('
+                 u'XAGG_AVG("imp_pct_c","imp_name",[imp_ip_name],'
+                 u'"chrom","spiked"),'
+                 u'XAGG_AVG_OFSUM("imp_pct_c","g_sample_id","imp_name",'
+                 u'"std","chrom","spiked"))')},
+            {"keyword": "imp_ip_hit", "title": u"命中数",
+             "result_type": "calculatedlist",
+             "formula": (u'XAGG_COUNT("imp_pct_c","imp_name",[imp_ip_name],'
+                         u'"chrom","spiked")')},
+        ]},
+    ])
+    raw = evaluate(p, analyses, ("STD", "CHROM", "SPIKED", "STAT"), passes=4)
+    out = dict((k.split(".", 1)[1], json.loads(v))
+               for k, v in raw.items() if v)
+
+    names = out.get("imp_ip_name")
+    avg = out.get("imp_ip_avg")
+    hit = out.get("imp_ip_hit")
+
+    r.check("row space: A, B, C, TOTAL", names, [u"A", u"B", u"C", u"总杂"])
+
+    # -- ①②预期反转 + 风险 2 复现 -----------------------------------------
+    r.check("A: XAGG_AVG answers directly, no fallthrough", avg[0], 2.0)
+    r.check("B: XAGG_AVG answers directly, no fallthrough", avg[1], 3.0)
+    r.check("★ C (fully undetected) EQUALS the TOTAL row -- the known "
+            "COALESCE-broadcast cost, not something to chase away",
+            avg[2], avg[3])
+    r.check("C's value is literally the OFSUM total (5.0)", avg[2], 5.0)
+
+    # -- ③ the corrected guard rule vs the original (wrong) wording -------
+    r.check("hit column: A/B matched with data, C matched with none, "
+            "TOTAL never matched at all", hit, [2, 2, 0, p._PLACEHOLDER])
+
+    def trustworthy(h):
+        """Corrected rule (Backlog S4 judgement 3 / needs doc §6 risk 2
+        【实测更正】): trustworthy only when hit is a positive number.
+        Both 0 and '---' mean "do not read this row"."""
+        return isinstance(h, (int, float)) and h > 0
+
+    def trustworthy_original_wording(h):
+        """The needs doc's ORIGINAL wording ("除总杂外任何一行显示 '---'
+        即作废") -- checks only for the placeholder.  Kept here so the
+        test demonstrates the gap instead of only asserting the fix."""
+        return h != p._PLACEHOLDER
+
+    r.check("corrected guard: A/B trustworthy, C/TOTAL are not",
+            [trustworthy(h) for h in hit], [True, True, False, False])
+    r.check("★ the ORIGINAL needs-doc wording wrongly calls C trustworthy",
+            [trustworthy_original_wording(h) for h in hit],
+            [True, True, True, False])
+    r.check("the two guard rules disagree on C -- concrete proof the "
+            "original wording had a gap, not just an assertion",
+            trustworthy(hit[2]) == trustworthy_original_wording(hit[2]),
+            False)
+
+    # -- ⑤ COALESCE argument order is precedence: front branch wins first -
+    r.check("front-branch answers are not overwritten by the fallback "
+            "(A is 2.0, not 5.0)", avg[0] == avg[3], False)
+
+
+def test_xagg_coalesce_no_new_code(p, r):
+    """S4: this slice adds no new patches.py functions -- COALESCE and
+    every XAGG_* it composes already existed after S1-S3 (Backlog S4
+    states this in its own 状态 line; this is the code-level check)."""
+    safe = _registry_keys(p, "_SAFE")
+    for name in ("COALESCE", "XAGG_AVG", "XAGG_AVG_OFSUM", "XAGG_COUNT",
+                 "XAGG_KEYS", "APPEND"):
+        r.check("%s already registered (no new registration in S4)" % name,
+                name in safe, True)
+
+
 def main():
     p = load_patches()
     print("IMPORT OK  (no Zope instance started)")
@@ -1178,7 +2135,24 @@ def main():
     test_baseline_bylist(p, r)
     test_baseline_registration(p, r)
     test_baseline_through_the_engine(p, r)
-    return r.report("S0-S7 engine helpers + BASELINE_BYlist")
+    test_xagg_keys_and_append(p, r)
+    test_xagg_row_space_registration(p, r)
+    test_xagg_through_the_engine(p, r)
+    test_xagg_op_direct(p, r)
+    test_xagg_op_reuses_group_apply(p, r)
+    test_xagg_op_scope_inherited_from_s1(p, r)
+    test_xagg_op_registration(p, r)
+    test_xagg_op_through_the_engine(p, r)
+    test_xagg_ofsum_direct(p, r)
+    test_xagg_ofsum_reuses_group_apply(p, r)
+    test_xagg_ofsum_registration(p, r)
+    test_xagg_ofsum_through_the_engine(p, r)
+    test_xagg_coalesce(p, r)
+    test_xagg_coalesce_no_new_code(p, r)
+    test_xagg_readme(p, r)
+    return r.report(
+        "S0-S7 engine helpers + BASELINE_BYlist + XAGG row space + "
+        "XAGG_<OP> + XAGG_<OP>_OFSUM + COALESCE composition")
 
 
 if __name__ == "__main__":
