@@ -1,0 +1,27 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: INNOCARE.autoreceive\n"
+"POT-Creation-Date: 2026-09-15 00:00+0000\n"
+"PO-Revision-Date: 2026-09-15 00:00+0000\n"
+"Last-Translator: Admin <admin@example.com>\n"
+"Language-Team: en <admin@example.com>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1)\n"
+"Language-Code: en\n"
+"Language-Name: English\n"
+"Preferred-Encodings: utf-8 latin1\n"
+"Domain: INNOCARE.autoreceive\n"
+
+msgid "Auto Receive Samples"
+msgstr "Auto Receive Samples"
+
+msgid "Checked: samples of this client are received automatically when they are registered (the receive step is skipped). Unchecked: samples stay in 'Sample due' and must be received manually, so that the receiving user and time are recorded."
+msgstr "Checked: samples of this client are received automatically when they are registered (the receive step is skipped). Unchecked: samples stay in 'Sample due' and must be received manually, so that the receiving user and time are recorded."
+
+msgid "Received By"
+msgstr "Received By"
+
+msgid "User who received this sample"
+msgstr "User who received this sample"

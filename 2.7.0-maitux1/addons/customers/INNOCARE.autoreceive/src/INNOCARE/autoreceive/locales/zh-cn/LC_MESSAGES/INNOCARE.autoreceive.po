@@ -1,0 +1,27 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: INNOCARE.autoreceive\n"
+"POT-Creation-Date: 2026-09-15 00:00+0000\n"
+"PO-Revision-Date: 2026-09-15 00:00+0000\n"
+"Last-Translator: Admin <admin@example.com>\n"
+"Language-Team: zh-cn <admin@example.com>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0\n"
+"Language-Code: zh-cn\n"
+"Language-Name: Simplified Chinese\n"
+"Preferred-Encodings: utf-8 latin1\n"
+"Domain: INNOCARE.autoreceive\n"
+
+msgid "Auto Receive Samples"
+msgstr "自动接收"
+
+msgid "Checked: samples of this client are received automatically when they are registered (the receive step is skipped). Unchecked: samples stay in 'Sample due' and must be received manually, so that the receiving user and time are recorded."
+msgstr "勾选后：该委托单位的样品登样提交时自动接收（跳过接收步骤）。不勾选：登样后停在「待接收」，需人工接收，系统会记录接收人与接收时间。"
+
+msgid "Received By"
+msgstr "接收人"
+
+msgid "User who received this sample"
+msgstr "该样品的接收人"
