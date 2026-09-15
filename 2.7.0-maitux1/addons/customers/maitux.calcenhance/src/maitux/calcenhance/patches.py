@@ -5768,8 +5768,8 @@ def _evaluate_calculatedlist_interims(self, only=None):
         all_array_refs = array_refs + str_refs  # for length validation
         scalar_refs = [r for r in all_refs if r not in list_arrays and r not in str_arrays]
 
-        _dl_sys.stderr.write("maitux:   processing cl kw=%s all_refs=%s array_refs=%s scalar_refs=%s all_array_refs=%s\n" % (
-            kw, all_refs, array_refs, scalar_refs, all_array_refs))
+        _dl_sys.stderr.write("maitux:   processing cl kw=%s all_refs=%s array_refs=%s str_refs=%s scalar_refs=%s all_array_refs=%s\n" % (
+            kw, all_refs, array_refs, str_refs, scalar_refs, all_array_refs))
         if not all_array_refs:
             # No array deps -- single evaluation, store as [result]
             svm = {}
@@ -5921,9 +5921,20 @@ def _evaluate_calculatedlist_interims(self, only=None):
             # Update list_arrays for downstream calculatedlist deps.  Numeric
             # and mixed (numeric + "---") arrays are indexable by downstream
             # element-wise formulas; pure string arrays stay in str_arrays.
+            # Keep the two dependency dicts disjoint and current: a recomputed
+            # column that leaves its previous-length array behind in the
+            # sibling dict makes a downstream formula collect the same keyword
+            # into BOTH array_refs and str_refs.  The length check then reads
+            # list_arrays (new length) while the per-element loop indexes
+            # str_arrays (old, shorter) -- IndexError, HTTP 500 on save.  Seen
+            # on imp_repeat appending row N+1 while imp_status_raw still held
+            # N rows (2026-09-15).
             if element_results and any(
                     not isinstance(v, (str, unicode)) for v in element_results):
                 list_arrays[kw] = element_results
+                str_arrays.pop(kw, None)
+            else:
+                list_arrays.pop(kw, None)
 
     if changed:
         self.setInterimFields(interims)
