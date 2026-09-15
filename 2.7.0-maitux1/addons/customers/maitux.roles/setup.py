@@ -32,7 +32,6 @@ setup(
         "plone.api",
         "zope.processlifetime",
         "Products.CMFPlone",
-        "INNOCARE.arextension",
     ],
     entry_points="""
     [z3c.autoinclude.plugin]
