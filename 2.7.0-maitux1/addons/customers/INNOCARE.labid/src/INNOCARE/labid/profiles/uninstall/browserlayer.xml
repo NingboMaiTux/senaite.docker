@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<!-- 卸载：移除本 add-on 的 browser layer，Lab ID 字段随即不再出现。
+     字段值本身以属性形式留在 Laboratory 对象上，不在此处删除
+     （重新装回后原样恢复）。 -->
+<layers>
+  <layer
+      name="INNOCARE.labid"
+      remove="True" />
+</layers>
