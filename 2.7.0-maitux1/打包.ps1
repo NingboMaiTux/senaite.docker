@@ -866,11 +866,18 @@ function Get-AddonReadme([object[]]$Addons) {
        # 先备份，出问题好回退
        tar -czf /tmp/customers-backup-$(date +%Y%m%d-%H%M).tar.gz addons/customers
 
-       # 再覆盖
-       cp -r /path/to/customers/. addons/customers/
+       # 整目录替换：先删旧的，再把包里的 customers 整个拷进来
+       rm -rf addons/customers
+       cp -r /path/to/customers addons/customers
 
-   > `cp -r` 覆盖是**合并**，不会删掉包里没有的旧目录。要求「和本包完全一致」时，
-   > 先 `rm -rf addons/customers` 再整目录拷进去。
+   > **必须「先删再拷」，不要用 `cp -r .../customers/. addons/customers/`。**
+   >
+   > 后者是**合并**：本包里已经删掉的 add-on，在生产上会原样留着。留下来的旧
+   > add-on 可能和新的提供**同名 Python 包**、在 `overrides.zcml` 里注册**同一个
+   > adapter**，触发 `ConfigurationConflictError` —— 症状是**整站起不来**，而且
+   > 现场极难查：包是新的、代码是对的，日志里只有一句 ZCML 冲突。
+   >
+   > 上一步的备份就是为这种情况准备的，回退时解压覆盖回去即可。
 
 3. 重启应用容器：
 
