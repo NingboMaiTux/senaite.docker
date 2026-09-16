@@ -48,6 +48,43 @@ def _mark_patched(klass, attr):
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+def _report_file_info(blob, fallback_name=u"report"):
+    """Return (filename, content_type) for a stored report blob.
+
+    The ResultsReport.pdf field holds whichever format was saved (PDF or
+    Word). Some upstream code paths assume PDF and hardcode "*.pdf" plus
+    "application/pdf" - and even mutate ``blob.filename``, which Zope then
+    persists. This helper derives both values from the blob itself so every
+    download (toolbar action, file link, email attachment) serves the real
+    format, and it self-heals blobs whose filename was renamed to "*.pdf"
+    by the old code.
+    """
+    content_type = (getattr(blob, "contentType", "") or "").strip()
+    filename = getattr(blob, "filename", "") or ""
+    if isinstance(filename, str):
+        filename = filename.decode("utf-8", "ignore")
+    filename = unicode(filename)
+
+    base = filename
+    if "." in base:
+        base = base.rsplit(".", 1)[0]
+    if not base:
+        base = unicode(fallback_name or u"report")
+    lower = base.lower()
+
+    ctype = content_type.lower()
+    if "wordprocessingml" in ctype:
+        if not lower.endswith(".docx"):
+            base += ".docx"
+        return base, content_type or cfg.MIMETYPE_WORD
+    if ctype.startswith("application/pdf") or ctype == cfg.MIMETYPE_PDF:
+        if not lower.endswith(".pdf"):
+            base += ".pdf"
+        return base, content_type or cfg.MIMETYPE_PDF
+    # unknown content type: keep the stored name
+    return (filename or (base + ".pdf")), (content_type or cfg.MIMETYPE_PDF)
+
+
 def _format_value(value):
     """Normalize a report_format parameter to 'pdf' or 'word'."""
     value = (value or cfg.DEFAULT_FORMAT)
@@ -57,6 +94,29 @@ def _format_value(value):
     if value not in cfg.SUPPORTED_FORMATS:
         value = cfg.DEFAULT_FORMAT
     return value
+
+
+def is_word_template(template):
+    """True when the given impress template is allowed to produce Word.
+
+    Word output is restricted to the CoA template - every other template is
+    served as PDF (same rule the front-end dropdown applies, enforced here so
+    a hand crafted request cannot bypass it).
+    """
+    from maitux.dualreport.docx import coa
+    return coa.is_coa_template(template)
+
+
+def _effective_format(value, template):
+    """Requested format, downgraded to PDF for templates without Word support.
+    """
+    report_format = _format_value(value)
+    if report_format == cfg.FORMAT_WORD and not is_word_template(template):
+        logger.warn(
+            "maitux.dualreport: Word output is limited to the CoA template "
+            "(requested template=%r), falling back to PDF" % (template,))
+        return cfg.FORMAT_PDF
+    return report_format
 
 
 def _language():
@@ -120,7 +180,21 @@ def _conversion_kwargs(view, paperformat, orientation):
     }
 
 
-def _docx_bytes(view, html, paperformat, orientation):
+def _docx_bytes(view, html, paperformat, orientation, template=None):
+    """Generate the Word document for the given report HTML.
+
+    For the CoaReport template the laboratory's own Word template is filled
+    with the report values; every other template uses the generic HTML->docx
+    converter.
+    """
+    from maitux.dualreport.docx import coa
+    if coa.is_coa_template(template):
+        data = coa.build_coa_docx(html)
+        if data:
+            return data
+        logger.warn("maitux.dualreport: CoA Word generation failed, "
+                    "falling back to the generic converter")
+
     from maitux.dualreport.docx.builder import html_to_docx
     kwargs = _conversion_kwargs(view, paperformat, orientation)
     return html_to_docx(html, **kwargs)
@@ -138,14 +212,15 @@ def patch_download():
     def download(self):
         request = self.request
         form = request.form
-        report_format = _format_value(form.get("report_format"))
+        template = form.get("template")
+        # Word is only served for the CoA template - everything else stays PDF
+        report_format = _effective_format(form.get("report_format"), template)
         if report_format != cfg.FORMAT_WORD:
             # plain PDF flow (unchanged)
             return original(self)
 
         from bika.lims import api
         html = api.safe_unicode(form.get("html", ""))
-        template = form.get("template")
         paperformat = form.get("format")
         orientation = form.get("orientation", "portrait")
 
@@ -157,7 +232,8 @@ def patch_download():
         filename = api.safe_unicode(filename)
 
         logger.info("maitux.dualreport: generating Word document for download")
-        data = _docx_bytes(self, html, paperformat, orientation)
+        data = _docx_bytes(self, html, paperformat, orientation,
+                           template=template)
 
         disposition = "attachment; filename=%s.%s" % (filename,
                                                        cfg.EXTENSION_WORD)
@@ -190,7 +266,8 @@ def patch_ajax_save_reports():
         template = data.get("template")
         paperformat = data.get("format")
         orientation = data.get("orientation", "portrait")
-        report_format = _format_value(data.get("report_format"))
+        # Word is only produced for the CoA template (server side guard)
+        report_format = _effective_format(data.get("report_format"), template)
         # Emails always use PDF (Word emailing is out of scope)
         if action == "email":
             report_format = cfg.FORMAT_PDF
@@ -232,7 +309,8 @@ def patch_ajax_save_reports():
                 logger.info(
                     "maitux.dualreport: generating Word report for %s UIDs"
                     % len(list(uids)))
-                data = _docx_bytes(self, node_html, paperformat, orientation)
+                data = _docx_bytes(self, node_html, paperformat, orientation,
+                                   template=template)
                 metadata = {
                     "template": template,
                     "paperformat": paperformat,
@@ -355,21 +433,16 @@ def patch_downloadview():
     original = DownloadView.__call__
 
     def __call__(self):
+        from bika.lims import api
         report = self.context
         blob = report.getPdf()
         if blob is None:
-            from bika.lims import api
             filename = "{}.pdf".format(api.get_id(report))
             self.download("", filename)
             return
 
-        filename = getattr(blob, "filename", None) or ""
-        content_type = getattr(blob, "contentType", "") or ""
-        if not filename:
-            from bika.lims import api
-            filename = "{}.pdf".format(api.get_id(report))
-        if not content_type:
-            content_type = cfg.MIMETYPE_PDF
+        filename, content_type = _report_file_info(
+            blob, fallback_name=api.get_id(report))
 
         is_pdf = content_type == cfg.MIMETYPE_PDF or \
             content_type.startswith("application/pdf")
@@ -384,6 +457,105 @@ def patch_downloadview():
 
     DownloadView.__call__ = __call__
     _mark_patched(DownloadView, "__call__")
+
+
+# ---------------------------------------------------------------------------
+# 4b) "Download" toolbar action of the reports listing (workflow action)
+# ---------------------------------------------------------------------------
+def patch_workflow_download_reports():
+    """Serve the stored report file (PDF *or* Word) from the toolbar action.
+
+    The upstream adapter hardcodes "*.pdf" / "application/pdf" and mutates
+    the persistent blob filename (``pdf.filename = "...pdf"``) - because Zope
+    commits every request, that rename is persisted and afterwards even the
+    file link serves a wrongly named file.
+    """
+    from bika.lims.browser.workflow.client import \
+        WorkflowActionDownloadReportsAdapter
+    if _is_patched(WorkflowActionDownloadReportsAdapter, "__call__"):
+        return
+
+    def __call__(self, action, uids):
+        import tempfile
+        import zipfile
+        from bika.lims import api
+        from DateTime import DateTime
+        from bika.lims import bikaMessageFactory as _b
+
+        reports = map(api.get_object_by_uid, uids)
+        files = []
+        for report in reports:
+            sample = report.getAnalysisRequest()
+            sample_id = api.get_id(sample)
+            blob = self.get_pdf(report)
+            if blob is None:
+                self.add_status_message(
+                    _b("Could not load report for sample {}"
+                       .format(sample_id)), "warning")
+                continue
+            filename, content_type = _report_file_info(
+                blob, fallback_name=sample_id)
+            files.append((filename, blob.data, content_type))
+
+        if len(files) == 1:
+            filename, data, content_type = files[0]
+            return self.download(data, filename, type=content_type)
+
+        # several reports -> ZIP archive with the real file names
+        archive = tempfile.NamedTemporaryFile(suffix=".zip")
+        with zipfile.ZipFile(archive.name, "w", zipfile.ZIP_DEFLATED) as zf:
+            for filename, data, _content_type in files:
+                zf.writestr(filename, data)
+        archive_name = "Reports-{}.zip".format(
+            DateTime().strftime("%Y%m%d_%H%M%S"))
+        data = archive.file.read()
+        return self.download(data, archive_name, type="application/zip")
+
+    WorkflowActionDownloadReportsAdapter.__call__ = __call__
+    _mark_patched(WorkflowActionDownloadReportsAdapter, "__call__")
+
+    # the upstream download() appends "; charset=utf-8" to every content
+    # type, which is wrong for binary payloads (docx/pdf/zip)
+    if not _is_patched(WorkflowActionDownloadReportsAdapter, "download"):
+        def download(self, data, filename, type="application/zip"):
+            response = self.request.response
+            response.setHeader(
+                "Content-Disposition",
+                "attachment; filename={}".format(filename))
+            response.setHeader("Content-Type", type)
+            response.setHeader("Content-Length", len(data))
+            response.setHeader("Cache-Control", "no-store")
+            response.setHeader("Pragma", "no-cache")
+            response.write(data)
+
+        WorkflowActionDownloadReportsAdapter.download = download
+        _mark_patched(WorkflowActionDownloadReportsAdapter, "download")
+
+
+# ---------------------------------------------------------------------------
+# 4c) email attachments use the real file name (pdf vs docx)
+# ---------------------------------------------------------------------------
+def patch_email_report_filename():
+    from bika.lims.browser.publish.emailview import EmailView
+    if _is_patched(EmailView, "get_report_filename"):
+        return
+
+    def get_report_filename(self, report):
+        from bika.lims import api
+        try:
+            blob = report.getPdf()
+        except Exception:  # noqa: B902
+            blob = None
+        sample = report.getAnalysisRequest()
+        sample_id = api.get_id(sample)
+        if blob is None:
+            return "{}.pdf".format(sample_id)
+        filename, _content_type = _report_file_info(
+            blob, fallback_name=sample_id)
+        return filename
+
+    EmailView.get_report_filename = get_report_filename
+    _mark_patched(EmailView, "get_report_filename")
 
 
 # ---------------------------------------------------------------------------
@@ -558,6 +730,8 @@ def apply_patches():
     patch_ajax_save_reports()
     patch_create_report()
     patch_downloadview()
+    patch_workflow_download_reports()
+    patch_email_report_filename()
     patch_reports_listing()
     patch_reportview_dates()
     patch_reportview_publisher()

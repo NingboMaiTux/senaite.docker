@@ -15,6 +15,12 @@ FORMAT_WORD = "word"
 SUPPORTED_FORMATS = (FORMAT_PDF, FORMAT_WORD)
 DEFAULT_FORMAT = FORMAT_PDF
 
+# Word output is restricted to the CoA report template: any other template
+# falls back to PDF (enforced on the front-end dropdown and on the server).
+# Only templates whose name contains this marker (case/space insensitive)
+# are allowed to produce docx files.
+WORD_TEMPLATE_MARKER = "coareport"
+
 # Word (docx) file details
 MIMETYPE_WORD = (
     "application/vnd.openxmlformats-officedocument."
