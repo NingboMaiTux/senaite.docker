@@ -47,6 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 users = None
 sync = None
 storage = None
+state = None
 reauth = None
 client = None
 FakeClient = None
@@ -307,7 +308,8 @@ def _install_zope_interface():
 
 
 def _install_stubs():
-    global users, sync, storage, reauth, client, FakeClient, _STUBS_INSTALLED
+    global users, sync, storage, state, reauth, client, FakeClient
+    global _STUBS_INSTALLED
     if _STUBS_INSTALLED:
         return
     _STUBS_INSTALLED = True
@@ -377,6 +379,10 @@ def _install_stubs():
 
     users = imp.load_source("maitux.oauth2.users", os.path.join(HERE, "users.py"))
     oauth2.users = users
+
+    # state.py 只用到标准库加 config/logger，真的就能跑。
+    state = imp.load_source("maitux.oauth2.state", os.path.join(HERE, "state.py"))
+    oauth2.state = state
 
     # httputils 和 client 只依赖标准库和 six，可以加载真的。网络那一层
     # (request_json) 由每个测试自己换掉，见 :class:`FakeTransport`。
@@ -1101,6 +1107,66 @@ class ReplyParsingTests(unittest.TestCase):
     def test_a_broken_id_token_yields_nothing_rather_than_raising(self):
         for bad in (u"", u"not-a-jwt", u"a.b", None):
             self.assertEqual(reauth.identity_from_id_token(bad), u"")
+
+
+# ---------------------------------------------------------------------------
+# 回调的 state 校验
+# ---------------------------------------------------------------------------
+
+class StateTests(unittest.TestCase):
+    u"""登录当场弹「安全校验未通过（state 不匹配）」的那一段判断。
+
+    这里定的是一条边界：**我们自己发出去的 state** 对不上 —— 拒绝；
+    **我们根本没发过 state** —— 放行。后者不是攻击，是两种正常情况：
+    竹云 Portal 点图标进来，以及登录入口和竹云登记的回调地址不同源
+    （https 对 http、域名对 IP、端口不一样），cookie 按源隔离，回不来。
+    """
+
+    def setUp(self):
+        SETTINGS.clear()
+        SETTINGS.update(DEFAULT_SETTINGS)
+        SETTINGS["state_secret"] = u"secret-for-tests"
+
+    def test_a_login_we_started_round_trips(self):
+        nonce, cookie = state.make_state(u"http://lims/clients")
+        came_from, _ = state.check_state(cookie, nonce)
+        self.assertEqual(came_from, u"http://lims/clients")
+
+    def test_the_portal_icon_brings_no_state_at_all(self):
+        self.assertEqual(state.check_state(None, None)[0], u"")
+
+    def test_a_state_we_never_issued_is_not_a_failure(self):
+        came_from, note = state.check_state(
+            None, u"6edf8ae449f359b0aaa7cba1c83cc210")
+        self.assertEqual(came_from, u"")
+        self.assertIn(u"never issued", note)
+
+    def test_require_state_refuses_everything_it_cannot_check(self):
+        self.assertIsNone(state.check_state(None, None, require_state=True)[0])
+        self.assertIsNone(
+            state.check_state(None, u"deadbeef", require_state=True)[0])
+
+    def test_a_state_that_is_not_the_one_we_sent_is_refused(self):
+        nonce, cookie = state.make_state()
+        self.assertNotEqual(nonce, u"someone-elses-nonce")
+        self.assertIsNone(state.check_state(cookie, u"someone-elses-nonce")[0])
+
+    def test_a_second_tab_overwriting_the_cookie_is_refused(self):
+        first_nonce, _ = state.make_state()
+        _, second_cookie = state.make_state()
+        self.assertIsNone(state.check_state(second_cookie, first_nonce)[0])
+
+    def test_a_tampered_cookie_is_refused(self):
+        nonce, cookie = state.make_state(u"http://lims/wanted")
+        payload, signature = cookie.rsplit(u".", 1)
+        self.assertIsNone(
+            state.check_state(u"%sX.%s" % (payload, signature), nonce)[0])
+
+    def test_a_missing_secret_is_created_once_not_per_call(self):
+        # 密钥要是每次调用都重新生成，签名永远对不上，登录 100% 失败。
+        SETTINGS.pop("state_secret", None)
+        nonce, cookie = state.make_state()
+        self.assertEqual(state.check_state(cookie, nonce)[0], u"")
 
 
 if __name__ == "__main__":

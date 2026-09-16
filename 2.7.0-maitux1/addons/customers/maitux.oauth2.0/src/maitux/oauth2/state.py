@@ -22,6 +22,10 @@ from maitux.oauth2 import logger
 
 STATE_COOKIE = "maitux_oauth2_state"
 BYPASS_COOKIE = "maitux_oauth2_bypass"
+#: One shot marker, set by the callback when it restarts a login whose state
+#: did not check out.  Without it a state that never checks out would bounce
+#: the browser between LIMS and 竹云 forever.
+RETRY_COOKIE = "maitux_oauth2_retry"
 #: How long a started login may stay unfinished.  The authorisation code
 #: itself expires much sooner (5 minutes on 竹云), but a user who opens the
 #: login page and only comes back later must not be met with a scary
@@ -132,6 +136,45 @@ def read_state(cookie_value, state_param):
         raise ValueError(u"state 与本次登录请求不匹配")
 
     return data.get("c") or u""
+
+
+def check_state(cookie_value, state_param, require_state=False):
+    """Decide what to do with a callback.  Returns ``(came_from, note)``.
+
+    ``came_from`` is ``None`` when the callback has to be refused, ``note`` is
+    a one line reason for the log.
+
+    The case worth explaining is "no cookie of ours".  It means this browser
+    never started a login *here*, which happens routinely and legitimately:
+
+    * the user came from the 竹云 Portal by clicking the LIMS icon.  竹云 does
+      not have to send a ``state`` then, but nothing stops it from sending one
+      of its own making either -- and we have nothing to compare that against.
+    * the login started on a different origin than the registered
+      ``redirect_uri`` points at: https vs http, domain vs IP, another port.
+      A cookie belongs to the origin that set it, so it is simply not sent
+      back, and the very first login of the day fails while the retry -- which
+      starts from the callback origin -- works.  That is a deployment mistake
+      worth fixing, but refusing the login does not help anyone find it.
+
+    So a ``state`` we never issued carries exactly as much information as no
+    ``state`` at all, and both are accepted on the same terms.
+    ``require_state`` is the switch for sites that would rather refuse both.
+    A cookie that *is* there and disagrees stays a hard failure: that is the
+    forged callback the nonce exists for.
+    """
+    if not cookie_value:
+        if require_state:
+            return None, u"no state cookie of ours, and require_state is on"
+        if state_param:
+            return u"", (u"callback carries a state we never issued -- Portal "
+                         u"initiated login, or the login started on another "
+                         u"origin than redirect_uri")
+        return u"", u"callback without state -- IdP initiated login"
+    try:
+        return read_state(cookie_value, state_param), u"state verified"
+    except ValueError as exc:
+        return None, u"state rejected: %s" % exc
 
 
 def set_cookie(response, name, value, max_age=COOKIE_MAX_AGE, secure=None,
