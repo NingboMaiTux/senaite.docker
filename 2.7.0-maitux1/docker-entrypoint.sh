@@ -8,9 +8,45 @@ START="console start restart"
 mkdir -p /data/blobstorage /data/cache /data/filestorage /data/instance /data/log /data/zeoserver
 mkdir -p /home/senaite/senaitelims/src
 
-find /data  -not -user senaite -exec chown senaite:senaite {} \+
-find /home/senaite -not -user senaite -exec chown senaite:senaite {} \+
+# entrypoint 前半段一条日志都不打，卡在这里的表现是「容器起来了、docker logs
+# 一行都没有、看着像死了」。加个带时间戳的标记，下次排查不用再靠反推。
+step() { echo "[entrypoint] $(date '+%F %T') $*"; }
 
+# ---------------------------------------------------------------------------
+# 修正属主。/home/senaite 下的 eggs/ 必须跳过，否则每「创建」一次容器就白花几十
+# 秒、可写层白涨几百 MB。
+#
+# 镜像里 eggs/ 的 38602 个文件属主是 root：Dockerfile 第二段 buildout 用
+# `cp -a /cache/eggs/.` 从 BuildKit 缓存把 egg 复制回来，-a 含 --preserve=all，
+# 连属主一起复制（缓存里那份是 root 写的），而那一层收尾的 chown 只覆盖
+# develop-eggs / bin / parts / addons/common 四项，没有 eggs。
+#
+# 不跳过的话，下面的 find 会匹配到这 38602 个文件逐个 chown。而 overlayfs 上
+# chown 是元数据修改，会触发 copy_up —— 把文件**整份内容**从镜像只读层复制到
+# 容器可写层。本机（NVMe）实测：
+#     只 find 不 chown       1.9 秒
+#     find + chown          52.0 秒，容器可写层 +597 MB
+# 生产机盘更慢，两个实例还并发做同一件事，量级是分钟。
+#
+# 跳过是安全的：eggs/ 运行时只读，镜像里是 root:root drwxr-xr-x / 644，senaite
+# 读得到也进得去；真正需要 senaite 写的 var / parts / bin / develop-eggs 本来就
+# 是 senaite 属主；启动时的 buildout 以 root 跑，写 eggs/ 不受影响。
+#
+# 不要反过来去 Dockerfile 里补 chown eggs —— 那会在镜像里多出一个 0.44 GB 的层，
+# 交付用的 lims.tar 跟着涨，等于把开销从每次启动挪到每次分发。
+# ---------------------------------------------------------------------------
+fix_owner() {
+  # 两段分开打点：/data 是宿主挂载（含 blobstorage，随业务量增长），
+  # /home/senaite 在镜像层里，两者慢的原因完全不同，日志要能直接分辨。
+  step "修正 /data 属主"
+  find /data -not -user senaite -exec chown senaite:senaite {} \+
+  step "修正 /home/senaite 属主（跳过 eggs/）"
+  find /home/senaite -path /home/senaite/senaitelims/eggs -prune -o \
+       -not -user senaite -exec chown senaite:senaite {} \+
+  step "属主修正完成"
+}
+
+fix_owner
 
 # Initializing from environment variables
 gosu senaite python /docker-initialize.py
@@ -53,11 +89,14 @@ sed 's/\r$//' /gen-custom-addon.sh > /tmp/gen-custom-addon.sh
 bash /tmp/gen-custom-addon.sh
 
 if [ -e "custom.cfg" ]; then
+  step "开始 buildout"
   buildout -c custom.cfg -o -n
-  find /data  -not -user senaite -exec chown senaite:senaite {} \+
-  find /home/senaite -not -user senaite -exec chown senaite:senaite {} \+
+  step "buildout 完成，再次修正属主"
+  fix_owner
   gosu senaite python /docker-initialize.py
 fi
+
+step "启动实例"
 
 # ZEO Server
 if [[ "$1" == "zeo"* ]]; then
