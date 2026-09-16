@@ -2056,6 +2056,130 @@ def _num_or_none(v):
         return None
 
 
+def _dec_quantize(val, digits, rounding):
+    """Quantize to `digits` decimals with an explicit rounding mode.
+
+    Returns a Decimal, or None when the input is not a number.  The
+    float is converted through repr() so the decimal the analyst
+    actually typed is what gets rounded -- Decimal(float) would round
+    the binary expansion instead.
+
+    Module level on purpose: both the scalar engine's ``safe_globals``
+    and the array engine's ``_SAFE`` need the rounding family below, and
+    the array engine is a single ~1200-line function whose nested helpers
+    are out of reach of the scalar engine.
+    """
+    from decimal import Decimal, InvalidOperation
+    n = _num_or_none(val)
+    if n is None:
+        return None
+    try:
+        d = int(digits)
+    except (ValueError, TypeError):
+        return None
+    try:
+        q = Decimal(1).scaleb(-d)
+        return Decimal(repr(n)).quantize(q, rounding=rounding)
+    except (InvalidOperation, ValueError, ArithmeticError):
+        return None
+
+
+def _round_half_up(val, digits=0):
+    """Round half away from zero.  Returns a NUMBER."""
+    if isinstance(val, list):
+        return [_round_half_up(v, digits) for v in val]
+    from decimal import ROUND_HALF_UP
+    d = _dec_quantize(val, digits, ROUND_HALF_UP)
+    return _PLACEHOLDER if d is None else float(d)
+
+
+def _round_half_even(val, digits=0):
+    """Round half to even -- GB/T 8170 / ChP numeric rounding.
+
+    Differs from _round_half_up only on an exact half: the retained
+    digit goes to the even side.  Returns a NUMBER."""
+    if isinstance(val, list):
+        return [_round_half_even(v, digits) for v in val]
+    from decimal import ROUND_HALF_EVEN
+    d = _dec_quantize(val, digits, ROUND_HALF_EVEN)
+    return _PLACEHOLDER if d is None else float(d)
+
+
+def _round_up(val, digits=0):
+    """Round AWAY FROM ZERO at `digits` decimals.
+
+    Completes the rounding family: ROUND is half away from zero,
+    ROUND_EVEN is half to even (GB/T 8170 / ChP), and this one never
+    discards a remainder at all -- GB/T 8170 calls it 只进不舍, the
+    analysts here ask for it as 向上进位.  Returns a NUMBER.
+
+    Why a function instead of writing ceil() in the formula:
+    `ceil` is bare math.ceil and takes a float, but every field that
+    wants this rounding reads from an array function (RSD_ROWS,
+    GROUP_RSDlist, ...) which returns a LIST.  So
+    `ceil(RSD_ROWS(...)*10)/10` hits Python list repetition on the
+    multiply and then throws "a float is required" -- the column
+    reads "---" and looks like missing data rather than a bad
+    formula.  Mapping over the list here is the same shape the rest
+    of the family already uses.
+
+    ★ Deliberately NOT ceil() for negative values.  ceil(-1.51)
+    rounds toward +inf (-1.5); this rounds away from zero (-1.6),
+    which is what 只进不舍 means and what ROUND does.  Every caller
+    today is a percentage or an RSD and never negative, so the two
+    agree in practice; the difference is written down so a future
+    negative-valued caller is not a surprise.
+    """
+    if isinstance(val, list):
+        return [_round_up(v, digits) for v in val]
+    from decimal import ROUND_UP
+    d = _dec_quantize(val, digits, ROUND_UP)
+    return _PLACEHOLDER if d is None else float(d)
+
+
+def _round_down(val, digits=0):
+    """Truncate TOWARD ZERO at `digits` decimals -- discard, never carry.
+
+    The mirror image of _round_up: that one never discards a
+    remainder (只进不舍), this one never adds one (只舍不进) --
+    straight truncation, not "round toward -inf" (that would be
+    decimal.ROUND_FLOOR, which is not symmetric around zero and is
+    NOT what was asked for here). Returns a NUMBER.
+
+    rs_stab_pct1 asked for exactly this: 保留一位小数、后面位数舍弃
+    不进位. None of ROUND / ROUND_EVEN / ROUND_UP has that semantic,
+    and bare floor() has the same list-vs-float crash _round_up's
+    docstring describes for ceil() -- the array functions this feeds
+    (RSD_ROWS / GROUP_RSDlist / ...) return a LIST, and
+    `floor(list * 10) / 10` throws "a float is required" the same
+    way `ceil(...)` did.
+
+    ★ Symmetric truncation, like ROUND_DOWN in every other language's
+    decimal library: -1.69 -> -1.6, not -1.7. Nobody has asked for a
+    negative-valued caller yet; written down for the same reason the
+    away-from-zero choice is written down on _round_up.
+    """
+    if isinstance(val, list):
+        return [_round_down(v, digits) for v in val]
+    from decimal import ROUND_DOWN
+    d = _dec_quantize(val, digits, ROUND_DOWN)
+    return _PLACEHOLDER if d is None else float(d)
+
+
+def _format_digits(val, digits=0):
+    """Fixed number of decimals, TRAILING ZEROS KEPT.  Returns a STRING.
+
+    Rounds the same way ROUND does, so the two never disagree on the
+    digits they show.  Being a string, the result cannot be referenced
+    by a downstream numeric formula (ISSUE-003) -- point later formulas
+    at the ROUND field, and use FORMAT only for final display."""
+    if isinstance(val, list):
+        return [_format_digits(v, digits) for v in val]
+    from decimal import ROUND_HALF_UP
+    d = _dec_quantize(val, digits, ROUND_HALF_UP)
+    return _PLACEHOLDER if d is None else unicode(d)
+
+
 def _row_survivors(cols, index):
     """The numeric cells of one row across parallel columns.
 
@@ -4229,6 +4353,16 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
                     len(y)*sum(xi*xi for xi in x) - sum(x)**2 != 0 and
                     len(y)*sum(yi*yi for yi in y) - sum(y)**2 != 0
                 ) else 0.0),
+            # Rounding family.  Registered in BOTH tables: a scalar
+            # Calculated field is just as entitled to round as a
+            # CalculatedList one, and a name missing here fails as
+            # NameError -> "---", which reads like a data problem rather
+            # than a missing function.
+            "ROUND": _round_half_up,
+            "ROUND_EVEN": _round_half_even,
+            "ROUND_UP": _round_up,
+            "ROUND_DOWN": _round_down,
+            "FORMAT": _format_digits,
         }}
 
         # Step 4b: bind the remaining [keyword] references (averaged value_map)
@@ -5206,124 +5340,11 @@ def _evaluate_calculatedlist_interims(self, only=None):
         return _xagg_ofsum("XAGG_COUNT_OFSUM", value_kw, group_kw, key_kw,
                             whitelist_kw, source_kws, len, True)
 
-    # ---- rounding, formatting, numeric-isation -------------------------
+    # ---- rounding / formatting helpers -------------------------------
     #
-    # These four are SCALAR functions on the per-element path and must not
-    # be added to _ARRAY_FN_RE.  Rounding is kept out of RESULT_STATUS /
-    # RESULT_NUM on purpose: a precision change should touch a formula, not
-    # a core calculation function.
-
-    def _dec_quantize(val, digits, rounding):
-        """Quantize to `digits` decimals with an explicit rounding mode.
-
-        Returns a Decimal, or None when the input is not a number.  The
-        float is converted through repr() so the decimal the analyst
-        actually typed is what gets rounded -- Decimal(float) would round
-        the binary expansion instead."""
-        from decimal import Decimal, InvalidOperation
-        n = _num_or_none(val)
-        if n is None:
-            return None
-        try:
-            d = int(digits)
-        except (ValueError, TypeError):
-            return None
-        try:
-            q = Decimal(1).scaleb(-d)
-            return Decimal(repr(n)).quantize(q, rounding=rounding)
-        except (InvalidOperation, ValueError, ArithmeticError):
-            return None
-
-    def _round_half_up(val, digits=0):
-        """Round half away from zero.  Returns a NUMBER."""
-        if isinstance(val, list):
-            return [_round_half_up(v, digits) for v in val]
-        from decimal import ROUND_HALF_UP
-        d = _dec_quantize(val, digits, ROUND_HALF_UP)
-        return _PLACEHOLDER if d is None else float(d)
-
-    def _round_half_even(val, digits=0):
-        """Round half to even -- GB/T 8170 / ChP numeric rounding.
-
-        Differs from _round_half_up only on an exact half: the retained
-        digit goes to the even side.  Returns a NUMBER."""
-        if isinstance(val, list):
-            return [_round_half_even(v, digits) for v in val]
-        from decimal import ROUND_HALF_EVEN
-        d = _dec_quantize(val, digits, ROUND_HALF_EVEN)
-        return _PLACEHOLDER if d is None else float(d)
-
-    def _round_up(val, digits=0):
-        """Round AWAY FROM ZERO at `digits` decimals.
-
-        Completes the rounding family: ROUND is half away from zero,
-        ROUND_EVEN is half to even (GB/T 8170 / ChP), and this one never
-        discards a remainder at all -- GB/T 8170 calls it 只进不舍, the
-        analysts here ask for it as 向上进位.  Returns a NUMBER.
-
-        Why a function instead of writing ceil() in the formula:
-        `ceil` is bare math.ceil and takes a float, but every field that
-        wants this rounding reads from an array function (RSD_ROWS,
-        GROUP_RSDlist, ...) which returns a LIST.  So
-        `ceil(RSD_ROWS(...)*10)/10` hits Python list repetition on the
-        multiply and then throws "a float is required" -- the column
-        reads "---" and looks like missing data rather than a bad
-        formula.  Mapping over the list here is the same shape the rest
-        of the family already uses.
-
-        ★ Deliberately NOT ceil() for negative values.  ceil(-1.51)
-        rounds toward +inf (-1.5); this rounds away from zero (-1.6),
-        which is what 只进不舍 means and what ROUND does.  Every caller
-        today is a percentage or an RSD and never negative, so the two
-        agree in practice; the difference is written down so a future
-        negative-valued caller is not a surprise.
-        """
-        if isinstance(val, list):
-            return [_round_up(v, digits) for v in val]
-        from decimal import ROUND_UP
-        d = _dec_quantize(val, digits, ROUND_UP)
-        return _PLACEHOLDER if d is None else float(d)
-
-    def _round_down(val, digits=0):
-        """Truncate TOWARD ZERO at `digits` decimals -- discard, never carry.
-
-        The mirror image of _round_up: that one never discards a
-        remainder (只进不舍), this one never adds one (只舍不进) --
-        straight truncation, not "round toward -inf" (that would be
-        decimal.ROUND_FLOOR, which is not symmetric around zero and is
-        NOT what was asked for here). Returns a NUMBER.
-
-        rs_stab_pct1 asked for exactly this: 保留一位小数、后面位数舍弃
-        不进位. None of ROUND / ROUND_EVEN / ROUND_UP has that semantic,
-        and bare floor() has the same list-vs-float crash _round_up's
-        docstring describes for ceil() -- the array functions this feeds
-        (RSD_ROWS / GROUP_RSDlist / ...) return a LIST, and
-        `floor(list * 10) / 10` throws "a float is required" the same
-        way `ceil(...)` did.
-
-        ★ Symmetric truncation, like ROUND_DOWN in every other language's
-        decimal library: -1.69 -> -1.6, not -1.7. Nobody has asked for a
-        negative-valued caller yet; written down for the same reason the
-        away-from-zero choice is written down on _round_up.
-        """
-        if isinstance(val, list):
-            return [_round_down(v, digits) for v in val]
-        from decimal import ROUND_DOWN
-        d = _dec_quantize(val, digits, ROUND_DOWN)
-        return _PLACEHOLDER if d is None else float(d)
-
-    def _format_digits(val, digits=0):
-        """Fixed number of decimals, TRAILING ZEROS KEPT.  Returns a STRING.
-
-        Rounds the same way ROUND does, so the two never disagree on the
-        digits they show.  Being a string, the result cannot be referenced
-        by a downstream numeric formula (ISSUE-003) -- point later formulas
-        at the ROUND field, and use FORMAT only for final display."""
-        if isinstance(val, list):
-            return [_format_digits(v, digits) for v in val]
-        from decimal import ROUND_HALF_UP
-        d = _dec_quantize(val, digits, ROUND_HALF_UP)
-        return _PLACEHOLDER if d is None else unicode(d)
+    # Hoisted to module level (see _dec_quantize / _round_* / _format_digits
+    # near _num_or_none) so the scalar engine's safe_globals can reference
+    # them too, not just this array engine's _SAFE.
 
     # Markers that genuinely contribute zero to a total: a result below the
     # limit of quantification is known to be near zero.  Anything else

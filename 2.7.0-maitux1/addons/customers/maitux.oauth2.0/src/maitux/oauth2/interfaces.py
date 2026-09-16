@@ -511,11 +511,13 @@ class IOAuth2Settings(model.Schema):
     require_state = schema.Bool(
         title=_(u"强制校验 state（会禁用竹云 Portal 入口）"),
         description=_(
-            u"默认关闭。竹云 Portal 点图标进来的登录（场景 1）不带 state，"
-            u"所以必须允许无 state 的回调。代价是留下一点“强制登录”"
-            u"（login CSRF）面：恶意站点可以把一个合法 code 塞给受害者，"
-            u"把他登成另一个账号。如果不需要 Portal 入口（用户只从 LIMS "
-            u"地址进入），建议打开本开关，拒绝所有不带 state 的回调。"
+            u"默认关闭。竹云 Portal 点图标进来的登录（场景 1）不是本站发起的，"
+            u"它带不带 state 都轮不到我们比对，所以这类回调必须放行。"
+            u"代价是留下一点“强制登录”（login CSRF）面：恶意站点可以把一个"
+            u"合法 code 塞给受害者，把他登成另一个账号。如果不需要 Portal "
+            u"入口（用户只从 LIMS 地址进入），建议打开本开关，拒绝一切"
+            u"不是本站发起的回调；但打开前先确认登录入口和竹云登记的回调"
+            u"地址同源（协议 / 域名 / 端口都一样），否则首次登录会被拒。"
         ),
         default=False,
         required=False,

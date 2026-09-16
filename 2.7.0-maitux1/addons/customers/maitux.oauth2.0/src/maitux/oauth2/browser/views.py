@@ -195,16 +195,19 @@ class CallbackView(BaseView):
 
         came_from = self.validate_state()
         if came_from is None:
+            if self.retry_login():
+                return u""
             return self.message_page(
                 u"统一登录失败",
-                [u"安全校验未通过（state 不匹配）。",
-                 u"最常见的原因是**登录停留太久**（超过 30 分钟），"
-                 u"次常见原因是直接手工访问了回调地址、"
-                 u"或浏览器阻止了 Cookie。",
-                 u"点下方“重新登录”重试即可。"],
+                [u"安全校验未通过（state 不匹配），自动重试一次后仍然失败。",
+                 u"常见原因：浏览器禁用了 Cookie；或者本次登录的入口地址"
+                 u"（协议 / 域名 / 端口）和竹云登记的回调地址不是同一个，"
+                 u"Cookie 因此回不来。",
+                 u"点下方“重新登录”可以再试一次。"],
                 level="error", show_retry=True)
 
         state_util.clear_cookie(request.response, state_util.STATE_COOKIE)
+        state_util.clear_cookie(request.response, state_util.RETRY_COOKIE)
 
         client = BCastleClient()
         try:
@@ -276,26 +279,50 @@ class CallbackView(BaseView):
     # -- helpers ------------------------------------------------------
 
     def validate_state(self):
-        """Return ``came_from``, or ``None`` when the state is invalid.
+        """Return ``came_from``, or ``None`` when the callback is refused.
 
-        竹云 Portal initiated logins (场景 1) arrive without a state and without
-        our cookie -- that is legitimate, so they are accepted with an empty
-        ``came_from``.  A *mismatching* state is always rejected.
+        The decision itself lives in :func:`state.check_state`: it is the part
+        of this flow most worth unit testing, and it needs no request to run.
         """
-        cookie = self.request.get(state_util.STATE_COOKIE)
-        param = self.request.form.get("state")
-        if not cookie and not param:
-            if config.get("require_state"):
-                logger.warning(
-                    "Rejecting a callback without state (require_state is on)")
-                return None
-            logger.info("Callback without state -- treating as IdP initiated login")
-            return u""
-        try:
-            return state_util.read_state(cookie, param)
-        except ValueError as exc:
-            logger.warning("State validation failed: %s", safe_text(exc))
-            return None
+        came_from, note = state_util.check_state(
+            self.request.get(state_util.STATE_COOKIE),
+            self.request.form.get("state"),
+            require_state=bool(config.get("require_state")))
+        if came_from is None:
+            logger.warning("Refusing the callback: %s", note)
+        else:
+            logger.info("Accepting the callback: %s", note)
+        return came_from
+
+    def retry_login(self):
+        """Start one fresh login instead of showing the state error page.
+
+        A state that does not check out is hardly ever an attack: it is a
+        nonce that went stale while the user sat on the 竹云 login form, or a
+        second tab that overwrote the cookie in the meantime.  One more round
+        trip fixes both, and with a live 竹云 session the user sees nothing but
+        the page they asked for.  The one shot cookie is what keeps this from
+        turning into a redirect loop when the state keeps failing.
+
+        Returns whether the browser has been sent back to the login.
+        """
+        response = self.request.response
+        if not self.request.get(state_util.STATE_COOKIE):
+            # Nothing of ours came back at all.  Either this site insists on
+            # require_state, or the browser is not storing our cookies -- and
+            # since the marker below is a cookie too, going round again would
+            # loop for ever.  Only retry a login we can prove this browser
+            # started here.
+            return False
+        if self.request.get(state_util.RETRY_COOKIE):
+            state_util.clear_cookie(response, state_util.RETRY_COOKIE)
+            return False
+        state_util.set_cookie(
+            response, state_util.RETRY_COOKIE, "1", max_age=300,
+            secure=self.is_secure())
+        logger.info("State did not check out -- restarting the login once")
+        self.goto(u"%s/@@oauth2-login" % self.portal_url)
+        return True
 
     def start_session(self, userid):
         """Create the Plone ``__ac`` session cookie for ``userid``."""

@@ -186,7 +186,7 @@ location = /api/sso/callback {
 
 | 场景 | 结果 |
 |---|---|
-| 竹云 Portal 点图标（带 code、无 state） | 直接走回调登录 |
+| 竹云 Portal 点图标（带 code，state 可有可无） | 直接走回调登录 |
 | 匿名访问任意需登录的页面 | 自动跳竹云授权页（`auto_redirect`，默认开） |
 | 打开 `/login` | 也直接跳竹云（`redirect_login_form`，默认开） |
 | **管理员本地登录** | `站点地址/@@oauth2-local-login` —— 种一个 1 小时的**豁免 Cookie**，只影响这个浏览器，统一登录本身一直开着 |
@@ -429,8 +429,8 @@ docker compose logs -f instance | grep maitux.oauth2
 
 | 现象 | 原因 |
 |---|---|
-| `state 签名校验失败` | 浏览器禁 Cookie，或中途换了域名 |
-| `安全校验未通过` | 直接手工访问了回调地址，或 state 过期（>15 分钟） |
+| `安全校验未通过（state 不匹配）` | 回调带回来的 state 不是本浏览器刚拿到的那一个：多开了一个标签页重复登录，或 state 过期（>30 分钟）。插件会自动重跑一遍登录，这个页面只在**重试也失败**时出现 |
+| 首次登录必报错、点「重新登录」就好 | 登录入口和竹云登记的回调地址**不同源**（https 对 http、域名对 IP、端口不一样）。cookie 按源隔离，发不回来；重试时人已经在回调那个源上了，所以第二次必成。把两边地址统一，别靠重试 |
 | `Bad client credentials` | ClientId / ClientSecret 不对 |
 | `Invalid redirect: ... does not match` | 竹云侧登记的可信回调地址和 `redirect_uri` 不一致 |
 | 竹云返回的用户信息中没有唯一标识 | 见第 7 节，改配置或让客户加属性映射 |
