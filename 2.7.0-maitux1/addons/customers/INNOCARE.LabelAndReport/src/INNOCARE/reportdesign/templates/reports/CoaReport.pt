@@ -14,6 +14,10 @@ CTX              python:(getattr(getattr(view, 'model', None), 'instance', None)
               portal_url       python:portal.absolute_url();
               pm               python:cmf_mod.getToolByName(CTX, 'portal_membership');
               inline_css       python:pkg_mod.resource_string('INNOCARE.reportdesign', 'templates/reports/coa.css').decode('utf-8', 'ignore');
+              re_mod           python:__import__('re');
+              STRV             python:lambda v: (v if isinstance(v, unicode) else (v.decode('utf-8', 'ignore') if isinstance(v, str) else unicode(v)));
+              NUMV             python:lambda v, _rx=re_mod.compile(r'^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)$'), _sv=STRV: (_sv(v).strip() if (isinstance(v, (str, unicode, int, long, float)) and _rx.match(_sv(v).strip())) else None);
+              SPECFMT          python:lambda mn, mx, msign, xsign: (u'' if (mn is None and mx is None) else ((xsign + u' ' + mx) if (mn is None) else ((mn + u' - ' + mx) if (mx is not None) else (msign + u' ' + mn))));
               _empty           python:u'';
 
               ar_id_raw        python:((ar.getId() if (ar is not None and hasattr(ar,'getId') and callable(ar.getId)) else getattr(ar,'id',u'')) or u'') if ar else u'';
@@ -227,9 +231,12 @@ CTX              python:(getattr(getattr(view, 'model', None), 'instance', None)
                             a_unit_raw python: (a.getFormattedUnit() if (hasattr(a,'getFormattedUnit') and callable(a.getFormattedUnit)) else u'');
                             a_unit2    python: (unicode(a.getUnit()) if (hasattr(a,'getUnit') and callable(a.getUnit) and a.getUnit() is not None) else u'');
                             a_unit     python: (S(a_unit_raw) or S(a_unit2));
-                            a_spec_raw python: (a.getFormattedSpecs() if (hasattr(a,'getFormattedSpecs') and callable(a.getFormattedSpecs)) else u'');
-                            a_spec2    python: (unicode(a.getSpecification()) if (hasattr(a,'getSpecification') and callable(a.getSpecification) and a.getSpecification() is not None) else u'');
-                            a_spec     python: (S(a_spec_raw) or S(a_spec2) or u'Report');
+                            a_rr0      python: (a.getResultsRange() if (hasattr(a,'getResultsRange') and callable(a.getResultsRange)) else None);
+                            a_rrd      python: (a_rr0 if (a_rr0 is not None and hasattr(a_rr0,'get')) else {});
+                            a_rr_fb    python: ((ar.getResultsRange(search_by=a.getKeyword()) or ar.getResultsRange(search_by=a.getServiceUID()) or {}) if (ar is not None and hasattr(ar,'getResultsRange') and callable(ar.getResultsRange) and hasattr(a,'getKeyword') and callable(a.getKeyword) and hasattr(a,'getServiceUID') and callable(a.getServiceUID)) else {});
+                            a_rr_fbd   python: (a_rr_fb if (a_rr_fb is not None and hasattr(a_rr_fb,'get')) else {});
+                            a_rr       python: (a_rrd if (NUMV(a_rrd.get('min')) or NUMV(a_rrd.get('max'))) else a_rr_fbd);
+                            a_spec     python: (SPECFMT(NUMV(a_rr.get('min')), NUMV(a_rr.get('max')), (u'\u2265' if a_rr.get('min_operator') == 'geq' else u'\u003e'), (u'\u2264' if a_rr.get('max_operator') == 'leq' else u'\u003c')) or u'\u2014');
                             a_inst     python: (a.getInstrument() if (hasattr(a,'getInstrument') and callable(a.getInstrument)) else None);
                             a_method   python: (T(a_inst, u'\u2014') if a_inst is not None else u'\u2014');
                             a_unc      python: S(a.getFormattedUncertainty() if (hasattr(a,'getFormattedUncertainty') and callable(a.getFormattedUncertainty)) else u'');
