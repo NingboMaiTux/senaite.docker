@@ -1,0 +1,38 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:i18n="http://namespaces.zope.org/i18n"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    i18n_domain="maitux.calcrefresh">
+
+  <!-- Chinese UI for the two toolbar actions comes from
+       locales/zh_CN/LC_MESSAGES/maitux.calcrefresh.po. -->
+  <i18n:registerTranslations directory="locales" />
+
+  <!-- GenericSetup profiles. Registered from *this* package so that
+       `directory` resolves relative to src/maitux/calcrefresh/ (R3). -->
+  <genericsetup:registerProfile
+      name="default"
+      title="MAITUX Calculation Refresh"
+      description="In-place calculation snapshot refresh + interim CSV export for Worksheet"
+      directory="profiles/default"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="MAITUX Calculation Refresh (uninstall)"
+      description="Remove MAITUX Calculation Refresh actions"
+      directory="profiles/uninstall"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <!-- R1: the browser views below reference senaite.core permissions
+       (EditWorksheet / ViewResults). senaite.core's own configure.zcml is not
+       guaranteed to load before this package, so include it explicitly or
+       startup fails with ComponentLookupError(IPermission, ...). -->
+  <include package="senaite.core.permissions" />
+
+  <!-- Browser views -->
+  <include package=".browser" />
+
+</configure>

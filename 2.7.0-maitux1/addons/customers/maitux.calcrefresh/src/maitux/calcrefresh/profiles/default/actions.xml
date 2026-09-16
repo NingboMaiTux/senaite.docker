@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<object name="portal_actions" meta_type="Plone Actions Tool">
+  <!--
+    title / description must be pure ASCII (R9b). Chinese titles in actions.xml
+    crash every page: CMFCore ActionInformation.py:161 wraps the byte str in a
+    zope.i18nmessageid.Message (a unicode subclass), and Py2's implicit ASCII
+    decode blows up. Chinese UI comes from locales/zh_CN translation instead.
+
+    Do NOT write purge="True": senaite.core already purges each category; copying
+    it here would wipe the native actions.
+
+    permissions must use the permission's *title* string (colon form), not the
+    dotted zcml path: EditWorksheet -> "senaite.core: Edit Worksheet",
+    ViewResults -> "senaite.core: View Results".
+
+    i18n_domain must be a <property>, not the i18n:domain attribute: the CMF
+    actions importer only writes xmlns:i18n on export and never reads the
+    attribute on import (see maitux.auditjournal actions.xml).
+  -->
+  <object name="object" meta_type="CMF Action Category">
+    <object name="refresh_calculation" meta_type="CMF Action">
+      <property name="i18n_domain">maitux.calcrefresh</property>
+      <property name="title">Refresh Calculation</property>
+      <property name="description">Refresh analysis calculation snapshots in place</property>
+      <property name="url_expr">string:${object_url}/@@refresh_calculation</property>
+      <property name="link_target"></property>
+      <property name="icon_expr"></property>
+      <property name="available_expr">python:object.portal_type == 'Worksheet'</property>
+      <property name="permissions">
+        <element value="senaite.core: Edit Worksheet"/>
+      </property>
+      <property name="visible">True</property>
+    </object>
+    <object name="export_interims" meta_type="CMF Action">
+      <property name="i18n_domain">maitux.calcrefresh</property>
+      <property name="title">Export Interims</property>
+      <property name="description">Export interim field values as CSV or ZIP</property>
+      <property name="url_expr">string:${object_url}/@@export_interims</property>
+      <property name="link_target"></property>
+      <property name="icon_expr"></property>
+      <property name="available_expr">python:object.portal_type == 'Worksheet'</property>
+      <property name="permissions">
+        <element value="senaite.core: View Results"/>
+      </property>
+      <property name="visible">True</property>
+    </object>
+  </object>
+</object>

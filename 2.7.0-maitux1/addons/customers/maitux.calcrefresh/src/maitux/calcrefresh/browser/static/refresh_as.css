@@ -1,0 +1,29 @@
+/* maitux.calcrefresh - 每个 AS 标题栏上的单 AS 刷新按钮。
+ *
+ * manage_results 页面没有加载 Bootstrap 的按钮 CSS，按钮原来用的
+ * btn-default / btn-xs / pull-right（Bootstrap 3 类名）在这页不生效，
+ * 导致按钮褪成普通文字。这里给注入的 .calcrefresh-refresh 一个明确的
+ * 按钮外观，主色沿用 maitux.worksheet 的 .as-group-keyword 徽章蓝。
+ */
+.calcrefresh-refresh {
+  display: inline-block;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #ffffff;
+  background-color: #2c6fad;
+  border: 1px solid #1f5587;
+  border-radius: 3px;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.calcrefresh-refresh:hover,
+.calcrefresh-refresh:focus {
+  color: #ffffff;
+  background-color: #245d92;
+  border-color: #1a4a75;
+  text-decoration: none;
+}

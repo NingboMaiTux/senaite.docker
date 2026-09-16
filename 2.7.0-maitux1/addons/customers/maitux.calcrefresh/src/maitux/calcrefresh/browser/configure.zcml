@@ -1,0 +1,44 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    i18n_domain="maitux.calcrefresh">
+
+  <!-- In-place calculation snapshot refresh (GET write operation, no template:
+       the view writes back to the response directly). -->
+  <browser:page
+      name="refresh_calculation"
+      for="senaite.core.interfaces.IWorksheet"
+      class=".views.RefreshCalculationView"
+      permission="senaite.core.permissions.EditWorksheet"
+      layer="senaite.core.interfaces.ISenaiteCore"
+      />
+
+  <!-- Interim value CSV/ZIP export (no template: the view sets Content-Type and
+       streams the file directly). -->
+  <browser:page
+      name="export_interims"
+      for="senaite.core.interfaces.IWorksheet"
+      class=".views.ExportInterimsView"
+      permission="senaite.core.permissions.ViewResults"
+      layer="senaite.core.interfaces.ISenaiteCore"
+      />
+
+  <!-- Static resources (the per-AS refresh button script) -->
+  <browser:resourceDirectory
+      name="maitux.calcrefresh.static"
+      directory="static"
+      />
+
+  <!-- Inject refresh_as.js into worksheet manage_results pages. The
+       available() test narrows it to Worksheet + manage_results; the script
+       itself no-ops unless the AS-Grouped table is present. -->
+  <browser:viewlet
+      for="senaite.core.interfaces.IWorksheet"
+      name="maitux.calcrefresh.refreshas"
+      class=".viewlets.RefreshAsScriptViewlet"
+      manager="plone.app.layout.viewlets.interfaces.IHtmlHead"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"
+      />
+
+</configure>
