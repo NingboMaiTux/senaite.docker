@@ -1474,6 +1474,8 @@ def _patch_set_interim_fields():
 
         # Call original save
         original(self, interims)
+        # 写入让已收集的兄弟数据过期（传播会在求值中途改写兄弟）。
+        _ccr_cache_invalidate()
 
         # Evaluate calculated interims, bounded against non-convergence
         # (see _MAX_EVAL_DEPTH).
@@ -1684,7 +1686,7 @@ def _sample_tree_analyses(analysis):
             return []
 
 
-def _collect_cross_referenceable_data(analysis):
+def _collect_cross_referenceable_data_uncached(analysis):
     """Collect cross-referenceable interim field values from sibling analyses.
 
     Returns a dict: {service_kw: {field_kw: value}}
@@ -1810,6 +1812,72 @@ def _collect_cross_referenceable_data(analysis):
             pass
 
     return sibling_data
+
+
+# --- LOOKUP 源数据：求值期缓存 ------------------------------------------
+#
+# _collect_cross_referenceable_data_uncached 每次都用 full_objects=True 走完
+# 整棵样品树，而两个求值引擎各自每跑一个 run 就调它一次。
+# 实测（Care/WS-009/imp_chrom，2026-09-17）：改 1 个字段的一次写入里，同一份
+# 树数据被重建 167 次，1.883s = 整个请求的 72%。
+# 详见 Docs/保存性能及重新计算/证据-代码路径与实测.md §8。
+#
+# 缓存刻意取最保守的形状 —— 它不可能活过一次写入、一轮求值或一个请求：
+#   * 只在 _evaluate_interims_ordered 驱动期间存在；窗口外 data 是 None，
+#     行为与加缓存之前逐字节相同；
+#   * 任何 interim 写入都清空它 —— 写入正是让收集结果过期的那件事
+#     （传播会在求值中途改写兄弟分析）；
+#   * 按提问分析的 UID 分键，因为收集器会把调用者自己排除在结果之外。
+#
+# 返回的是共享对象而不是拷贝：全部调用方只读它
+#（_make_lookup 的闭包、_xagg_collect 的 sibling_data.get），
+# 模块里没有任何一处在收集之后改写过它。
+_ccr_cache_local = threading.local()
+
+
+def _ccr_cache_begin():
+    """开一个缓存窗口。
+
+    嵌套时**共用同一个 dict**，只记深度，不是每层各持一份。
+    传播会在外层窗口里再开内层窗口（源分析求值 -> 写入 -> 传播 -> 下游求值），
+    如果每层各持一份 dict，内层的写入只清得掉内层那份，外层恢复后会拿
+    回写入前收集的陈旧数据继续用。实测踩到过：改源值再改回去，下游
+    imp_chrom.imp_rf_lookup 停在中间那次的结果不跟回来。
+    """
+    depth = getattr(_ccr_cache_local, "depth", 0)
+    if depth == 0:
+        _ccr_cache_local.data = {}
+    _ccr_cache_local.depth = depth + 1
+
+
+def _ccr_cache_end():
+    depth = getattr(_ccr_cache_local, "depth", 1) - 1
+    if depth <= 0:
+        depth = 0
+        _ccr_cache_local.data = None
+    _ccr_cache_local.depth = depth
+
+
+def _ccr_cache_invalidate():
+    """丢掉已收集的一切。每次 interim 写入后调用。"""
+    data = getattr(_ccr_cache_local, "data", None)
+    if data is not None:
+        data.clear()
+
+
+def _collect_cross_referenceable_data(analysis):
+    """带缓存的收集器；失效规则见 _ccr_cache_local 上方的注释。"""
+    data = getattr(_ccr_cache_local, "data", None)
+    if data is None:
+        return _collect_cross_referenceable_data_uncached(analysis)
+    try:
+        key = analysis.UID()
+    except Exception:
+        # 取不到 UID 就不缓存，退回原路径。
+        return _collect_cross_referenceable_data_uncached(analysis)
+    if key not in data:
+        data[key] = _collect_cross_referenceable_data_uncached(analysis)
+    return data[key]
 
 
 # Method-B "key not found" placeholder.  Preserved as a string element through
@@ -4002,6 +4070,7 @@ def _evaluate_interims_ordered(self):
         return
 
     _eval_depth_local.in_driver = True
+    _ccr_cache_begin()
     try:
         for sweep in range(_MAX_ORDER_SWEEPS):
             before = _interim_value_map(self)
@@ -4022,6 +4091,7 @@ def _evaluate_interims_ordered(self):
                     "dependencies (see _interim_order_violations)"
                     % (getattr(self, "id", "?"), sweep + 1))
     finally:
+        _ccr_cache_end()
         _eval_depth_local.in_driver = False
 
 
