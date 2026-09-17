@@ -65,6 +65,84 @@ def _decode_scalar(text):
         return _UNPARSEABLE
 
 
+def _display_text(value):
+    """Text form of a cell value, exactly as the page template renders it.
+
+    Zope hands every non-string TAL expression result to ``unicode()``
+    (Products/PageTemplates/Expressions.py, ``_handleText`` ->
+    ``text_type(text)``), so a computed interim that reaches
+    as_grouped_table.pt as a float is written out by Python 2's
+    ``float.__str__`` -- twelve significant digits.
+
+    The very same number also travels to the browser inside the ajax
+    folderitems, but there it is still a JSON *number*: maitux.calcenhance
+    stores a computed list as ``json.dumps`` of the evaluated floats, which
+    keeps full precision.  as_grouped.js parsed that and wrote
+    ``String(Number)`` -- the shortest round-trip form -- into the cell:
+
+        server render   0.0139172639989
+        ajax refill     0.013917263998886622
+
+    The value never moved, only its spelling, yet applyToCell() compares
+    text and so lit the cell up as refreshed.  On a panel nobody had
+    touched that produced "0 recalculated" next to fifteen highlighted
+    cells -- the opposite of what the count was saying.
+
+    Formatting here, once, is what keeps the two in step: the template
+    renders this text and the ajax response ships this same text (see
+    _numbers_to_text / get_folderitems), so an unchanged value returns
+    byte-identical and stays quiet.
+
+    Strings are handed back untouched, so nothing that is already display
+    text is reformatted, and None is left alone because TAL treats it as
+    "no content" rather than as the text "None".
+    """
+    if value is None:
+        return value
+    if isinstance(value, basestring):  # noqa: F821  (Python 2 only)
+        return value
+    return unicode(value)  # noqa: F821  (Python 2 only)
+
+
+def _is_json_number(value):
+    """True for a value json.loads() produced as a number.
+
+    ``bool`` is excluded on purpose: it is an ``int`` subclass in Python,
+    and a JSON ``true`` is not a number the analyst entered.
+    """
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, (int, long, float))  # noqa: F821  (Python 2)
+
+
+def _numbers_to_text(value):
+    """Replace the numeric elements of an encoded list by their display text.
+
+    Only elements that arrive as JSON *numbers* are touched.  A
+    hand-entered list interim is stored as JSON strings and so comes back
+    byte for byte; anything that is not an encoded list is returned
+    unchanged.  That narrowness is the point -- this runs over every
+    interim of every refreshed row, and the editable ones must not be
+    rewritten under the analyst.
+    """
+    if not isinstance(value, basestring):  # noqa: F821  (Python 2 only)
+        return value
+    text = value
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", "replace")
+    stripped = text.strip()
+    if not (stripped.startswith("[") and stripped.endswith("]")):
+        return value
+    parsed = _decode_scalar(stripped)
+    if not isinstance(parsed, list):
+        return value
+    if not any(_is_json_number(element) for element in parsed):
+        return value
+    return json.dumps([
+        _display_text(element) if _is_json_number(element) else element
+        for element in parsed])
+
+
 def _flatten_encoded(items, depth=0):
     """Replace elements that are themselves encoded lists by their contents.
 
@@ -684,14 +762,22 @@ class GroupedRenderingMixin(object):
             row["interim_editable"] = {}
             for col in columns:
                 kw = col["keyword"]
+                # _display_text() spells the value out here instead of
+                # leaving it to TAL, so that the ajax refill can ship the
+                # identical text and stop reporting a spelling change as a
+                # value change.  For everything that already is a string --
+                # every editable cell -- it is a no-op.
                 if col["is_list"]:
                     # One list element per row; the spare trailing row (see
                     # above) stays empty so a new element can be typed in.
                     arr = self._get_list_array(item, kw)
-                    row["interim"][kw] = arr[row_idx] if row_idx < len(arr) else ""
+                    row["interim"][kw] = (
+                        _display_text(arr[row_idx])
+                        if row_idx < len(arr) else "")
                 else:
                     val = self._get_item_field_value(item, kw)
-                    row["interim"][kw] = val if row_idx == 0 else ""
+                    row["interim"][kw] = (
+                        _display_text(val) if row_idx == 0 else "")
                 row["interim_uid"][kw] = item.get("uid", "")
                 row["interim_editable"][kw] = self._is_interim_editable(
                     item, col)
@@ -834,6 +920,54 @@ class GroupedRenderingMixin(object):
             result.append(grp)
 
         return result
+
+    def get_folderitems(self):
+        """folderitems for the ajax refills, already carrying display text.
+
+        Both refill paths end here: the inherited ajax_set_fields() of
+        senaite.app.listing (an ordinary save) and our own
+        ajax_recalculate().  One override therefore covers the worksheet
+        view and both sample views at once, which is why it sits on the
+        mixin rather than on any single view.
+
+        What it fixes is a spelling mismatch, not a value mismatch.  A
+        computed list is stored by maitux.calcenhance as JSON numbers, so
+        the response used to hand the browser
+        ``[98033.33333333333, ...]`` while the template had rendered the
+        same element as ``98033.3333333`` -- see _display_text() for why
+        the two spellings differ.  applyToCell() compares text, so every
+        one of those cells came back looking changed and got the
+        `as-refreshed` highlight, on panels whose own status line said
+        nothing had been recalculated.
+
+        Converting the numbers to their display text here leaves the
+        browser nothing to reinterpret: String(value) on a string it
+        already holds is the identity, so an untouched cell stays quiet
+        and a cell that really moved still lights up.
+
+        Nothing editable is affected.  _numbers_to_text() only rewrites
+        JSON numbers, and a computed list never has an input to rewrite:
+        _get_render_type() maps calculatedlist -> readonlylist and
+        _is_interim_editable() refuses that outright, so formatted text
+        cannot travel back into storage on the next save.
+        """
+        folderitems = super(GroupedRenderingMixin, self).get_folderitems()
+        for item in folderitems or []:
+            # core keeps one dict per interim and points both
+            # item[keyword] and item["interimfields"] at it, so rewriting
+            # the record once updates whichever of the two the browser
+            # reads (itemValue() takes item[keyword]).
+            for ifield in item.get("interimfields") or []:
+                keyword = ifield.get("keyword", "")
+                if not keyword:
+                    continue
+                record = item.get(keyword)
+                if not isinstance(record, dict):
+                    continue
+                value = _numbers_to_text(record.get("value"))
+                record["value"] = value
+                ifield["value"] = value
+        return folderitems
 
     def get_as_groups(self):
         """Return analyses grouped by AS -> sample.
