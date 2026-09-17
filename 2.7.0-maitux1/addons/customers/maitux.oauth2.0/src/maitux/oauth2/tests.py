@@ -34,6 +34,7 @@ Plone 的解释器本身没问题（buildout 那个解释器就是这样，也�
 ``bin/instance run`` 或正在服务的实例。检测到那种情况就直接跳过。
 """
 
+import datetime
 import imp
 import json
 import os
@@ -48,6 +49,7 @@ users = None
 sync = None
 storage = None
 state = None
+scheduler = None
 reauth = None
 client = None
 FakeClient = None
@@ -308,7 +310,7 @@ def _install_zope_interface():
 
 
 def _install_stubs():
-    global users, sync, storage, state, reauth, client, FakeClient
+    global users, sync, storage, state, scheduler, reauth, client, FakeClient
     global _STUBS_INSTALLED
     if _STUBS_INSTALLED:
         return
@@ -412,6 +414,11 @@ def _install_stubs():
 
     sync = imp.load_source("maitux.oauth2.sync", os.path.join(HERE, "sync.py"))
     sync.BCastleClient = _FakeClient
+
+    # scheduler.py 把 Zope 那些 import 都写在函数里，正是为了这里能加载它。
+    scheduler = imp.load_source("maitux.oauth2.scheduler",
+                                os.path.join(HERE, "scheduler.py"))
+    oauth2.scheduler = scheduler
 
     # 电子签名的二次验证 provider。它在 import 时就要拿到 maitux.esignature 的
     # 契约接口，所以那个包也得先顶上；真装了 esignature 的环境里用真的。
@@ -1167,6 +1174,59 @@ class StateTests(unittest.TestCase):
         SETTINGS.pop("state_secret", None)
         nonce, cookie = state.make_state()
         self.assertEqual(state.check_state(cookie, nonce)[0], u"")
+
+
+# ---------------------------------------------------------------------------
+# 凌晨自动同步的定时判断
+# ---------------------------------------------------------------------------
+
+class SchedulerTests(unittest.TestCase):
+    u"""两个开关一开就该每天凌晨自己跑，判断「到点没」的那段。"""
+
+    def setUp(self):
+        SETTINGS.clear()
+        SETTINGS.update(DEFAULT_SETTINGS)
+
+    def at(self, text):
+        return datetime.datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+
+    def test_the_hour_arrives_and_today_has_not_run(self):
+        self.assertTrue(scheduler.due(
+            self.at("2026-09-18 02:03:00"), 2, u"2026-09-17 02:00:11"))
+
+    def test_nothing_happens_outside_the_hour(self):
+        self.assertFalse(scheduler.due(
+            self.at("2026-09-18 09:03:00"), 2, u"2026-09-17 02:00:11"))
+
+    def test_it_runs_once_a_day_not_once_a_tick(self):
+        # 窗口是整个钟点，5 分钟醒一次，所以跑过之后必须认得出来。
+        self.assertFalse(scheduler.due(
+            self.at("2026-09-18 02:35:00"), 2, u"2026-09-18 02:00:11"))
+
+    def test_a_site_that_never_synced_runs(self):
+        self.assertTrue(scheduler.due(self.at("2026-09-18 02:00:00"), 2, u""))
+        self.assertTrue(scheduler.due(self.at("2026-09-18 02:00:00"), 2, None))
+
+    def test_a_manual_run_earlier_today_counts_as_done(self):
+        self.assertFalse(scheduler.due(
+            self.at("2026-09-18 02:00:00"), 2, u"2026-09-18 10:22:00"))
+
+    def test_the_hour_defaults_to_two_in_the_morning(self):
+        self.assertEqual(scheduler.scheduled_hour(), 2)
+
+    def test_the_hour_can_be_configured(self):
+        SETTINGS["sync_at_hour"] = 5
+        self.assertEqual(scheduler.scheduled_hour(), 5)
+
+    def test_midnight_is_a_real_hour_not_a_missing_setting(self):
+        # 0 是假值，用 `or DEFAULT_HOUR` 写就会把「凌晨 0 点」悄悄改成 2 点。
+        SETTINGS["sync_at_hour"] = 0
+        self.assertEqual(scheduler.scheduled_hour(), 0)
+
+    def test_nonsense_falls_back_instead_of_crashing_the_thread(self):
+        for bad in (u"两点", None, 99, -1):
+            SETTINGS["sync_at_hour"] = bad
+            self.assertEqual(scheduler.scheduled_hour(), 2)
 
 
 if __name__ == "__main__":

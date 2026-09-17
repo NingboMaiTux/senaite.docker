@@ -39,6 +39,14 @@
         provides="maitux.esignature.interfaces.IReAuthenticationProvider" />
   </configure>
 
+  <!-- 每天凌晨自己跑一次用户同步。调度在 add-on 自己身上，不靠 clock-server
+       也不靠外部 cron：两个开关一开就该自动跑，这是产品行为，不该落到每个
+       客户现场的部署步骤里。见 scheduler.py 的模块说明。 -->
+  <subscriber
+      for="zope.processlifetime.IDatabaseOpenedWithRoot"
+      handler=".scheduler.start"
+      />
+
   <!-- Kick out sessions of accounts the daily sync has disabled. -->
   <subscriber
       for="Products.CMFPlone.interfaces.IPloneSiteRoot
@@ -79,6 +87,16 @@
       description="Adds the settings for the new sync endpoints (eiam_app_accounts_path, eiam_user_by_username_path, sync_create_missing, sync_protected_users), for the e-signature password check (sdk_login_path, esign_*, sdk_*), and the member properties that remember a disabled account's groups and its 竹云 login name. The obsolete eiam_users_path / sync_org_id records are left in place; they are simply no longer read."
       source="2"
       destination="3"
+      handler=".setuphandlers.upgrade_registry"
+      sortkey="1"
+      profile="maitux.oauth2:default"
+      />
+
+  <genericsetup:upgradeStep
+      title="Nightly sync scheduler"
+      description="Adds sync_at_hour, the hour of day the built-in scheduler runs the user sync at (default 2am). No cron or clock-server needed any more."
+      source="3"
+      destination="4"
       handler=".setuphandlers.upgrade_registry"
       sortkey="1"
       profile="maitux.oauth2:default"

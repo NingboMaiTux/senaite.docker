@@ -309,32 +309,24 @@ if users.is_pending(portal, member):   # 另一个维度：管理员分没分权
 还没配全，现有用户会被误停。`sync_max_missing_percent`（默认 50%）会兜住，
 先看一次结果再放开。
 
-### 触发方式二选一
+### 触发方式
 
-**A. Zope 自带的 clock-server（推荐，不需要外部 cron）**
+**默认就是自动的。** 「统一登录」总开关和「启用用户同步」两个都开着，实例自己
+就会在「每天几点同步」设定的钟点（默认**凌晨 2 点**）跑一次 —— 不用配 cron，
+不用改 zope.conf，不用重建镜像。关掉任一开关即等于关掉调度。
 
-`custom-addon.cfg` 里已经写好了注释掉的片段，改掉 `token` 后取消注释重建镜像：
+- 当天已经跑过（包括管理员手动触发的那次）就不会重复跑。
+- 两个实例都会醒，但谁先把 `last_sync` 写成今天谁跑，另一个自动让开。
+- 调度器是 add-on 进程里的一个守护线程（`scheduler.py`），每 5 分钟看一眼到点
+  没。刻意不用 Zope 的 `<clock-server>`：那个只能表达「进程起来后每 N 秒一次」，
+  每重启一次容器时间就漂一次，定不到钟点。
+- 竹云接口当晚不可用就等第二天，不在凌晨反复重试。
 
-```ini
-[instance]
-zope-conf-additional +=
-    <clock-server>
-        method /<站点id>/@@oauth2-sync-users?token=CHANGE-ME
-        period 86400
-        user
-        password
-        host localhost
-    </clock-server>
-```
+**手动跑一次**：配置页底部有「立即同步」按钮 —— 装机当天填完配置就想把人
+拉进来，不用等今晚。它会先把本页配置保存掉再同步（否则刚填的凭据还没落库），
+完成后在页面顶部报「名单几人、新建几个、停用几个」。
 
-**B. 外部 cron / 定时任务**
-
-```bash
-curl -s "https://lims.example.com/<站点id>/@@oauth2-sync-users?token=你的口令"
-```
-
-管理员登录后也可以直接在浏览器打开
-`站点地址/@@oauth2-sync-users` 手动跑一次（不需要 token）；
+也可以直接开 `站点地址/@@oauth2-sync-users`（管理员登录后不需要 token），
 加 `?dry_run=1` 只看结果不改数据。返回的是 JSON：
 
 ```json
@@ -346,6 +338,10 @@ curl -s "https://lims.example.com/<站点id>/@@oauth2-sync-users?token=你的口
 ```
 
 最近一次的结果也会写回配置页的“上次同步结果”。
+
+**要从别的机器统一调度**（一般用不上，自带调度已经够了）：在配置页填好
+“同步触发口令”（至少 16 位），然后
+`curl -s "https://lims.example.com/<站点id>/@@oauth2-sync-users?token=你的口令"`。
 
 ## 9. 电子签名的账号/密码二次验证
 
