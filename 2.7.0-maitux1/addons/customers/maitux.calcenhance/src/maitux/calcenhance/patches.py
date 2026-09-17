@@ -2626,6 +2626,19 @@ _LOOKUP_SRC_RE = _lookup_re.compile(r'LOOKUP\s*\(\s*["\']([^"\']+)["\']')
 # quoted literals -- finds nothing and the formula looks dependency-free.
 _LOOKUP_DYNAMIC_SRC_RE = _lookup_re.compile(r'LOOKUP\s*\(\s*\[')
 
+# Cross-AS aggregation (XAGG_*) reads its source AS from string-literal
+# arguments too, but unlike LOOKUP the source is not a fixed position:
+#   XAGG_KEYS(field, src...)                      -> src after the first arg
+#   XAGG_<OP>(val, key, rowkeys, src...)          -> src after the third arg
+#   XAGG_<OP>_OFSUM(val, grp, key, list, src...)  -> list + src after it
+# Extracting "every string literal inside the call" is the simplest correct
+# choice: field/key/value keywords are also string literals, but they never
+# equal an AS keyword (senaite-keyword-check enforces that), and even a
+# hypothetical collision only costs one harmless recalculation.  [^()]* is
+# enough because XAGG_* arguments carry no nested function calls today.
+_XAGG_CALL_RE = _lookup_re.compile(r'XAGG_[A-Z_]+\([^()]*\)')
+_XAGG_ARG_RE = _lookup_re.compile(r'["\']([^"\']+)["\']')
+
 _calc_propagation_local = None  # threading.local, lazily created
 
 
@@ -2638,14 +2651,19 @@ def _get_propagation_local():
 
 
 def _extract_lookup_sources(formula):
-    """Return the set of source AS keywords referenced by LOOKUP() calls.
+    """Return the set of source AS keywords referenced by LOOKUP() / XAGG_*().
 
-    Only the first (string literal) argument of each LOOKUP is captured; that
-    argument is the source Analysis Service keyword.
+    LOOKUP's source is its first (string literal) argument.  XAGG_* spreads
+    its source AS over several string-literal arguments, so every string
+    literal inside an XAGG_* call is captured as a potential source -- see the
+    _XAGG_CALL_RE comment above for why that cannot misfire on field names.
     """
     if not formula:
         return set()
-    return set(_LOOKUP_SRC_RE.findall(formula))
+    sources = set(_LOOKUP_SRC_RE.findall(formula))
+    for call in _XAGG_CALL_RE.findall(formula):
+        sources.update(_XAGG_ARG_RE.findall(call))
+    return sources
 
 
 def _lookup_has_dynamic_source(formula):
