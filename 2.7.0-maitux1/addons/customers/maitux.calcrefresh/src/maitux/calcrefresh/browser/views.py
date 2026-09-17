@@ -55,17 +55,17 @@ class RefreshCalculationView(BrowserView):
                            "whole-worksheet refresh is disabled",
             })
 
-        analyses = self.context.getAnalyses()
+        all_analyses = self.context.getAnalyses()
         keyword = _to_str(keyword)
-        analyses = [a for a in analyses
-                    if _to_str(a.getKeyword()) == keyword]
+        targets = [a for a in all_analyses
+                   if _to_str(a.getKeyword()) == keyword]
 
         refreshed = []
         rejected = []
         skipped = []
-        seen = set()
+        refreshed_objs = []
 
-        for analysis in analyses:
+        for analysis in targets:
             state = api.get_review_status(analysis)
             if state not in self.ALLOWED_STATES:
                 rejected.append({
@@ -77,12 +77,15 @@ class RefreshCalculationView(BrowserView):
             outcome = self._refresh_one(analysis)
             if outcome == "refreshed":
                 refreshed.append(_to_str(analysis.getKeyword()))
-                self._recalculate_dependents(analysis, seen)
+                refreshed_objs.append(analysis)
             else:
                 skipped.append({
                     "keyword": _to_str(analysis.getKeyword()),
                     "reason": outcome,
                 })
+
+        if refreshed_objs:
+            self._recalculate_dependents(refreshed_objs, all_analyses)
 
         self.request.response.setHeader("Content-Type", "application/json")
         return json.dumps({
@@ -119,29 +122,55 @@ class RefreshCalculationView(BrowserView):
         analysis.reindexObject()
         return "refreshed"
 
-    def _recalculate_dependents(self, analysis, seen):
+    def _recalculate_dependents(self, refreshed_analyses, all_analyses):
         """Recalculate downstream analyses in the same sample that depend on
-        this analysis's service (mirrors importer.calculateTotalResults)."""
-        service = analysis.getAnalysisService()
-        if not service:
-            return
-        sample_uid = analysis.getRequestUID()
-        for other in self.context.getAnalyses():
-            if other.UID() == analysis.UID():
-                continue
-            if other.getRequestUID() != sample_uid:
-                continue
-            calc = other.getCalculation()
+        the refreshed services (mirrors importer.calculateTotalResults).
+
+        The previous version recursed once per dependency level and re-ran
+        getAnalyses() / getCalculation() / getDependentServices() on every
+        level -- O(N * depth) ZODB object wake-ups.  This version builds the
+        sample / service / dependency index in one flat pass, then walks the
+        dependents with a queue, so each analysis is woken once and each
+        dependency edge is followed once.
+        """
+        by_uid = {}
+        sample_of = {}
+        service_uid_of = {}
+        # service uid -> uids of the analyses that depend on that service
+        dependents = {}
+
+        for a in all_analyses:
+            uid = a.UID()
+            by_uid[uid] = a
+            sample_of[uid] = a.getRequestUID()
+            service = a.getAnalysisService()
+            service_uid_of[uid] = api.get_uid(service) if service else None
+            calc = a.getCalculation()
             if not calc:
                 continue
-            if service not in calc.getDependentServices():
+            for dep_service in calc.getDependentServices():
+                dep_uid = api.get_uid(dep_service)
+                if dep_uid:
+                    dependents.setdefault(dep_uid, []).append(uid)
+
+        queue = [a.UID() for a in refreshed_analyses]
+        done = set(queue)
+        while queue:
+            uid = queue.pop(0)
+            suid = service_uid_of[uid]
+            if not suid:
                 continue
-            if other.UID() in seen:
-                continue
-            seen.add(other.UID())
-            other.calculateResult(override=True)
-            other.reindexObject(idxs=["Result"])
-            self._recalculate_dependents(other, seen)
+            sample_uid = sample_of[uid]
+            for other_uid in dependents.get(suid, []):
+                if other_uid in done:
+                    continue
+                if sample_of[other_uid] != sample_uid:
+                    continue
+                done.add(other_uid)
+                other = by_uid[other_uid]
+                other.calculateResult(override=True)
+                other.reindexObject(idxs=["Result"])
+                queue.append(other_uid)
 
 
 class ExportInterimsView(BrowserView):
