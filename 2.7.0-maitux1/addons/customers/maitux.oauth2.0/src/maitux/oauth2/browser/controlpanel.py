@@ -18,10 +18,19 @@ class OAuth2SettingsEditForm(controlpanel.RegistryEditForm):
     schema_prefix = "maitux.oauth2"
     label = _(u"竹云统一登录 (OAuth 2.0)")
 
-    # 继承来的“保存”“取消”要先复制出来，否则下面那个装饰器会在子类上另起一套
-    # buttons，把它们俩顶掉。
-    buttons = controlpanel.RegistryEditForm.buttons.copy()
+    # “立即同步”排在“确定 / 取消”左边 —— 装机当天最常点的就是它。按钮顺序
+    # 就是 buttons 的拼接顺序，所以这里显式拼：buttonAndHandler 装饰器只会
+    # 往后追加，排不到前面。继承来的两个也必须先 copy 出来，否则会被顶掉。
+    buttons = button.Buttons(
+        button.Button("sync_now", title=_(u"立即同步")),
+    ) + controlpanel.RegistryEditForm.buttons.copy()
     handlers = controlpanel.RegistryEditForm.handlers.copy()
+
+    def updateActions(self):
+        super(OAuth2SettingsEditForm, self).updateActions()
+        # 和“确定”同一个 class：主题怎么画“确定”就怎么画它。不加这一句按钮是
+        # 灰的 —— plone.app.registry 给“确定”点亮用的也正是这个 class。
+        self.actions["sync_now"].addClass("context")
 
     def updateWidgets(self, *args, **kwargs):
         super(OAuth2SettingsEditForm, self).updateWidgets(*args, **kwargs)
@@ -58,9 +67,9 @@ class OAuth2SettingsEditForm(controlpanel.RegistryEditForm):
         return super(OAuth2SettingsEditForm, self).getContent()
 
     #: 装机当天填完配置就想把人拉进来，没人愿意等今晚两点（自动调度见
-    #: scheduler.py）。先保存再同步：否则刚填的 app_id / 凭据还没落库，
-    #: 同步拿旧配置去跑，报错报得莫名其妙。
-    @button.buttonAndHandler(_(u"保存并立即同步"), name="sync_now")
+    #: scheduler.py）。同步前先把本页保存掉：否则刚填的 app_id / 凭据还没
+    #: 落库，同步拿旧配置去跑，报错报得莫名其妙。提示语里会说明保存过了。
+    @button.handler(buttons["sync_now"])
     def handle_sync_now(self, action):
         data, errors = self.extractData()
         if errors:
@@ -86,8 +95,8 @@ class OAuth2SettingsEditForm(controlpanel.RegistryEditForm):
             messages.addStatusMessage(
                 u"同步没有进行：%s" % problems[0], "error")
         else:
-            summary = (u"同步完成：竹云授权名单 %s 人，新建 %s、关联 %s、"
-                       u"停用 %s、恢复 %s、更新 %s。"
+            summary = (u"配置已保存，同步完成：竹云授权名单 %s 人，新建 %s、"
+                       u"关联 %s、停用 %s、恢复 %s、更新 %s。"
                        % (stats.get("accounts_total"), stats.get("created"),
                           stats.get("linked"), stats.get("disabled"),
                           stats.get("reenabled"), stats.get("updated")))
