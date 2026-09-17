@@ -529,6 +529,7 @@ class IOAuth2Settings(model.Schema):
         label=_(u"用户定时同步"),
         fields=[
             "sync_enabled",
+            "sync_at_hour",
             "sync_create_missing",
             "sync_protected_users",
             "sync_user_id_field",
@@ -546,8 +547,23 @@ class IOAuth2Settings(model.Schema):
         title=_(u"启用用户同步"),
         description=_(
             u"每天向竹云要一次“谁被授权访问本应用”的名单，据此在 LIMS 里建号和停用。"
+            u"打开它（且统一登录总开关也开着）就会在下面这个钟点自动跑，"
+            u"不需要另外配 cron 或 clock-server。"
         ),
         default=True,
+        required=False,
+    )
+
+    sync_at_hour = schema.Int(
+        title=_(u"每天几点同步"),
+        description=_(
+            u"0-23，默认凌晨 2 点。两个开关都开着时，实例自己在这个钟点跑一次；"
+            u"当天已经跑过（包括手动触发的）就不再重复。两个实例同时在跑也没关系，"
+            u"谁先抢到这一轮谁跑，另一个自动让开。"
+        ),
+        default=2,
+        min=0,
+        max=23,
         required=False,
     )
 
