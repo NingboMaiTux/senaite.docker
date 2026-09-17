@@ -22,8 +22,15 @@
      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
      i18n:domain="maitux.worksheet"
      class="as-grouped-listing"
+     data-recalculate-running="Recalculating…"
+     data-recalculate-summary="{total} analysis(es): {changed} recalculated, {unchanged} unchanged, {skipped} skipped"
+     data-recalculate-failed="Recalculate failed: {error}"
+     i18n:attributes="data-recalculate-running;
+                      data-recalculate-summary;
+                      data-recalculate-failed"
      tal:attributes="data-save-url view/get_save_url;
                      data-transitions-url view/get_transitions_url;
+                     data-recalculate-url view/get_recalculate_url;
                      data-confirm-messages view/get_confirm_messages">
 
   <link rel="stylesheet" type="text/css"
@@ -85,6 +92,30 @@
             <span tal:replace="group/sample_count">0</span>
             <span i18n:translate="">sample(s)</span>
           </small>
+
+          <!-- Replays this AS through the calculation engine: every analysis
+               is re-evaluated from its own snapshot formula and its current
+               sources.  This is the AS-Grouped equivalent of the native
+               per-row "recalculate" link, which was left behind because it
+               hangs off a ReactJS click handler.
+
+               data-uids carries EVERY analysis of the panel, not only the
+               ones that can be recalculated: the server refuses the rest and
+               reports them as `skipped`, which is what lets the summary say
+               how many were left alone.  The button itself only appears when
+               at least one analysis can actually be recalculated, so a panel
+               whose analyses have all been submitted shows nothing.
+
+               maitux.calcrefresh injects its own "Refresh Cal" button into
+               this same header during static data setup.  That one re-links
+               the Calculation snapshot; this one only recalculates. -->
+          <button type="button"
+                  class="btn btn-outline-primary btn-sm as-recalculate-button"
+                  tal:condition="group/has_recalculable"
+                  tal:attributes="data-uids python:','.join(group['analysis_uids'])">
+            <i class="fas fa-calculator"></i>
+            <span i18n:translate="">Recalculate</span>
+          </button>
         </div>
 
         <div class="panel-body as-group-body">

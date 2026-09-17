@@ -26,6 +26,7 @@
   }
 
   var saveUrl = root.getAttribute("data-save-url");
+  var recalculateUrl = root.getAttribute("data-recalculate-url");
   var form = root.querySelector(".as-grouped-form");
   var saveButton = root.querySelector(".as-save-button");
   var status = root.querySelector(".as-save-status");
@@ -438,6 +439,81 @@
         throw error;
       }
     );
+  }
+
+  /* --------------------------------------------------------------------- *
+   * AS-level recalculate
+   * --------------------------------------------------------------------- */
+
+  /* The texts live on the root element so they go through i18n:attributes
+   * with the rest of the template; the placeholders are filled here. */
+  function message(name, fallback) {
+    return root.getAttribute("data-recalculate-" + name) || fallback;
+  }
+
+  function fillTemplate(text, values) {
+    return text.replace(/\{(\w+)\}/g, function (match, key) {
+      return key in values ? String(values[key]) : match;
+    });
+  }
+
+  function recalculate(button) {
+    var uids = (button.getAttribute("data-uids") || "")
+      .split(",")
+      .filter(function (uid) {
+        return !!uid;
+      });
+    if (!recalculateUrl || !uids.length || button.disabled) {
+      return;
+    }
+
+    button.disabled = true;
+    /* Persist first, always.  Anything still queued would otherwise be
+     * recalculated from the stored (older) value, and the folderitems coming
+     * back would overwrite the analyst's unsaved input on the way in.  The
+     * native listing saves pending items before any transition for exactly
+     * this reason. */
+    flush()
+      .then(function () {
+        setStatus(message("running", "Recalculating\u2026"));
+        return fetch(recalculateUrl, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-TOKEN": getCsrfToken()
+          },
+          body: JSON.stringify({ uids: uids })
+        });
+      })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+        return response.json();
+      })
+      .then(function (data) {
+        // No reload: applyFolderitems() patches the cells in place and adds
+        // `as-refreshed` to the ones whose value moved, so what changed stays
+        // visible.  Reloading here would throw that away -- which is what
+        // maitux.calcrefresh's refresh_as.js does, and why it cannot tell the
+        // analyst what happened.
+        applyFolderitems(data.folderitems);
+        setStatus(fillTemplate(message("summary",
+          "{total} analysis(es): {changed} recalculated, " +
+          "{unchanged} unchanged, {skipped} skipped"), {
+          total: uids.length,
+          changed: data.changed || 0,
+          unchanged: data.unchanged || 0,
+          skipped: data.skipped || 0
+        }));
+        button.disabled = false;
+      })
+      .catch(function (error) {
+        setStatus(fillTemplate(message("failed", "Recalculate failed: {error}"),
+          { error: error.message }), true);
+        button.disabled = false;
+      });
   }
 
   /* --------------------------------------------------------------------- *
@@ -961,6 +1037,17 @@
       });
     });
   }
+
+  root.addEventListener("click", function (event) {
+    var button = event.target.closest
+      ? event.target.closest(".as-recalculate-button")
+      : null;
+    if (!button) {
+      return;
+    }
+    event.preventDefault();
+    recalculate(button);
+  });
 
   // event.submitter is not available in every supported browser, so remember
   // which button was pressed. Without it a deferred submit would lose the
