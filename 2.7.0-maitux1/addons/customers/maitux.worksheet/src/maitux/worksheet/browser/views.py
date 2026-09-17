@@ -2,16 +2,22 @@
 
 import ast
 import collections
+import copy
 import json
 
 from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
 from bika.lims import api
 from bika.lims import senaiteMessageFactory as _
 from bika.lims.api.analysis import is_out_of_range
+from senaite.app.listing.decorators import inject_runtime
+from senaite.app.listing.decorators import returns_safe_json
+from senaite.app.listing.decorators import set_application_json_header
 from senaite.core.browser.worksheets.worksheet.analyses_listing import (
     AnalysesView as WorksheetAnalysesView,
 )
 from senaite.core.i18n import translate
+from senaite.core.interfaces import IDataManager
+from zope.component import queryAdapter
 
 # Sentinel: tells "decoded to None" apart from "could not be decoded".
 _UNPARSEABLE = object()
@@ -705,6 +711,9 @@ class GroupedRenderingMixin(object):
           - title (str)
           - sort_key (int)
           - sample_count (int): distinct samples, for the group header
+          - analysis_uids (list): UID of every analysis in the group, in
+            folderitems() order; posted as one batch by the recalculate button
+          - has_recalculable (bool): whether the recalculate button is rendered
           - interim_columns (list): visible interim column definitions
           - samples (list): one entry per ANALYSIS, in the order
             folderitems() returned them (creation order, so a retracted
@@ -791,6 +800,18 @@ class GroupedRenderingMixin(object):
             for s in samples_raw:
                 all_items.extend(s["items"])
             grp["interim_columns"] = self._build_interim_columns(all_items)
+
+            # What the AS-level recalculate button needs.  `analysis_uids`
+            # holds *every* analysis of the panel, including the ones the
+            # endpoint will refuse: the summary line has to be able to say
+            # "1 skipped", and it can only do that if the server was given
+            # that one to refuse.  Whether the button is rendered at all is a
+            # separate question, and the answer is "only if there is at least
+            # one analysis it could actually do something to".
+            grp["analysis_uids"] = [i.get("uid") for i in all_items
+                                    if i.get("uid")]
+            grp["has_recalculable"] = any(
+                self._can_recalculate_item(i) for i in all_items)
 
             # Expand each sample
             for s in samples_raw:
@@ -1031,6 +1052,248 @@ class GroupedRenderingMixin(object):
         choices = row.get("_choices", {})
         raw = choices.get("Instrument")
         return self._choices_to_list(raw)
+
+    # -- AS-level "recalculate" ------------------------------------------
+    #
+    # The native listing has a per-row "recalculate" link that AS-Grouped
+    # deliberately did not carry over (it hangs off a ReactJS click handler;
+    # see _expand_sample_rows()).  What follows is the equivalent ability at
+    # AS-panel granularity, on our own endpoint.
+    #
+    # Why it exists: a calculation that reads a value from *elsewhere* -- a
+    # LOOKUP whose source analysis moved afterwards, and in particular the
+    # planned cross-sample XLOOKUP, whose design explicitly does not wire a
+    # propagation link -- only catches up "the next time the referring
+    # analysis is saved".  This turns that "next save" into an explicit
+    # action the analyst can take.
+    #
+    # Nothing here imports maitux.calcenhance.  setInterimFields() is the
+    # public seam: with calcenhance installed the extended evaluator runs on
+    # that write, without it the call degrades to the native behaviour.
+
+    def get_recalculate_url(self):
+        """Return the URL of our AS-level recalculate endpoint.
+
+        Built by hand for the same reason as get_save_url(): the result must
+        not depend on self.__name__, since the URL is traversed afresh.
+
+        The path segment is `recalculate`, NOT `ajax_recalculate` --
+        handle_subpath() prefixes the first subpath element with "ajax_"
+        itself, so the latter would resolve to `ajax_ajax_recalculate` and
+        raise NameError.  Same trap as get_transitions_url().
+        """
+        return "{}/{}/recalculate".format(
+            self.context.absolute_url(), self.view_name)
+
+    @classmethod
+    def _normalize_snapshot_value(cls, value):
+        """Make one stored value comparable regardless of its encoding.
+
+        Interim values reach us both as utf8 bytes and as unicode depending
+        on who wrote them last; comparing the two forms directly reports a
+        change where there is none -- and for non-ascii it does so silently,
+        after a UnicodeWarning that nobody reads (CLAUDE.md 5).
+        """
+        if isinstance(value, bytes):
+            return api.safe_unicode(value)
+        if isinstance(value, (list, tuple)):
+            return [cls._normalize_snapshot_value(v) for v in value]
+        return value
+
+    @classmethod
+    def _recalc_snapshot(cls, obj):
+        """Result plus every interim value of one analysis.
+
+        This is what decides whether a recalculation actually changed
+        anything.  It has to be a value comparison: calculateResult() returns
+        True whenever it managed to evaluate the formula, not when the
+        outcome differs.
+        """
+        values = {}
+        try:
+            interims = obj.getInterimFields() or []
+        except AttributeError:
+            interims = []
+        for interim in interims:
+            values[interim.get("keyword")] = cls._normalize_snapshot_value(
+                interim.get("value"))
+        try:
+            result = obj.getResult()
+        except AttributeError:
+            result = None
+        return cls._normalize_snapshot_value(result), values
+
+    @classmethod
+    def _recalc_candidates(cls, obj, found=None):
+        """`obj` plus every analysis that recalculating it can touch.
+
+        Mirrors the walk in RoutineAnalysisDataManager.recalculate_results()
+        (senaite/core/datamanagers/content/analysis.py), so a dependent whose
+        result moves as a side effect is snapshotted too -- and therefore
+        gets reindexed and notified like the native save path does.  `found`
+        doubles as the cycle guard.
+
+        Not covered on purpose: siblings that calcenhance's LOOKUP
+        propagation reaches on its own.  Those are outside getDependents(),
+        exactly as they are on the native save path; the same limitation, not
+        a new one.
+        """
+        if found is None:
+            found = collections.OrderedDict()
+        uid = api.get_uid(obj)
+        if uid in found:
+            return found
+        found[uid] = obj
+        try:
+            dependents = obj.getDependents()
+        except AttributeError:
+            dependents = []
+        for dep in dependents:
+            cls._recalc_candidates(dep, found)
+        return found
+
+    def _can_recalculate(self, obj):
+        """Guard for one analysis: this user may edit it AND it has a formula.
+
+        The native endpoint behind the per-row link is
+        permission="zope2.View" and looks at no workflow state at all -- the
+        button is merely hidden in the UI.  We must not copy that: a UID
+        posted by hand has to be refused here, on the server.
+
+        is_analysis_edition_allowed() is the same check the listing uses to
+        decide whether a result cell is writable, so a submitted analysis
+        (which has lost FieldEditAnalysisResult) is refused by construction.
+        """
+        try:
+            if not self.is_analysis_edition_allowed(obj):
+                return False
+            return bool(self.get_calculation(obj))
+        except Exception:
+            return False
+
+    def _can_recalculate_item(self, item):
+        """The _can_recalculate() guard, asked from a folderitem dict.
+
+        Used at render time to decide whether an AS panel gets a button at
+        all.  Deliberately not `row["result_editable"]`, which the rest of
+        this template uses: that one means "editable AND has no formula",
+        the exact complement of what is wanted here.
+        """
+        brain = item.get("obj")
+        if brain is None:
+            return False
+        if not self._has_calculation(item):
+            return False
+        try:
+            return bool(self.is_analysis_edition_allowed(brain))
+        except Exception:
+            return False
+
+    @set_application_json_header
+    @returns_safe_json
+    @inject_runtime
+    def ajax_recalculate(self):
+        """Recalculate the analyses whose UIDs are posted.
+
+        Payload: ``{"uids": [...]}``.  Response::
+
+            {"folderitems": [...], "uids": [...], "count": N,
+             "changed": N, "unchanged": N, "skipped": N}
+
+        The three counts are over the *posted* UIDs, so their sum is always
+        the number of UIDs received -- that is what the panel reports back to
+        the analyst.  `folderitems` may carry extra rows on top of those, for
+        dependents that moved as a side effect.
+
+        Each analysis is replayed through setInterimFields(), which is what
+        makes the calculation engine read its sources again, and then through
+        the native data manager for its own result and the downstream
+        cascade.  Deliberately serial: interim fields feed each other, so
+        evaluating two analyses at once would reorder the writes.
+        """
+        payload = self.get_json()
+        uids = payload.get("uids")
+        if not isinstance(uids, (list, tuple)):
+            return self.json_message(
+                "Payload needs to provide the key uids", status=400)
+
+        # Resolve every UID first.  `decisions` keeps one entry per *posted*
+        # UID, in order, so the counts add up even if the same UID arrives
+        # twice; `targets` de-duplicates for the work itself.
+        decisions = []
+        targets = collections.OrderedDict()
+        for uid in uids:
+            obj = self.get_object(uid)
+            if obj is None or not self._can_recalculate(obj):
+                decisions.append(None)
+                continue
+            resolved = api.get_uid(obj)
+            decisions.append(resolved)
+            targets[resolved] = obj
+
+        # Snapshot before touching anything: analysis #2 may be a dependent
+        # of #1, and a snapshot taken inside the loop would compare against a
+        # value the loop itself had already moved.
+        candidates = collections.OrderedDict()
+        for obj in targets.values():
+            self._recalc_candidates(obj, candidates)
+        before = {}
+        for uid in candidates:
+            before[uid] = self._recalc_snapshot(candidates[uid])
+
+        for obj in targets.values():
+            datamanager = queryAdapter(obj, interface=IDataManager)
+            if datamanager is None:
+                continue
+            interims = obj.getInterimFields() or []
+            if interims:
+                # deepcopy is not optional: getInterimFields() hands back the
+                # stored records themselves, and the evaluator compares what
+                # comes in against what is stored to decide what changed --
+                # the same objects on both sides make that comparison blind.
+                # senaite.core deepcopies for the same reason in
+                # setInterimValue() (abstractanalysis.py).
+                obj.setInterimFields(copy.deepcopy(interims))
+            # own result + dependents; the same call a normal save runs
+            datamanager.recalculate_results(obj)
+
+        # Only now decide what actually moved.  Reindexing and notifying are
+        # limited to those: an ObjectEditedEvent on an unchanged analysis
+        # would put a meaningless "edit" entry in the audit log every time
+        # somebody presses the button.
+        changed_uids = []
+        for uid in candidates:
+            obj = candidates[uid]
+            if self._recalc_snapshot(obj) == before[uid]:
+                continue
+            changed_uids.append(uid)
+            obj.reindexObject()
+            self.notify_edited(obj)
+
+        changed_set = set(changed_uids)
+        changed = len([uid for uid in decisions if uid in changed_set])
+        skipped = len([uid for uid in decisions if uid is None])
+        unchanged = len(decisions) - changed - skipped
+
+        # Refresh every analysis we worked on, plus any dependent that moved.
+        affected_uids = list(targets.keys())
+        for uid in changed_uids:
+            if uid not in targets:
+                affected_uids.append(uid)
+
+        folderitems = []
+        if affected_uids:
+            self.contentFilter["UID"] = affected_uids
+            folderitems = self.get_folderitems()
+
+        return {
+            "count": len(folderitems),
+            "uids": affected_uids,
+            "folderitems": folderitems,
+            "changed": changed,
+            "unchanged": unchanged,
+            "skipped": skipped,
+        }
 
 
 class AnalysesGroupedView(GroupedRenderingMixin, WorksheetAnalysesView):
