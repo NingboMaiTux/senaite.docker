@@ -1,9 +1,10 @@
 /* maitux.dualreport - PDF + Word output for the senaite.impress publish view
  *
- * This file is inlined into the senaite.impress publish/printview pages via
- * the resource type "senaite.impress.js" (see publish.pt -> custom JS).
+ * This file is served as a "++plone++maitux.dualreport" static resource and
+ * pulled into the publish/printview pages by a viewlet in the
+ * "senaite.impress.publishcustomhead" slot (see browser/head.py).
  *
- * It does three things without touching the compiled impress bundle:
+ * It does four things without touching the compiled impress bundle:
  *
  *  1. injects a "格式" (format) dropdown into the publish toolbar
  *     (PDF = 默认, Word)
@@ -13,6 +14,11 @@
  *  3. makes the native "Download PDF" action download a Word file when the
  *     dropdown is set to Word (the PDF-download POST would otherwise fetch a
  *     PDF blob first)
+ *  4. keeps Word restricted to the CoA template: the Word option is disabled
+ *     (and forced back to PDF) for every template whose name does not contain
+ *     "coareport" (WORD_MARKER below). The server enforces the same rule, so
+ *     a stale/hand crafted payload cannot produce a Word file for another
+ *     template.
  *
  * All code is ES5 (the bundle target) and runs only when window.impress is
  * present (i.e. on publish pages).
@@ -24,11 +30,53 @@
     var FORMAT_PDF = "pdf";
     var FORMAT_WORD = "word";
 
+    /* Word output is only supported for the CoA template, mirroring
+     * maitux.dualreport.config.WORD_TEMPLATE_MARKER on the server side. */
+    var WORD_MARKER = "coareport";
+    var WORD_HINT = "Word 仅支持 CoaReport.pt 模板 / " +
+        "Word is only available for the CoaReport.pt template";
+
     var lastFormat = FORMAT_PDF;
+
+    /* keep the pristine implementation around: getRequestOptions() is patched
+     * below, and the template lookup must not run through the patch. */
+    var originalGetRequestOptions = null;
+
+    function isCoaTemplate(name) {
+        return String(name || "").toLowerCase().replace(/\s+/g, "")
+            .indexOf(WORD_MARKER) !== -1;
+    }
+
+    /* Current impress template, e.g. "CoaReport.pt" (empty when unknown). */
+    function currentTemplate() {
+        var impress = window.impress;
+        try {
+            var getter = originalGetRequestOptions ||
+                (impress && impress.getRequestOptions);
+            if (getter) {
+                var options = getter.call(impress);
+                if (options && options.template) {
+                    return String(options.template);
+                }
+            }
+        } catch (err) { /* ignore */ }
+        var sel = document.querySelector(
+            'form[name="publishform"] select[name="template"]');
+        return sel ? String(sel.value) : "";
+    }
+
+    function wordAllowed() {
+        return isCoaTemplate(currentTemplate());
+    }
 
     function getFormat() {
         var sel = findSelect();
-        return sel ? sel.value : lastFormat;
+        var fmt = sel ? sel.value : lastFormat;
+        if (fmt === FORMAT_WORD && !wordAllowed()) {
+            /* never send "word" to the server for a non CoA template */
+            return FORMAT_PDF;
+        }
+        return fmt;
     }
 
     function findSelect() {
@@ -53,12 +101,30 @@
         var optWord = document.createElement("option");
         optWord.value = FORMAT_WORD;
         optWord.textContent = "Word";
+        optWord.title = WORD_HINT;
         sel.appendChild(optWord);
 
         sel.addEventListener("change", function () {
             lastFormat = sel.value;
+            syncWordOption(sel);
         });
         return sel;
+    }
+
+    /* Enable the Word entry only for the CoA template; otherwise force the
+     * dropdown back to PDF so the toolbar never looks like Word is usable. */
+    function syncWordOption(sel) {
+        var allowed = wordAllowed();
+        var optWord = sel.querySelector('option[value="' + FORMAT_WORD + '"]');
+        if (optWord) {
+            optWord.disabled = !allowed;
+            optWord.title = allowed ? "" : WORD_HINT;
+        }
+        if (!allowed && sel.value === FORMAT_WORD) {
+            sel.value = FORMAT_PDF;
+            lastFormat = FORMAT_PDF;
+        }
+        return allowed;
     }
 
     /* Insert the format select into the toolbar (template/format/orientation
@@ -68,10 +134,23 @@
         if (!form) {
             return false;
         }
+        /* re-evaluate the Word availability whenever the template changes
+         * (capture phase: React handlers may stop propagation) */
+        if (!form.__maitux_word_sync) {
+            form.__maitux_word_sync = true;
+            form.addEventListener("change", function () {
+                var current = findSelect();
+                if (current) {
+                    syncWordOption(current);
+                }
+            }, true);
+        }
         if (findSelect()) {
             var existing = findSelect();
+            syncWordOption(existing);
             if (existing.value !== lastFormat) {
                 existing.value = lastFormat;
+                syncWordOption(existing);
             }
             return true;
         }
@@ -82,6 +161,7 @@
         var append = group.querySelector(".input-group-append");
         var sel = makeSelect();
         sel.value = lastFormat;
+        syncWordOption(sel);
         if (append) {
             group.insertBefore(sel, append);
         } else {
@@ -148,6 +228,7 @@
         }
 
         var origGetRequestOptions = impress.getRequestOptions.bind(impress);
+        originalGetRequestOptions = origGetRequestOptions;
         impress.getRequestOptions = function () {
             var options = origGetRequestOptions();
             options.report_format = getFormat();
@@ -220,6 +301,17 @@
             observer.observe(document.body, { childList: true, subtree: true });
         }
     }
+
+    /* Small public surface: lets the restriction be checked from the browser
+     * console (e.g. window.maitux_dualreport.wordAllowed()) and unit tested
+     * without a full browser. */
+    window.maitux_dualreport = {
+        isCoaTemplate: isCoaTemplate,
+        currentTemplate: currentTemplate,
+        wordAllowed: wordAllowed,
+        getFormat: getFormat,
+        syncWordOption: syncWordOption
+    };
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", boot);

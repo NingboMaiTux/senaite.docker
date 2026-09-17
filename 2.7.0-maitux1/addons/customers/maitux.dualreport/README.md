@@ -157,3 +157,79 @@ profile 目录真实存在（R4）；有 uninstall profile（非合规类，R4b 
   如需可另开需求）。
 - 兼容性：只针对本镜像固定的 senaite.impress（buildout 里 rev=889778c…）
   的发布 UI 行为做适配；升级 senaite.impress 后应先跑一遍“验收判据”表。
+
+---
+
+## 8. CoA 报告（CoaReport 模板）的 Word 输出
+
+对 **CoaReport** 模板本包走一条**独立通道**：不再把报告 HTML 转成新文档，
+而是把客户提供的 Word 模板
+
+```
+src/maitux/dualreport/templates/CoaReportTemplate.docx
+```
+
+填上报告数据后输出（保留客户的公司版式 / 页眉页脚 / 图片 / customXml）。
+
+- **触发条件**：所选报告模板名包含 `CoaReport`（大小写不敏感），例如
+  `INNOCARE.reportdesign:CoaReport.pt`；其它模板仍走通用 HTML→docx 转换器。
+- **数据来源**：与 PDF 同一份渲染后的报告 HTML（`#coa-wrapper`），按
+  `CoaReport.pt` 的类名抓取值：
+  - `.rid-value` → 报告编号（追加到模板 “Report ID” 标签后）；
+  - `table.meta-table` 的 `.m-label`（中文标签）+ `.m-value` → 项目号 /
+    CoA版本号 / 化合物编号 / 批数量 / 物料名称 / 生产日期 / 批号 / 检测日期 /
+    规格 / 复检日期 / 生产企业 / 储存条件 / 备注；
+  - `table.analyses-table` 的 `.a-item/.a-method/.a-spec/.a-result` →
+    检测项目表格（按分析条数复制行，模板里的示例空行会被替换）；
+  - `.sig-block .sig-row` → 起草人 / 审核人 / 批准人 + 日期列；
+  - 版本历史表、对照品赋值表按模板保持空白（与 PDF 行为一致）。
+- **实现**：`docx/coa.py`（`build_coa_docx`），用 lxml 只改写
+  `word/document.xml`，模板其余部件原样复制；生成失败会自动回退通用转换器
+  并记日志。
+- **验证**（服务器 zopepy，合成 CoA HTML）：字段全部填充、分析行数=分析条数、
+  签名姓名/日期正确、模板 29 个部件零丢失。
+  如需整链验证：发布页选择 CoaReport 模板 → Word 保存/下载，检查 `.docx`
+  中的项目号/分析表格/签名日期与 PDF 一致。
+
+---
+
+## 9. 下载入口与格式一致性（已修 bug）
+
+历史上报告视图/列表里有几处**硬编码 PDF** 的下载入口，会让 Word 报告下载成
+`.pdf`（甚至把存储 blob 的文件名改坏）：
+
+| 入口 | 上游问题 | 本包处理 |
+|---|---|---|
+| 报告列表工具栏 “Download”（`workflow_action?action=download_reports`） | `WorkflowActionDownloadReportsAdapter` 硬编码 `{sample}.pdf` + `application/pdf`，并执行 `pdf.filename = "…pdf"`（Zope 每请求提交 → **改名被持久化**，之后文件链接也变 `.pdf`） | 改为按 blob 真实 `contentType` 取文件名/类型；**不再改写 blob**；多份报告打包 ZIP 时用真实文件名 |
+| 报告行 “文件”链接（`{report}/download_pdf`） | 同名/类型写死 | 使用统一辅助函数 `_report_file_info()`，并**自愈**已被改名为 `.pdf` 的 Word blob |
+| 邮件附件名（`EmailView.get_report_filename`） | 固定 `{sample}.pdf` | 按 blob 真实文件名（`.docx` / `.pdf`） |
+
+统一逻辑：`_report_file_info(blob, fallback_name)` 依据 `blob.contentType`
+判定 Word(`wordprocessingml`) / PDF，文件名补正确后缀；未知类型保留原名。
+
+**回归**（服务器 zopepy）：Word blob（含被改名成 `.pdf` 的）
+→ `Content-Type: …wordprocessingml.document`、`filename=AP-0001.docx`、
+`blob.filename` 保持不变；两份 Word 报告下载得到 ZIP 内
+`AP-0001.docx`/`AP-0002.docx`。**已受影响的历史报告无需修数据**，下载时会自动纠正名字。
+
+## 10. Word 输出限模板（只允许 CoaReport.pt）
+
+Word 只对 **CoA 模板**开放（模板名含 `coareport`，大小写/空格不敏感；规则集中在
+`config.WORD_TEMPLATE_MARKER`，判定函数 `docx/coa.py::is_coa_template`）。其他模板
+（`DataReport.pt`、`senaite.impress:Default.pt`、`MultiDefault*.pt` 等）即使带
+`report_format=word` 请求，也只会得到 **PDF**。
+
+| 层 | 位置 | 行为 |
+|---|---|---|
+| 前端 | `resources/js/impress_dualformat.js` | 模板不是 CoA 时**禁用**格式下拉的 Word 选项（悬停提示「Word 仅支持 CoaReport.pt 模板」），并把当前选择强制回 PDF；模板切到 CoA 时自动恢复可用。判据取自 `window.impress.getRequestOptions().template` |
+| 服务端 | `patches.py::_effective_format()` | `PublishView.download` / `AjaxPublishView.ajax_save_reports` 生成前统一调用；请求 Word 但模板不是 CoA → 记 warning 并**按 PDF 处理**（手工构造请求也无法绕过） |
+
+**验收信号**
+
+- `DataReport.pt` + `report_format=word` 走下载 → `Content-Type: application/pdf`、`filename=AP-0001.pdf`
+- `CoaReport.pt` + `report_format=word` → `Content-Type: …wordprocessingml.document`、`filename=AP-0001.docx`
+- 发生降级时实例日志出现：`maitux.dualreport: Word output is limited to the CoA template (requested template='…'), falling back to PDF`
+- 前端单测：`node tests/test_word_restriction.js src/maitux/dualreport/resources/js/impress_dualformat.js` → `RESULT: PASS`
+- 浏览器控制台自查：`window.maitux_dualreport.wordAllowed()` / `.currentTemplate()`
+
+> JS 是 `++plone++` 静态资源，浏览器会缓存旧版本：更新后需**硬刷新**（Ctrl+F5）才生效。
