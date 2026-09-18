@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<!--
+  本包浏览器层的站点级注册。
+
+  它在两处承重：
+    · browser/configure.zcml 的设置表单适配器靠它门控（R14）：
+      只有装了本 profile 的站点，请求上才带 IGlobalAuditLogLayer。
+    · 没装本包的站点因此完全不受影响（core 那条适配器照旧命中）。
+-->
+<layers>
+  <layer name="maitux.globalauditlog"
+         interface="maitux.globalauditlog.interfaces.IGlobalAuditLogLayer" />
+</layers>
