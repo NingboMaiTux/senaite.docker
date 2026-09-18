@@ -18,6 +18,7 @@ from AccessControl import getSecurityManager
 from Products.CMFCore.utils import getToolByName
 from Products.Five.browser import BrowserView
 from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
+from Products.statusmessages.interfaces import IStatusMessage
 from plone import api
 from six.moves.urllib.parse import urlencode
 from zope.interface import alsoProvides
@@ -43,6 +44,21 @@ def disable_csrf(request):
     """The SSO callback legitimately writes to the ZODB on a GET request."""
     if IDisableCSRFProtection is not None:
         alsoProvides(request, IDisableCSRFProtection)
+
+
+def drop_pending_messages(request):
+    u"""把 statusmessages cookie 里排队的提示读掉（``show()`` 是取出并清空）。
+
+    之所以要主动清：退出时 Plone 的 logged-out 视图会把「您现在已登出」塞进
+    这个 cookie，而 statusmessages 要等到下一次**真正渲染页面**才被消费掉 ——
+    自动跳转的 SSO 站点上，匿名阶段全是 302（站点根 → require_login → 竹云），
+    一个页面都不渲染，于是那条消息一路活到登录成功之后，贴在刚进来的仪表盘上。
+    """
+    try:
+        IStatusMessage(request).show()
+    except Exception as exc:  # pragma: no cover - 绝不能因为这个把登录搞挂
+        logger.warning("Could not clear pending status messages: %s",
+                       safe_text(exc))
 
 
 def now_string():
@@ -272,6 +288,8 @@ class CallbackView(BaseView):
 
         users.set_member_properties(
             portal, userid, {users.PROP_LAST_LOGIN: now_string()})
+        # 人已经登进来了，匿名阶段排队的提示一条都不该再露脸。
+        drop_pending_messages(request)
         logger.info(u"SSO login succeeded for %s (subject=%s)", userid, subject)
 
         return self.goto(self.safe_came_from(came_from) or self.portal_url)
@@ -367,13 +385,18 @@ class LogoutView(BaseView):
         state_util.clear_cookie(response, state_util.STATE_COOKIE)
         state_util.clear_cookie(response, state_util.BYPASS_COOKIE)
 
-        # Same two steps as CMFPlone's own LogoutView: honour ``next`` when it
-        # stays inside the portal, otherwise fall back to the stock landing
-        # page -- which is spelled ``logged-out``, with a hyphen; ``logged_out``
-        # is a 404.  The idle session timeout passes the login form as
-        # ``next``, so an expiry lands where it did before SSO was in play.
-        target = self.safe_came_from(self.request.form.get("next")) \
-            or u"%s/logged-out" % self.portal_url
+        # Same first step as CMFPlone's own LogoutView: honour ``next`` when it
+        # stays inside the portal -- the idle session timeout passes the login
+        # form that way, so an expiry lands where it did before SSO was in play.
+        #
+        # The landing page is ours rather than the stock ``logged-out`` (hyphen;
+        # the underscore spelling is a 404) -- see LoggedOutView for why.  With
+        # the master switch off this is plain Plone again, so the stock page is
+        # the right one.
+        landing = u"%s/@@oauth2-logged-out" % self.portal_url
+        if not config.is_enabled():
+            landing = u"%s/logged-out" % self.portal_url
+        target = self.safe_came_from(self.request.form.get("next")) or landing
         if config.is_enabled() and config.get("sso_logout"):
             # Go via the IdP, and have it send the browser on to ``target``.
             idp_url = BCastleClient().logout_url(target)
@@ -433,6 +456,25 @@ class PendingView(MessageView):
             [u"您的账号已通过竹云统一登录成功创建，但尚未获得 LIMS 的使用权限。",
              u"请联系 LIMS 管理员为您分配角色；分配完成后重新登录即可进入系统。"],
             level="warning", show_retry=True)
+        return self.template()
+
+
+class LoggedOutView(MessageView):
+    u"""``@@oauth2-logged-out`` -- 退出后的落地页.
+
+    刻意不落在 Plone 自己的 ``logged-out`` 上。那个视图发现来访者是匿名，就把
+    「您现在已登出」塞进 statusmessages cookie，再 302 到站点根；而在自动跳转
+    的 SSO 站点上，匿名状态下根本没有页面会被渲染（站点根 → require_login →
+    竹云 → 回调），这条消息只能一路活到登录成功之后，贴在刚进来的仪表盘上。
+
+    这一页是真的会渲染出来的，消息也就不用排队了。
+    """
+
+    def __call__(self):
+        self.update(
+            u"您已退出登录",
+            [u"如需继续使用，请点下方“重新登录”。"],
+            level="info", show_retry=True)
         return self.template()
 
 

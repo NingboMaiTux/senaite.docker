@@ -14,7 +14,7 @@ from six.moves.urllib.parse import urlencode
 from maitux.oauth2 import config
 from maitux.oauth2.state import BYPASS_COOKIE
 
-LOGIN_VIEW_NAMES = ("login", "login_form", "require_login", "logged_out",
+LOGIN_VIEW_NAMES = ("login", "login_form", "require_login", "logged-out",
                     "failsafe_login_form")
 
 

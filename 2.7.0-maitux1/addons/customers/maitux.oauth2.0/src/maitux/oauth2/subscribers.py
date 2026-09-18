@@ -31,7 +31,7 @@ GUARD_KEY = "_maitux_oauth2_checked"
 SAFE_PATH_MARKERS = (
     "/@@oauth2-",
     "/logout",
-    "/logged_out",
+    "/logged-out",
     "/acl_users",
     "/manage",
     "/++resource++",
