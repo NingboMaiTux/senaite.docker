@@ -266,31 +266,6 @@ def _patch_interimfields_result_types():
 # DEXTERITY SCHEMA PATCH — Add "formula" and "cross_referenceable" to IInterimField
 # ==============================================================================
 
-def _patch_datagrid_crossref_header():
-    """Patch DataGridWidget.update() to set the boolean column headers.
-
-    Bool subfields carry title="" to suppress the per-cell labels rendered by
-    CheckBoxWidget; this patch restores the column header labels.
-    """
-    from senaite.core.z3cform.widgets.datagrid.datagrid import DataGridWidget
-
-    _original_update = DataGridWidget.update
-
-    _HEADERS = {
-        "cross_referenceable": u"Cross-ref",
-        "locked": u"Locked",
-    }
-
-    def _patched_update(self):
-        _original_update(self)
-        for col in self.columns:
-            label = _HEADERS.get(col.get("name"))
-            if label:
-                col["label"] = label
-
-    DataGridWidget.update = _patched_update
-
-
 def _patch_dexterity_interimfields_schema():
     """Add 'formula' field to the Dexterity IInterimField schema.
 
@@ -311,6 +286,7 @@ def _patch_dexterity_interimfields_schema():
     from senaite.core.schema.interimfields import InterimFields
     from senaite.core.schema.fields import DataGridRow
     from zope import schema as _schema
+    from plone.autoform import directives
     from bika.lims import senaiteMessageFactory as _dx
 
     # Create a patched interface that extends IInterimField with formula and cross_referenceable
@@ -327,6 +303,19 @@ def _patch_dexterity_interimfields_schema():
             required=False,
             default=u""
         )
+        # ★ Every Bool column MUST carry klass="hide-title", the way core does
+        # it for report / hidden / apply_wide (senaite.core interimfields.py).
+        # The checkbox template (plone.app.z3cform singlecheckboxbool_input.pt)
+        # renders <label> with the title AND the description inside EVERY row;
+        # nothing suppresses it but the CSS rule "input.hide-title + label
+        # {display:none}" that this klass turns on.  Forget it and the column
+        # reads its own title back at you once per row -- no error, just an
+        # unusable grid.  Text/Int columns are unaffected: only the checkbox
+        # template puts a label inside the cell.
+        # The column HEADER comes from field.title/description via
+        # DataGridField.columns, a separate path, so hiding the in-cell label
+        # costs nothing there.
+        directives.widget("cross_referenceable", klass="hide-title")
         cross_referenceable = _schema.Bool(
             title=_dx(
                 u"label_interim_crossref",
@@ -335,6 +324,7 @@ def _patch_dexterity_interimfields_schema():
             required=False,
             default=False
         )
+        directives.widget("locked", klass="hide-title")
         locked = _schema.Bool(
             title=_dx(
                 u"label_interim_locked",
@@ -388,9 +378,6 @@ def _patch_dexterity_interimfields_schema():
                       % str(list(IInterimFieldPatched.names())))
     _sys.stderr.write("maitux: InterimFields.value_type updated\n")
     _sys.stderr.flush()
-
-    # Patch DataGrid column header for cross_referenceable (Bool title="" → no per-cell label)
-    _patch_datagrid_crossref_header()
 
 
 # ==============================================================================
