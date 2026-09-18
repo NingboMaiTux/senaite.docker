@@ -40,9 +40,31 @@
   font-size: 11px;
 }
 
+/* The panel scrolls inside itself once it has more rows than fit: a list
+   interim with 40+ elements otherwise makes a single AS panel taller than
+   the viewport, and the header has scrolled away by the time you are
+   filling row 30.  max-height rather than height, so a short panel grows
+   no scrollbar at all.
+
+   --as-head-h is the thead row height.  The sticky header (top: 0) and the
+   sticky merged-cell contents (top: --as-head-h) share this one number:
+   two magic numbers would drift apart, and the symptom -- merged content
+   half-hidden behind the header -- is silent.  A constant, not a JS
+   measurement: the header row is GIVEN this height (`thead th` gets
+   `height: var(--as-head-h)`), so the two agree by construction instead of
+   by a lucky guess -- the natural height is ~32.4px on the real page and
+   was 34px in the static spike, which is exactly the kind of drift that
+   would otherwise hide merged content behind the header.  `height` on a
+   table cell is a minimum, so a future font big enough to outgrow 34px
+   would still push it out: S1 criterion (5) measures th height against
+   this variable for that reason. */
 .as-group-body {
+  --as-head-h: 34px;
+  --as-panel-h: 70vh;
   padding: 0;
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: var(--as-panel-h);
 }
 
 .as-group-empty {
@@ -58,9 +80,20 @@
   margin-bottom: 0;
 }
 
+/* box-shadow, not border-bottom: under `border-collapse: collapse` the
+   cell borders are painted by the table, not by the sticky th, so the
+   2px rule stays behind at the top of the table while the header rides
+   down -- header and data visually merge.  Nothing errors; it just looks
+   wrong.  An inset shadow is painted by the th itself and travels with
+   it.  z-index 3 keeps the header above the sticky merged-cell contents
+   (z-index 1) that slide under it. */
 .as-group-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: var(--as-head-h);
   background: #f5f6f8;
-  border-bottom: 2px solid #c0c6ce;
+  box-shadow: inset 0 -2px 0 #c0c6ce;
   padding: 7px 10px;
   font-weight: 600;
   font-size: 11px;
@@ -73,6 +106,29 @@
   border-bottom: 1px solid #e8eaed;
   white-space: nowrap;
   vertical-align: middle;
+}
+
+/* The rule above (0,1,2) outranks `.sample-cell { vertical-align: top }`
+   (0,1,0), so the rowspan'd cells park their content in the middle of a
+   41-row-tall box -- which is why the sample id showed up next to row 16.
+   Getting it back to the top is what gives the sticky rule below a
+   correct starting point, so the two belong together. */
+.as-group-table tbody td.as-span-cell {
+  vertical-align: top;
+}
+
+/* Merged-column contents follow the scroll and stop just under the header.
+   The td itself cannot be sticky (it is the containing block that keeps
+   the content from escaping its own cell), so its children are.
+
+   `> *` matches ELEMENTS only: a bare text node in one of these cells
+   would simply stop following, with no error anywhere.  Every as-span-cell
+   in as_grouped_table.pt wraps its content in an element today -- that is
+   invariant I2 of this change, not an accident. */
+.as-span-cell > * {
+  position: sticky;
+  top: var(--as-head-h);
+  z-index: 1;
 }
 
 .as-group-table tbody tr.as-row-first td {
@@ -242,4 +298,19 @@
 .as-grouped-filters .nav-link.active {
   font-weight: 600;
   color: #095c7d;
+}
+
+/* ------------------------------- Print -------------------------------- */
+/* Paper has no scroll container: without this the panel prints clipped to
+   max-height and everything past it is simply gone. */
+@media print {
+  .as-group-body {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .as-group-table thead th,
+  .as-span-cell > * {
+    position: static;
+  }
 }
