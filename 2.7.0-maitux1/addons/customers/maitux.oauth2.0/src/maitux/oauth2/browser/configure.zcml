@@ -40,6 +40,14 @@
       />
 
   <browser:page
+      name="oauth2-logged-out"
+      for="Products.CMFPlone.interfaces.IPloneSiteRoot"
+      class=".views.LoggedOutView"
+      permission="zope2.Public"
+      layer="maitux.oauth2.interfaces.IMaituxOAuth2Layer"
+      />
+
+  <browser:page
       name="oauth2-pending"
       for="Products.CMFPlone.interfaces.IPloneSiteRoot"
       class=".views.PendingView"
