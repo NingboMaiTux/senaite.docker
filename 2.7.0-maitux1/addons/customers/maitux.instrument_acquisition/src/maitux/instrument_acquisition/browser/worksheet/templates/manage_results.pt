@@ -146,13 +146,14 @@
                       仪器采集
                     </span>
                   </div>
-                  <span tal:condition="view/show_acquisition_entry">
+                  <div class="input-group input-group-append"
+                       tal:condition="view/show_acquisition_entry">
                     <a tal:attributes="href view/get_acquisition_url"
-                       class="btn btn-sm btn-outline-success"
+                       class="btn btn-sm btn-outline-success text-nowrap"
                        title="进入仪器采集界面，分配并回写仪器读数">
                       进入采集
                     </a>
-                  </span>
+                  </div>
                   <span class="input-group-text"
                         tal:condition="python:not view.is_instrument_available()">
                     <small class="text-muted">未配置仪器</small>
