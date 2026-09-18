@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    i18n_domain="maitux.globalauditlog">
+
+  <!--
+    SENAITE 设置（portal.setup，DX 类型 Setup）的编辑表单适配器。
+
+    core 的同名注册在
+      senaite.core/browser/form/adapters/configure.zcml
+
+        <adapter
+            for="senaite.core.interfaces.ISetup
+                 zope.publisher.interfaces.browser.IBrowserRequest"
+            factory=".senaitesetup.EditForm"/>
+
+    ★ 唯一改动是把第二个 required 换成**本包的 layer**（R14：签名里有
+      request 的注册，用 ZCML 门控，把 IBrowserRequest 换掉即可）。
+      因此这不是「同名注册」：
+        · 走 include 不会 ConfigurationConflictError（R5 不触发，
+          也就不需要 overrides.zcml / -overrides slug，R2 不触发）；
+        · 但它必然与 core 那条**同时匹配**同一个请求，
+          Zope 挑更具体的一条 —— IGlobalAuditLogLayer 直接继承
+          IBrowserRequest，是那个请求槽接口的真子接口，
+          本包这一对因此严格更具体，一定胜出。
+          理由与反例见 interfaces.py 的类 docstring。
+
+    ★ 没装本 profile 的站点：请求上不带 IGlobalAuditLogLayer，
+      core 那条照旧命中，设置页面**行为与原生完全一致**（无泄漏）。
+  -->
+  <adapter
+      for="senaite.core.interfaces.ISetup
+           maitux.globalauditlog.interfaces.IGlobalAuditLogLayer"
+      factory=".senaitesetup.EditForm"
+      provides="senaite.core.interfaces.IAjaxEditForm"
+      />
+
+</configure>

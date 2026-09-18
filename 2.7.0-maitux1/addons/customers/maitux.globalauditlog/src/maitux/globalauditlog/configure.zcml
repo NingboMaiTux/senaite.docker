@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    i18n_domain="maitux.globalauditlog">
+
+  <!--
+    本包**没有** <include package="senaite.core.permissions" />，这是有意的：
+    R1 约束的是「ZCML 里用到 senaite.core / bika.lims 自定义权限」的注册，
+    而本包所有注册（adapter / subscriber / importStep）都不带 permission=，
+    唯一引用到 senaite.core 的地方是 for= 里的 ISetup —— 那是个普通接口，
+    ZCML 解析时按点分名 import 得到，与权限的注册顺序无关。
+    将来若在本文件里加了 permission=，必须同时补上那一行 include。
+  -->
+  <include package=".browser" />
+
+  <utility
+      factory=".setuphandlers.HiddenProfiles"
+      name="maitux.globalauditlog"
+      />
+
+  <genericsetup:registerProfile
+      name="default"
+      title="Maitux 全局审计日志强制开启"
+      directory="profiles/default"
+      description="隐藏设置页的「启用全局审计日志」并把它的值钉成开启"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <genericsetup:importStep
+      name="maitux.globalauditlog.setuphandler"
+      title="maitux.globalauditlog setup handler"
+      description="Enable the global auditlog on install"
+      handler="maitux.globalauditlog.setuphandlers.setup_handler">
+    <depends name="plone-various"/>
+  </genericsetup:importStep>
+
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="卸载 Maitux 全局审计日志强制开启"
+      directory="profiles/uninstall"
+      description="卸载 maitux.globalauditlog 包"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <genericsetup:importStep
+      name="maitux.globalauditlog.uninstallhandler"
+      title="maitux.globalauditlog uninstall handler"
+      description="Uninstall Maitux globalauditlog registrations"
+      handler="maitux.globalauditlog.setuphandlers.uninstall_handler">
+    <depends name="plone-various"/>
+  </genericsetup:importStep>
+
+  <!--
+    设置对象被改写后，把 enable_global_auditlog 钉回 True。
+
+    ★ 用 handler= 而不是 factory=：这里指向的是普通函数，不是类工厂（R15）。
+      写错的话 ZCML 加载期就抛
+      "TypeError: You must specify a provided interface when registering a
+       factory"，而 compose 里是 restart: unless-stopped —— 容器会一直重启，
+      看起来像镜像或网络问题。
+
+    ★ 这个 <subscriber> 的 for= 里**没法**放本包 layer：事件签名里没有
+      request，ZCML 无处门控（R14 第二条通道），门控只能在工厂里做 ——
+      见 maitux.globalauditlog.subscribers.on_senaite_setup_modified
+      开头的 getLastVersionForProfile 判定。
+  -->
+  <subscriber
+      for="senaite.core.interfaces.ISetup
+           zope.lifecycleevent.interfaces.IObjectModifiedEvent"
+      handler="maitux.globalauditlog.subscribers.on_senaite_setup_modified"
+      />
+
+</configure>
