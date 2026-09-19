@@ -45,6 +45,15 @@
       handler=".patches._patch_setupdata_import_deferred"
       />
 
+  <!-- The instrument results importer (senaite.core exportimport.instruments)
+  is patched for two Python 2 unicode holes; see patches._patch_instrument_import_unicode.
+  Its modules import senaite.core at module scope, so the same deferred retry
+  applies. -->
+  <subscriber
+      for="zope.processlifetime.IDatabaseOpenedWithRoot"
+      handler=".patches._patch_instrument_import_unicode_deferred"
+      />
+
   <!-- format_interim must also be rebound on senaite.impress, which binds the
   name at import time.  senaite.impress may not be importable while this
   package is loading, and a miss there is invisible: the core module would be

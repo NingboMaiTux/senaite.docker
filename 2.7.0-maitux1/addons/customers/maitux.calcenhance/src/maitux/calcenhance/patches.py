@@ -119,6 +119,14 @@ def apply_patches():
     except Exception:
         pass
 
+    # 仪器结果导入的两个 Python 2 unicode 洞（详见 _patch_instrument_import_unicode）。
+    # 同样可能在冷启动时 import 不到 senaite.core，失败由 ZCML 的
+    # IDatabaseOpenedWithRoot 订阅者重试一次。
+    try:
+        _patch_instrument_import_unicode()
+    except Exception:
+        pass
+
     # DISABLED: _patch_uidcatalog_unicode() breaks uid_catalog getObject()
     # in UTF-8-native environments (e.g. 8085 MaituxLIMS). The patch stores
     # UUID as the catalog id instead of physical path, causing
@@ -3831,6 +3839,144 @@ def _patch_setupdata_import_deferred(event=None):
     except Exception:
         _s = __import__("sys")
         _s.stderr.write("maitux: deferred setupdata import patch failed\n")
+
+
+# ==============================================================================
+# 仪器结果导入（Instrument Results Import）—— Python 2 unicode 的两个洞
+# ==============================================================================
+#
+# 路径：仪器界面上传 CSV -> generic/two_dimension.py -> AnalysisResultsImporter。
+# 两个缺陷都只在**值里有中文**时才现形，所以一直没碰到。
+#
+# ① 崩溃（senaite.core 的疏漏）
+#    importer.py 的 set_analysis_interims 把已经 .format() 好的 **bytes**
+#    直接交给 senaiteMessageFactory：zope.i18nmessageid.Message 是 unicode
+#    的子类，构造时按 ascii 隐式解码，于是任何非 ASCII 的 interim 值都让整次
+#    导入以 UnicodeDecodeError 结束 —— 而且是在前面若干条结果**已经写进数据库
+#    之后**，留下一份写了一半的样品。
+#
+#      File ".../instruments/importer.py", line 618, in set_analysis_interims
+#        value=str(value))))
+#      UnicodeDecodeError: 'ascii' codec can't decode byte 0xbe ...
+#
+#    同一模块另外三处日志（set_analysis_result / set_analysis_fields）写的都是
+#    u"..." + safe_unicode(...)，只有这一处漏了 —— 上游改了大半没改完。
+#    这里不复制那 35 行方法（复制就得跟着上游漂），只把模块里的 `_` 换成
+#    「先把 msgid 变成 unicode 再建 Message」的工厂：该模块所有 `_()` 调用点
+#    一起受益；将来上游把那一行改对了，本补丁退化成一次多余的解码调用。
+#
+# ② 乱码（编码假设与中文 Windows 不符，而且**完全静默**）
+#    Python 2 的 csv 模块只吃 bytes，所以 core 的 CSV 解析器有意不解码文件
+#    （InstrumentCSVResultsFileParser 的 _encoding 默认 None，two_dimension
+#    也没传）。中文 Windows 的 Excel「另存为 CSV」默认写 GBK，这些字节原样
+#    落进 interim；写盘时 RecordsField._decode_strings 按 utf-8 解码，得到
+#    一串 U+FFFD —— **没有任何报错**，界面上只是字变成了问号。
+#    这里在 splitline 之前把整行按 GB18030 转成 UTF-8 字节："仍然是 bytes"
+#    这一点不变，下游类型与行为都不变，只是编码对了。
+#    转过码就往导入结果页的 Warns 里记一条，别让它也变成静默行为。
+
+# GB18030 是 GBK / GB2312 的超集，一个回退档覆盖中文 Windows 的全部常见导出。
+_GBK_FALLBACK_ENCODING = "gb18030"
+
+
+def _csv_line_to_utf8(line):
+    """把一行 CSV 统一成 UTF-8 字节。
+
+    :returns: (line, transcoded) —— transcoded 表示走了 GB18030 回退。
+              两种编码都读不通就原样返回，交给下游，不在这里吞掉一行数据。
+    """
+    if isinstance(line, unicode):
+        return line.encode("utf-8"), False
+    try:
+        line.decode("utf-8")
+        return line, False
+    except UnicodeDecodeError:
+        pass
+    try:
+        return line.decode(_GBK_FALLBACK_ENCODING).encode("utf-8"), True
+    except UnicodeDecodeError:
+        return line, False
+
+
+def _patch_instrument_import_unicode():
+    """仪器结果导入的两个 unicode 洞，见上方长注释。"""
+    import sys as _ii_sys
+    applied = True
+
+    # --- ① importer 模块的消息工厂 ---------------------------------------
+    try:
+        from senaite.core.exportimport.instruments import importer as _imp_mod
+    except Exception as _imp_err:
+        _ii_sys.stderr.write(
+            "maitux: instruments.importer not importable yet (%s), "
+            "deferring instrument import unicode patch\n" % _imp_err)
+        return False
+
+    factory = getattr(_imp_mod, "_", None)
+    if factory is None:
+        _ii_sys.stderr.write(
+            "maitux: instruments.importer has no message factory `_`, skip\n")
+        applied = False
+    elif not getattr(factory, "_maitux_patched", False):
+        def safe_message_factory(msgid, *args, **kwargs):
+            return factory(_safe_text(msgid), *args, **kwargs)
+
+        safe_message_factory._maitux_patched = True
+        _imp_mod._ = safe_message_factory
+        _ii_sys.stderr.write(
+            "maitux: instruments.importer message factory patched "
+            "for Python 2 unicode safety\n")
+
+    # --- ② 2-Dimensional-CSV 的取行 --------------------------------------
+    try:
+        from senaite.core.exportimport.instruments.generic import (
+            two_dimension as _td_mod)
+    except Exception as _td_err:
+        _ii_sys.stderr.write(
+            "maitux: generic.two_dimension not importable yet (%s), "
+            "deferring CSV encoding patch\n" % _td_err)
+        return False
+
+    parser_cls = getattr(_td_mod, "TwoDimensionCSVParser", None)
+    if parser_cls is None or "splitline" not in parser_cls.__dict__:
+        _ii_sys.stderr.write(
+            "maitux: TwoDimensionCSVParser.splitline not found, skip\n")
+        applied = False
+    elif not getattr(parser_cls.splitline, "_maitux_patched", False):
+        original_splitline = parser_cls.__dict__["splitline"]
+
+        def patched_splitline(self, line, *args, **kwargs):
+            line, transcoded = _csv_line_to_utf8(line)
+            if transcoded and not getattr(self, "_maitux_gbk_warned", False):
+                # 每次解析只提醒一次；Logger.warn 会把它放进导入结果页的
+                # Warns 区，看得见才不算静默。
+                self._maitux_gbk_warned = True
+                try:
+                    self.warn(
+                        u"文件不是 UTF-8，已按 GB18030（GBK）解码后转成 UTF-8 "
+                        u"再导入。建议导出时选「CSV UTF-8」，以免遇到本回退"
+                        u"覆盖不到的字符。")
+                except Exception:
+                    pass
+            return original_splitline(self, line, *args, **kwargs)
+
+        patched_splitline._maitux_patched = True
+        parser_cls.splitline = patched_splitline
+        _ii_sys.stderr.write(
+            "maitux: TwoDimensionCSVParser.splitline patched (GBK -> UTF-8)\n")
+
+    _ii_sys.stderr.flush()
+    return applied
+
+
+def _patch_instrument_import_unicode_deferred(event=None):
+    """ZODB 起来之后再试一次，理由同 _patch_listing_set_field_deferred。"""
+    try:
+        _patch_instrument_import_unicode()
+    except Exception:
+        _s = __import__("sys")
+        _s.stderr.write(
+            "maitux: deferred instrument import unicode patch failed\n")
 
 
 def _propagate_lookup_recalc(analysis):
