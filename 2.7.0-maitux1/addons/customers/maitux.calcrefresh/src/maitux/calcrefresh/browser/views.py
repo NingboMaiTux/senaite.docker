@@ -7,6 +7,8 @@ preserving entered interim values (SPEC: scope 功能 B).
 Feature C (export_interims): dump interim values as CSV (single AS via
 ?keyword=) or ZIP (all AS, no keyword), for native /import round-trip or
 archival (SPEC: scope 功能 C).
+
+CSV 一律写 **UTF-8 with BOM**；理由见 _UTF8_BOM 上方的注释。
 """
 
 import csv
@@ -28,12 +30,31 @@ def _to_str(value):
     return value
 
 
-def _ascii(value):
-    """Coerce a cell value to an ASCII byte string for CSV output."""
+# Excel（中文 Windows）打开无 BOM 的 UTF-8 CSV 会按 GBK 猜，中文全花；
+# 带 BOM 它才认得出 UTF-8，而且另存时保持 UTF-8。这三个字节就是
+# 「导出 -> Excel 填写 -> 导回」这条回路不掉编码的全部条件。
+#
+# 导入侧安全：BOM 落在表头第一格 sample_id 上，而 two_dimension.py 的
+# parse_headerline 只取 splitted[1:]，那一列本来就被丢弃（已实测）。
+_UTF8_BOM = b"\xef\xbb\xbf"
+
+
+def _utf8(value):
+    """Coerce a cell value to a UTF-8 byte string for CSV output.
+
+    取代原来的 _ascii（`encode("ascii", "replace")`）。那一版把每个
+    中文字符换成一个 `?` 然后照常导出，**没有任何提示**：
+    文件看着是完整的，中文列全是问号，再导回去就把好数据
+    覆盖成问号。interim 的字符串值由 RecordsField 存成 unicode
+    （senaite/core/browser/fields/records.py 的 _decode_strings），
+    所以这条路径是所有中文值的必经之地。
+    """
     if value is None:
         return ""
     if isinstance(value, unicode):
-        return value.encode("ascii", "replace")
+        return value.encode("utf-8")
+    if isinstance(value, bytes):
+        return value
     return str(value)
 
 
@@ -218,18 +239,20 @@ class ExportInterimsView(BrowserView):
         header = ["sample_id"] + list(keywords)
 
         buf = io.BytesIO()
+        buf.write(_UTF8_BOM)
         writer = csv.writer(buf)
-        writer.writerow([_ascii(c) for c in header])
+        writer.writerow([_utf8(c) for c in header])
         for a in analyses:
             imap = self._interim_map(a)
-            row = [_ascii(a.getRequestID())]
+            row = [_utf8(a.getRequestID())]
             for kw in keywords:
-                row.append(_ascii(imap.get(kw, "")))
+                row.append(_utf8(imap.get(kw, "")))
             writer.writerow(row)
 
         # manifest: first cell "end" makes the parser skip the line
         # (two_dimension.py splitline), kept last so it is never a header
-        writer.writerow(["end", self._manifest_cell(analyses, keyword)])
+        writer.writerow(
+            ["end", _utf8(self._manifest_cell(analyses, keyword))])
         return buf.getvalue()
 
     def _manifest_cell(self, analyses, keyword):
