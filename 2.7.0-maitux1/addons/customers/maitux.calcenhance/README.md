@@ -2,13 +2,36 @@
 
 为 SENAITE LIMS 的计算公式（Calculation）模块增加三种新的 Interim Field 控件类型，支持 HPLC 含量测定、装量差异、杂质含量等复杂计算场景。
 
-**版本：** 1.12.0
+**版本：** 1.12.3
 **兼容：** SENAITE 2.x（实测 2.7.0 / Plone 5.2 / Python 2.7）
 
 > **关于 `ISSUES.md`**：本文多处写着「详见 `ISSUES.md` ISSUE-0xx」，但**该文件
 > 不在本仓库里**（2026-09-03 核实，git 全历史也没有提交记录）。那些
 > `ISSUE-0xx` 编号仍可作为问题标识使用，但**不要指望在本包目录下找到对应文档**。
 > 若有人手上留着这份台账，值得补进仓库。
+
+---
+
+## 1.12.3 更新概要（2026-09-18）
+
+**仪器结果导入（Instrument Results Import）的两个 Python 2 unicode 洞。**
+两个都只在值里有中文时现形，都在 `senaite.core` 侧，本包用补丁覆盖。
+
+| | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| ① | 导入报 `UnicodeDecodeError: 'ascii' codec can't decode byte 0xbe`，**前面几条结果已经写进去了** | `importer.py` 的 `set_analysis_interims` 把格式化好的 **bytes** 交给 `senaiteMessageFactory`；`Message` 是 `unicode` 子类，构造时按 ascii 解码。同模块另外三处日志都是 `u"..."` + `safe_unicode()`，只漏了这一处 | 把该模块的 `_` 换成「先把 msgid 变成 unicode 再建 Message」的工厂；**不复制那 35 行方法** |
+| ② | 中文值导进去变乱码，**没有任何报错** | Python 2 的 `csv` 只吃 bytes，core 的 CSV 解析器有意不解码；中文 Windows 的 Excel「另存为 CSV」默认写 GBK，字节原样落进 interim，`RecordsField` 再按 utf-8 解码 → U+FFFD | `TwoDimensionCSVParser.splitline` 前把整行按 **GB18030** 转成 UTF-8 字节（仍然是 bytes，下游类型不变），并往导入结果页的 **Warns** 里记一条 |
+
+两个补丁都在 `patches.py`（`_patch_instrument_import_unicode`），
+和 `_patch_listing_set_field` / `_patch_setupdata_import` 一样带
+`IDatabaseOpenedWithRoot` 的延迟重试。启动日志里的两条标记是它们生效的凭据：
+
+```
+maitux: instruments.importer message factory patched for Python 2 unicode safety
+maitux: TwoDimensionCSVParser.splitline patched (GBK -> UTF-8)
+```
+
+> ★ 建议还是导出 **CSV UTF-8**。GB18030 回退是兵底，不是许诺。
 
 ---
 
