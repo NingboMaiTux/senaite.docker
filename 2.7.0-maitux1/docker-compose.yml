@@ -86,6 +86,8 @@ services:
       TZ: Asia/Shanghai
       SITE: MaiLIMS
       PASSWORD: ${ZOPE_ADMIN_PASSWORD:?missing in .env - copy .env.example to .env first}
+      # buildout.cfg 的 rel-storage 口令由 docker-entrypoint.sh 按这个值替换
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing in .env - copy .env.example to .env first}
       PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
       PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
       LANG: C.UTF-8
@@ -122,6 +124,8 @@ services:
     environment:
       TZ: Asia/Shanghai
       PASSWORD: ${ZOPE_ADMIN_PASSWORD:?missing in .env - copy .env.example to .env first}
+      # buildout.cfg 的 rel-storage 口令由 docker-entrypoint.sh 按这个值替换
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing in .env - copy .env.example to .env first}
       PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
       PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
       LANG: C.UTF-8

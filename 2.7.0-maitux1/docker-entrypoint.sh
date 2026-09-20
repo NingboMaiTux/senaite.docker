@@ -88,6 +88,66 @@ fi
 sed 's/\r$//' /gen-custom-addon.sh > /tmp/gen-custom-addon.sh
 bash /tmp/gen-custom-addon.sh
 
+# ---------------------------------------------------------------------------
+# 把 buildout.cfg 里的口令占位符换成环境变量里的真实值。
+#
+# 为什么在这里做：buildout.cfg 是打进镜像的、不是挂载进来的，所以口令不能写死在
+# 里面（既进版本库又进镜像层）。本脚本是 bind mount，改它不用重建镜像，正好承担
+# 这次替换。必须在 `buildout -c custom.cfg` 之前跑 —— custom.cfg extends
+# buildout.cfg，buildout 是在那一刻才去读它的。
+#
+# 匹配的是**配置键**而不是旧值，所以对「镜像里还是旧版明文 buildout.cfg」的存量
+# 环境同样生效，不必先重建镜像。
+#
+# 用 python 做字面替换而不是 sed：口令里可能含 & | / \ 这类 sed 会当成语法的字符。
+# 口令本身绝不打进日志。
+# ---------------------------------------------------------------------------
+: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - copy .env.example to .env}"
+: "${PASSWORD:?PASSWORD is not set - copy .env.example to .env}"
+step "写入 buildout.cfg 的口令"
+python - <<'PYEOF'
+import io
+import os
+import sys
+
+PATH = "/home/senaite/senaitelims/buildout.cfg"
+admin = os.environ["PASSWORD"]
+pg = os.environ["POSTGRES_PASSWORD"]
+
+with io.open(PATH, encoding="utf-8", newline="") as fh:
+    lines = fh.readlines()
+
+hits = {"user": 0, "password": 0}
+out = []
+for line in lines:
+    body = line.rstrip("\r\n")
+    eol = line[len(body):]
+    if body.startswith("user=admin:"):
+        line = "user=admin:" + admin + eol
+        hits["user"] += 1
+    elif body.startswith("    password ") and not body.lstrip().startswith("#"):
+        # rel-storage 块里唯一的 password 行
+        line = "    password " + pg + eol
+        hits["password"] += 1
+    out.append(line)
+
+if hits["password"] != 1:
+    sys.stderr.write(
+        "ERROR: buildout.cfg 里 rel-storage 的 password 行匹配到 %d 处（应为 1）。\n"
+        "       buildout.cfg 结构变了，这段替换逻辑要跟着改，\n"
+        "       否则 Zope 会拿着占位符去连 Postgres。\n" % hits["password"])
+    sys.exit(1)
+if hits["user"] != 1:
+    sys.stderr.write(
+        "WARN: buildout.cfg 里 user=admin: 行匹配到 %d 处（预期 1）。\n" % hits["user"])
+
+with io.open(PATH, "w", encoding="utf-8", newline="") as fh:
+    fh.write(u"".join(out))
+
+print("buildout.cfg: 口令占位符已替换（user=%d password=%d）"
+      % (hits["user"], hits["password"]))
+PYEOF
+
 if [ -e "custom.cfg" ]; then
   step "开始 buildout"
   buildout -c custom.cfg -o -n
