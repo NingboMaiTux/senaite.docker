@@ -11,7 +11,6 @@ from Products.CMFPlone.interfaces import INonInstallable
 from zope.interface import implementer
 
 from maitux.roles import logger
-from maitux.roles.config import DEFAULT_PASSWORD
 from maitux.roles.config import ROLE_DEFINITIONS
 
 _INSTALL_LOCK = threading.Lock()
@@ -156,52 +155,10 @@ def ensure_groups(portal):
     return created
 
 
-# ---------------------------------------------------------------------------
-# Accounts
-# ---------------------------------------------------------------------------
-def ensure_users(portal):
-    created = 0
-    for rd in ROLE_DEFINITIONS:
-        username = rd["username"]
-        user = ploneapi.user.get(username=username)
-        if user is None:
-            try:
-                user = ploneapi.user.create(
-                    email=rd["email"],
-                    username=username,
-                    password=rd.get("password", DEFAULT_PASSWORD),
-                    roles=("Member",),
-                    properties={"fullname": rd["title_msg"]},
-                )
-                created += 1
-                logger.info("maitux.roles: created user %s", username)
-            except Exception as exc:
-                logger.warn("maitux.roles: create user %s failed: %s",
-                            username, exc)
-                continue
-        # ensure membership in the matching group (idempotent)
-        group_id = rd["role_id"]
-        group = ploneapi.group.get(groupname=group_id)
-        if group is None:
-            continue
-        try:
-            groups = [g.getId() for g in
-                      ploneapi.group.get_groups(user=user)]
-        except Exception:
-            groups = []
-        if group_id not in groups:
-            try:
-                ploneapi.group.add_user(group=group, user=user)
-            except Exception as exc:
-                logger.warn("maitux.roles: add user %s to group %s failed: %s",
-                            username, group_id, exc)
-    return created
-
-
 def migrate_role_titles(portal):
-    """Re-point stored group titles and user fullnames to the maitux.roles
-    domain (replaces legacy arextension-domain Messages created before the
-    domain split). Idempotent.
+    """Re-point stored group titles to the maitux.roles domain (replaces
+    legacy arextension-domain Messages created before the domain split).
+    Idempotent.
     """
     updated = 0
     group_tool = None
@@ -222,14 +179,6 @@ def migrate_role_titles(portal):
             except Exception as exc:
                 logger.warn("roles: group %s title update failed: %s",
                             group_id, exc)
-        user = ploneapi.user.get(username=rd["username"])
-        if user is not None:
-            try:
-                user.setMemberProperties({"fullname": rd["title_msg"]})
-                updated += 1
-            except Exception as exc:
-                logger.warn("roles: user %s fullname update failed: %s",
-                            rd["username"], exc)
     return updated
 
 
@@ -247,12 +196,10 @@ def run_install_steps(portal):
                 granted += grant_labmanager_equivalent(portal, rd)
         logger.info("maitux.roles: granted %d permissions", granted)
         created_groups = ensure_groups(portal)
-        created_users = ensure_users(portal)
         migrate_role_titles(portal)
     logger.info(
-        "*** maitux.roles run_install_steps done "
-        "(groups=%d users=%d) ***",
-        created_groups, created_users)
+        "*** maitux.roles run_install_steps done (groups=%d) ***",
+        created_groups)
 
 
 def _get_portal(context=None):
@@ -383,26 +330,12 @@ def uninstall(context):
         logger.warn("maitux.roles uninstall: portal not found, skip")
         return
     role_ids = [rd["role_id"] for rd in ROLE_DEFINITIONS]
-    usernames = [rd["username"] for rd in ROLE_DEFINITIONS]
 
-    removed_users = 0
     removed_groups = 0
     removed_roles = 0
 
     with ploneapi.env.adopt_roles(["Manager"]):
-        # 1) accounts
-        for username in usernames:
-            user = ploneapi.user.get(username=username)
-            if user is None:
-                continue
-            try:
-                ploneapi.user.delete(username=username)
-                removed_users += 1
-                logger.info("maitux.roles uninstall: deleted user %s", username)
-            except Exception as exc:
-                logger.warn("maitux.roles uninstall: delete user %s failed: %s",
-                            username, exc)
-        # 2) groups
+        # 1) groups
         for group_id in role_ids:
             group = ploneapi.group.get(groupname=group_id)
             if group is None:
@@ -414,7 +347,7 @@ def uninstall(context):
             except Exception as exc:
                 logger.warn("maitux.roles uninstall: delete group %s failed: %s",
                             group_id, exc)
-        # 3) roles (from __ac_roles__ and every permission rolemap)
+        # 2) roles (from __ac_roles__ and every permission rolemap)
         current_roles = set(getattr(portal, "__ac_roles__", ()) or ())
         for role in role_ids:
             if role not in current_roles:
@@ -432,5 +365,5 @@ def uninstall(context):
                             role, exc)
 
     logger.info(
-        "maitux.roles uninstall [DONE] (users=%d groups=%d roles=%d)",
-        removed_users, removed_groups, removed_roles)
+        "maitux.roles uninstall [DONE] (groups=%d roles=%d)",
+        removed_groups, removed_roles)

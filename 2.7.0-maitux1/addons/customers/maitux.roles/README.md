@@ -1,6 +1,9 @@
 # maitux.roles
 
-INNOCARE 业务角色 / 分组 / 账号 初始化扩展，按角色定义批量创建 Plone 角色、组、用户并授权。
+INNOCARE 业务角色 / 分组 初始化扩展，按角色定义批量创建 Plone 角色与同名组并授权。
+
+> **本包不创建任何登录账号，也不涉及任何口令。** 权限链是「组 → 角色 → 权限」，
+> 账号只负责“谁进哪个组”，由 IT 按实际到岗的人开通并拉进对应组。
 
 ## 功能职责
 
@@ -8,10 +11,10 @@ INNOCARE 业务角色 / 分组 / 账号 初始化扩展，按角色定义批量�
   - MethodAdministrator / InstrumentAdministrator / InventoryAdministrator
   - StabilityAdministrator / StabilityInventoryAdministrator
   - BusinessSystemAdministrator / ITSystemEngineer
-- 每个角色 = 一个 Plone 角色 + 同名组 + 一个登录账号，授予预设权限（增量授权，不覆盖已有授权）。
-- 初始密码统一 `DEFAULT_PASSWORD`（`Maitux=123456`，与容器环境保持一致，可在 config.py 修改）。
+- 每个角色 = 一个 Plone 角色 + 一个同名组，授予预设权限（增量授权，不覆盖已有授权）。
+- 组持有同名角色；把用户加进组即获得该角色的全部权限。
 - `BusinessSystemAdministrator` 直接继承 `LabManager` 全部权限。
-- 安装 / 卸载 setuphandlers（创建 / 删除 角色、组、用户，见 `setuphandlers.py`）。
+- 安装 / 卸载 setuphandlers（创建 / 删除 角色与组，见 `setuphandlers.py`）。
 - 首次请求钩子：在站点就绪后补跑安装步骤并提交。
 
 ## 依赖
@@ -44,4 +47,12 @@ profiles += maitux.roles:default
 
 ## 卸载
 
-- 执行 `maitux.roles:uninstall` profile 会删除角色、组、用户；确认后移除 `custom-addon.cfg` 三处注册。
+- 执行 `maitux.roles:uninstall` profile 会删除角色与组；确认后移除 `custom-addon.cfg` 三处注册。
+- 卸载**不会**动任何用户账号（本包不创建账号）。
+
+> ⚠️ 历史遗留：1.0 时期本包会创建 9 个统一口令的账号
+> （`methodadministrator` / `instrumentadministrator` / `inventoryadministrator` /
+> `stabilityadministrator` / `stabilityinventoryadministrator` /
+> `businesssystemadministrator` / `itsystemengineer` / `verifier` / `labclerk`）。
+> 本次改动只是不再新建，**已装过旧版的站点上这些账号仍然存在且口令未变**，
+> 必须手工核查：该删的删，要保留的立刻改成强口令。

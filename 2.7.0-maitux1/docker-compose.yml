@@ -29,7 +29,7 @@ services:
       TZ: Asia/Shanghai
       POSTGRES_DB: lims_db
       POSTGRES_USER: lims_user
-      POSTGRES_PASSWORD: Maitux=123456
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing in .env - copy .env.example to .env first}
       POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8 --data-checksums
     command:
       - postgres
@@ -85,7 +85,12 @@ services:
     environment:
       TZ: Asia/Shanghai
       SITE: MaiLIMS
-      PASSWORD: Maitux=123456
+      PASSWORD: ${ZOPE_ADMIN_PASSWORD:?missing in .env - copy .env.example to .env first}
+      # buildout.cfg 的 rel-storage 口令由 docker-entrypoint.sh 按这个值替换
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing in .env - copy .env.example to .env first}
+      # 仪器采集端的共享上报 Token。可选：不设就是空串，该通道关闭，
+      # 采集端只能用仪器模板上登记的 agent_token 鉴权。
+      PHASE1_INGEST_TOKEN: ${PHASE1_INGEST_TOKEN:-}
       PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
       PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
       LANG: C.UTF-8
@@ -121,7 +126,12 @@ services:
           memory: 2048MB
     environment:
       TZ: Asia/Shanghai
-      PASSWORD: Maitux=123456
+      PASSWORD: ${ZOPE_ADMIN_PASSWORD:?missing in .env - copy .env.example to .env first}
+      # buildout.cfg 的 rel-storage 口令由 docker-entrypoint.sh 按这个值替换
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing in .env - copy .env.example to .env first}
+      # 仪器采集端的共享上报 Token。可选：不设就是空串，该通道关闭，
+      # 采集端只能用仪器模板上登记的 agent_token 鉴权。
+      PHASE1_INGEST_TOKEN: ${PHASE1_INGEST_TOKEN:-}
       PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
       PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
       LANG: C.UTF-8
