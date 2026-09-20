@@ -12,3 +12,6 @@ addons/customers/custom-addon.cfg
 .trae/skills/
 # 打包产物（打包.ps1 的输出），不进版本库
 dist/
+
+# 本地环境变量（含口令），不进版本库；提交的是 .env.example
+.env
