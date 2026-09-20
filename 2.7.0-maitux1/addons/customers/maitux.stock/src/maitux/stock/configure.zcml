@@ -33,6 +33,7 @@
       description="Install MAITUX Stock site structure and registrations"
       handler="maitux.stock.setuphandlers.setup_handler">
     <depends name="plone-various"/>
+    <depends name="typeinfo"/>
   </genericsetup:importStep>
 
   <genericsetup:registerProfile

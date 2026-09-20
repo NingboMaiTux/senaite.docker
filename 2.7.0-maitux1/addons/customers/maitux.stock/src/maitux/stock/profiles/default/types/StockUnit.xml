@@ -7,7 +7,7 @@
   <property name="title" i18n:translate="">Stock Unit</property>
   <property name="description" i18n:translate=""></property>
 
-  <property name="icon_expr">senaite_theme/icon/folder</property>
+  <property name="icon_expr">senaite_theme/icon/container</property>
   <property name="factory">StockUnit</property>
   <property name="add_view_expr">string:${folder_url}/++add++StockUnit</property>
   <property name="immediate_view">view</property>

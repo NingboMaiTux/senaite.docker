@@ -7,7 +7,7 @@
   <property name="title" i18n:translate="">Stock Type</property>
   <property name="description" i18n:translate=""></property>
 
-  <property name="icon_expr">senaite_theme/icon/folder</property>
+  <property name="icon_expr">senaite_theme/icon/category</property>
   <property name="factory">StockType</property>
   <property name="add_view_expr">string:${folder_url}/++add++StockType</property>
   <property name="immediate_view">view</property>

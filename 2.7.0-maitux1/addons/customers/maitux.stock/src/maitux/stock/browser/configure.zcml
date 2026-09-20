@@ -156,6 +156,37 @@
       permission="zope2.View"
       />
 
+  <!-- 库存使用记录查询界面（需求 1：使用记录追溯 / 需求 2：使用记录查询导出） -->
+  <browser:page
+      for="maitux.stock.interfaces.IStockSection"
+      name="stock_usage_trace"
+      class="maitux.stock.browser.stockusage.StockUsageTraceView"
+      template="stockusagetrace.pt"
+      permission="zope2.View"
+      />
+
+  <browser:page
+      for="maitux.stock.interfaces.IStockSection"
+      name="stock_usage_report"
+      class="maitux.stock.browser.stockusage.StockUsageReportView"
+      template="stockusagereport.pt"
+      permission="zope2.View"
+      />
+
+  <browser:page
+      for="maitux.stock.interfaces.IStockSection"
+      name="stock_usage_report_export"
+      class="maitux.stock.browser.stockusage.StockUsageExportView"
+      permission="zope2.View"
+      />
+
+  <browser:page
+      for="maitux.stock.interfaces.IStockManager"
+      name="stock_usage_setup"
+      class="maitux.stock.browser.stockusage.StockUsageSetupView"
+      permission="cmf.ManagePortal"
+      />
+
   <browser:page
       for="maitux.stock.interfaces.IStockManager"
       name="sync_expired_batches"

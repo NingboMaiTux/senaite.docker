@@ -118,8 +118,9 @@ class StockItemsView(ListingView):
                     ref = resolve_by_uid(uid)
                     title = api.get_title(ref) if api.is_object(ref) else ""
                 if title:
-                    titles.append(title)
-            return ", ".join(titles)
+                    # 中文注释：中文标题可能是 utf8 字节串，统一成 unicode 再 join
+                    titles.append(api.safe_unicode(title))
+            return u", ".join(titles)
 
         def format_date(value):
             if not value:

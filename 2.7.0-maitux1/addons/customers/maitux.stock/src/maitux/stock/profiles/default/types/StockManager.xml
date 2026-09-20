@@ -21,6 +21,8 @@
     <element value="StockTypes" />
     <element value="StockPurchaseOrders" />
     <element value="StockBatches" />
+    <element value="StockUsageTrace" />
+    <element value="StockUsageReport" />
   </property>
 
   <property name="allow_discussion">False</property>
