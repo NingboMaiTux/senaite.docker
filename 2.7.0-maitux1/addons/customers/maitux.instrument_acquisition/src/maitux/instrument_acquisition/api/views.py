@@ -71,14 +71,20 @@ def _get_template_for_instrument(context, instrument_code):
 def _verify_token(context, instrument_code, token):
     """校验采集端 Token（一个中转站一个 Token）
 
-    优先按仪器模板上登记的 `agent_token` 校验；模板未配置时回退到
-    固定共享 Token（兼容旧部署）。固定共享 Token 始终有效。
+    优先按仪器模板上登记的 `agent_token` 校验；另有一条共享 Token 通道，
+    兼容还没配模板 Token 的旧采集端。
+
+    共享 Token 从环境变量 `PHASE1_INGEST_TOKEN` 读（见 phase1_targets），
+    **没配就是空串，该通道关闭**，只剩模板 `agent_token` 一条路。
     """
     token = api.safe_unicode(token or u"").strip()
     if not token:
         return False
-    # 固定共享 Token 始终有效（兼容旧版采集端）
-    if token == PHASE1_INGEST_TOKEN:
+    # 共享 Token 通道（兼容旧版采集端）。
+    # 左边这个非空判断不能去掉：环境变量没配时 PHASE1_INGEST_TOKEN 是空串，
+    # 少了它就变成"拿空 Token 也能过"——上面虽然已经挡了空 token，但那道
+    # 判断哪天被改掉，这里就是个静默的鉴权绕过。两道都留着。
+    if PHASE1_INGEST_TOKEN and token == PHASE1_INGEST_TOKEN:
         return True
     # 模板登记的 agent_token（一个中转站一个 Token，多台仪器可填相同值）
     template = _get_template_for_instrument(context, instrument_code)

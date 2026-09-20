@@ -313,8 +313,14 @@ class TargetKeyTest(unittest.TestCase):
 
 class ConstantsTest(unittest.TestCase):
 
-    def test_token_constant(self):
-        self.assertTrue(_targets.PHASE1_INGEST_TOKEN)
+    def test_token_constant_comes_from_env(self):
+        # 共享 Token 不再写死在代码里：环境变量没配时就该是空串，
+        # 此时 _verify_token 只认模板上的 agent_token。
+        # 这里钉的是"来源"而不是"有值"——有值与否取决于部署环境。
+        self.assertIsInstance(_targets.PHASE1_INGEST_TOKEN, str)
+        self.assertEqual(
+            _targets.PHASE1_INGEST_TOKEN,
+            os.environ.get("PHASE1_INGEST_TOKEN", "").strip())
 
     def test_annotation_keys(self):
         self.assertTrue(_targets.PHASE1_ANNOTATION_KEY)

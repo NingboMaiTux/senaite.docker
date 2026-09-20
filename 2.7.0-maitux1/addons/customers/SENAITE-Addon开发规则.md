@@ -17,7 +17,7 @@ python 2.7.0-maitux1/addons/customers/lint_addon.py                      # 全�
 ```
 
 从哪个目录跑都行，它按自身位置找 `addons` 根。**改完 addon、重启容器之前跑一遍**；
-`ERROR` 为 0 才进部署。当前覆盖 R1 / R4 / R4b / R5b / R5c / R5d / R12 / R14
+`ERROR` 为 0 才进部署。当前覆盖 R1 / R4 / R4b / R5b / R5c / R5d / R12 / R14 / R17
 以及若干 Python 2.7 编码陷阱。
 
 > 订正（2026-09-15）：这里原先写作「R14 / R16」，但规则表里从未有过 R16
@@ -737,6 +737,45 @@ TypeError: You must specify a provided interface when registering a factory
 
 ---
 
+### R17. 口令 / Token 不许硬编码，只从环境变量读
+
+**规则**：凭据类的值（口令、共享 Token、API Key）不能以字符串字面量的形式
+赋给代码里的变量。代码里只留占位符或空默认值，真实值从环境变量注入。
+
+```python
+# 不行
+PHASE1_INGEST_TOKEN = "maitux-phase1-instrument-acquisition-token"
+
+# 可以
+import os
+PHASE1_INGEST_TOKEN = os.environ.get("PHASE1_INGEST_TOKEN", "").strip()
+```
+
+**依据**：addon 代码进版本库，凭据跟着进去就等于公开。而且 git 历史删不掉 ——
+一旦提交，后续只能靠**轮换凭据**补救，挪文件位置没有用。
+
+**违反后果**：分两层。表层是凭据泄露；深一层是它会**反噬本产品自己的合规模块**
+—— `maitux.esignature`（电子签名）与 `maitux.audittrail`（审计追踪）都建立在
+「操作可归因到人」之上，共享凭据一旦公开，这两个模块的证据效力就无从谈起。
+
+实例：`maitux.instrument_acquisition` 的 `PHASE1_INGEST_TOKEN` 曾写死在代码里，
+而 ingest 接口对它是「始终放行」—— 知道这个字符串就能往 LIMS 灌任意检测读数。
+
+**默认值取空，并且在鉴权处显式判非空。** 把默认值写成「旧的那个真实值」等于没改；
+而取空之后若鉴权处只写 `token == SHARED_TOKEN`，空串会变成「谁都能过」，
+必须写成 `SHARED_TOKEN and token == SHARED_TOKEN`。
+
+**机器判据**：`lint_addon.py` 的 `E17_HARDCODED_SECRET`。用 AST 认
+「赋值语句左边是凭据名、右边是字符串字面量」，所以关键字实参（`token=SCOPE_BOTH`）、
+函数调用（`password=random_password()`）、布尔表达式都不会误报。
+占位符（`${...}` / `__X__` / `change-me`）、短于 8 字符的值、
+全大写点分常量（`"SDK.LOGIN.1005"` 这类错误码）一律放行。
+
+只扫 `.py`：`.zcml` / `.xml` / `.pt` 没有可靠的「这是赋值」语法信号，
+正则化会把误报率打回不可用的水平（实测朴素正则 85 命中、抽样几乎全错）。
+
+---
+
 ## 附：新建 addon 检查清单
 
 - [ ] `package-includes/` 下 configure + overrides **两个** slug 都建了
@@ -757,3 +796,4 @@ TypeError: You must specify a provided interface when registering a factory
 - [ ] 指向外来内容/视图接口的 `subscriber` / `adapter` 都做了 layer 门控：签名里有 request 的换成自己的 layer，没 request 的（`IListingViewAdapter`）在工厂里判 `providedBy(request)`（R14）
 - [ ] `<subscriber>` 指向普通函数时用 `handler=`（不是 `factory=`）；用 `factory=` 的一律配了 `provides=`，且函数上没有 `@adapter` 装饰器（R15）
 - [ ] 布尔字段的 `BooleanWidget` 没传 `render_own_label=True`，标签与说明由字段模板渲染（R16）
+- [ ] 代码里没有硬编码的口令 / Token / API Key；凭据一律从环境变量读，默认取空且鉴权处判非空（R17）

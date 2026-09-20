@@ -288,6 +288,83 @@ def scan_ui_gating(code_dir, dist_name, layers):
     return out
 
 
+# --- R17：口令 / Token 硬编码 --------------------------------------------
+#
+# 为什么用 AST 而不是正则：实测过。对本目录 23 个 addon，
+#   (password|secret|token|api_key)\s*[:=]   -> 85 命中 / 23 文件，抽样全是误报
+#   收紧成「值必须是非占位符字面量」的正则   -> 11 命中，仍有 6 成误报
+#   本 AST 规则                              -> 1 命中，真阳性
+# 误报是这类规则的头号死因：一旦开始误报，团队就学会无视它，等于没加。
+#
+# AST 只认「赋值语句的右边是字符串字面量」，所以下面这些天然不会命中：
+#   token=SCOPE_BOTH              关键字实参，不是赋值语句
+#   token = token or self.f()     右边是 BoolOp
+#   password = request.get(...)   右边是 Call
+#
+# 已知不覆盖（有意为之，保持规则简单）：
+#   · 只扫 .py。addon 的 .zcml / .xml / .pt 里理论上也能塞口令，但那几种格式
+#     没有可靠的「这是赋值」语法信号，正则化会把误报率打回去。
+#   · 拼接出来的口令（"abc" + suffix）不认。
+#   · buildout 那种「空格分隔」的 key value 不认 —— 那类文件也不在 addon 里。
+CRED_NAME_TOKENS = frozenset([
+    "pass", "passwd", "password", "pwd", "secret", "token",
+    "apikey", "accesskey", "credential", "credentials",
+])
+# 按 _ - 以及小写→大写的驼峰边界切词。必须切词而不是子串匹配，否则
+# BYPASS_COOKIE 里的 "BYPASS" 会因为含 "PASS" 被误报（实测踩到过）。
+_NAME_SPLIT = re.compile(r"[_\-]|(?<=[a-z0-9])(?=[A-Z])")
+# 占位符：本来就是给外部注入用的，不算泄露
+SECRET_PLACEHOLDER = re.compile(
+    r"(?i)^(\$\{.*\}|__[A-Z0-9_]+__|change[-_]?me|<.*>|x+|none|null"
+    r"|todo|fixme|\*+)$")
+# 全大写 + 点/下划线/数字：基本都是错误码、状态常量，不是口令
+# （实例：oauth2 包里的 WRONG_PASSWORD = "SDK.LOGIN.1005"）
+SECRET_CODEISH = re.compile(r"^[A-Z][A-Z0-9_.]*$")
+SECRET_MIN_LEN = 8
+
+
+def _is_credential_name(name):
+    parts = [p.lower().replace("_", "") for p in _NAME_SPLIT.split(name) if p]
+    return any(p in CRED_NAME_TOKENS for p in parts)
+
+
+def scan_hardcoded_secrets(src):
+    """找「凭据名 = 字符串字面量」。返回 [(lineno, name, value), ...]"""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return []                      # 语法错另有 E06/E07 管，这里不重复报
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+        value = node.value
+        # py3.8+ 统一用 ast.Constant；本脚本在 CI 里跑 py3.12
+        if not isinstance(value, ast.Constant) or \
+                not isinstance(value.value, str):
+            continue
+        for tgt in targets:
+            if isinstance(tgt, ast.Name):
+                name = tgt.id
+            elif isinstance(tgt, ast.Attribute):
+                name = tgt.attr
+            else:
+                continue
+            if not _is_credential_name(name):
+                continue
+            literal = value.value.strip()
+            if len(literal) < SECRET_MIN_LEN or \
+                    SECRET_PLACEHOLDER.match(literal) or \
+                    SECRET_CODEISH.match(literal):
+                continue
+            out.append((node.lineno, name, literal))
+    return out
+
+
 LEVEL_ERROR = "ERROR"
 LEVEL_WARN = "WARN"
 LEVEL_INFO = "INFO"
@@ -855,6 +932,15 @@ def check_addon(addon, findings):
                         u"泄漏的 %s 都是通用键（senaite.core 自己也在漏），"
                         u"暂不致命；建议补 base_query={}，顺带免疫别人泼过来的键"
                         % (lineno, wname, u"、".join(keys) or u"键"), "R12", rel)
+            # R17：口令 / Token 硬编码
+            for lineno, cname, literal in scan_hardcoded_secrets(src):
+                # 值本身绝不回显 —— lint 输出会进 CI 日志和 run summary，
+                # 打出来等于又泄露一次。只给行号和变量名，足够定位。
+                add(LEVEL_ERROR, "E17_HARDCODED_SECRET",
+                    u"第 %d 行 %s 直接赋了一个字符串字面量（%d 字符，内容不回显）"
+                    u" —— 口令/Token 不能进版本库。改成从环境变量或 registry 读，"
+                    u"代码里只留占位符" % (lineno, cname, len(literal)),
+                    "R17", rel)
             # 中文字节串字面量：unicode 边界的高发区（docstring 与注释不算）
             if hits:
                 add(LEVEL_WARN, "W07b_BYTES_CJK",

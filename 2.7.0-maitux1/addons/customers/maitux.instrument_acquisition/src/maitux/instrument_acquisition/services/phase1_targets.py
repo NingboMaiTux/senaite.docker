@@ -21,8 +21,19 @@ subfield），本模块按**分析的 interim 快照**推导出目标位。留�
 type 与 UID 引用（`assigned_analysis_uids`）时只需解析此字符串。
 """
 
-# 入站接口固定鉴权 Token（第一阶段写死，后续升级为配置界面）
-PHASE1_INGEST_TOKEN = "maitux-phase1-instrument-acquisition-token"
+import os
+
+# 入站接口的共享鉴权 Token —— 只从环境变量读，代码里不留值。
+#
+# 这是给旧采集端的兼容通道：知道这个字符串的人就能往 LIMS 灌任意检测读数，
+# 所以它是凭据，不能进版本库（lint_addon.py 的 E17 会拦）。
+#
+# **没设这个环境变量时取空串，共享 Token 通道直接关闭**（`_verify_token`
+# 里有显式非空判断，空串不会变成"任何人都能过"）。此时仍可用每台仪器模板上
+# 登记的 `agent_token` 鉴权 —— 那才是推荐路径，本变量只为存量部署保留。
+#
+# 值配在与 docker-compose.yml 同目录的 .env 里，见 .env.example。
+PHASE1_INGEST_TOKEN = os.environ.get("PHASE1_INGEST_TOKEN", "").strip()
 
 # 远端采集端模式（默认开启）：
 #   True  —— 云 LIMS 与实验室本地采集端（agent）分离部署。LIMS 点「开始采集」
