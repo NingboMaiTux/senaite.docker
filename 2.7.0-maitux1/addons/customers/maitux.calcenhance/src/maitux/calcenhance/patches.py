@@ -1233,11 +1233,27 @@ def _patch_set_interim_value():
         for interim in interims:
             if interim.get("keyword") == keyword:
                 interim["value"] = str(value)
-        self.setInterimFields(interims)
-        # --- End original save logic ---
 
-        # Re-evaluate every computed interim, in definition order
-        _evaluate_interims_ordered(self)
+        # 求值失败汇总的归属：setInterimFields 会在它自己的顶层边界报一次，
+        # 但下面那次 _evaluate_interims_ordered 发生在它**之后**，那一段的
+        # 失败没人报也没人清，会留给下一次写入的汇总。压住 -> 两段算完 ->
+        # 一次报完，一次字段写入恰好一条汇总，归属按构造就是对的。
+        #
+        # ⚠️ 这条尾巴到底有没有量，**没有证实**。最初以为 1081/1091 交替
+        # 是它串过去造成的，实测推翻了：那是"填值"和"清空"两个不同操作
+        # 本来就该有的两个数（同一操作重复做，数字是稳的）。加这段前后
+        # 报出来的数字一模一样。保留它是因为"归属按构造正确"对一个只为
+        # 观测存在的机制值得，不是因为它修好了什么可见的症状。
+        _fail_suppress_push()
+        try:
+            self.setInterimFields(interims)
+            # --- End original save logic ---
+
+            # Re-evaluate every computed interim, in definition order
+            _evaluate_interims_ordered(self)
+        finally:
+            _fail_suppress_pop()
+            _report_eval_failures(self)
 
     try:
         import sys as _s2
@@ -1508,6 +1524,7 @@ def _patch_set_interim_fields():
         finally:
             if is_top:
                 _finish_propagation()
+                _report_eval_failures(self)
 
     setattr(Analysis, "setInterimFields", patched_setInterimFields)
     _s = __import__("sys")
@@ -1807,6 +1824,107 @@ def _collect_cross_referenceable_data_uncached(analysis):
             pass
 
     return sibling_data
+
+
+# --- 调试跟踪开关 ------------------------------------------------------
+#
+# 这套 `maitux: ...` 的 stderr 跟踪是开发期加的，一直无条件开着，而且
+# **每行都 flush()** —— 一行一次系统调用穿过 docker 的日志驱动。
+#
+# 实测（2026-09-19，Care / WS-009 / S-0010，见
+# Docs/保存性能及重新计算/证据-代码路径与实测.md）：
+#   * 改 imp_sys_suit 一格        -> 3820 行 / 1.65s
+#   * 清空同一面板（约 19 格）    -> 73998 行 / 26.51s
+# 其中 15568 行是同一条求值失败被逐元素重复打印。
+#
+# 跟踪本身没错，错在默认开着：一次保存就把日志占满（tail 里全是它），别的
+# 什么都读不到；而那些 28 元素数组、dict 的 repr 是在写之前就格式化好的，
+# 关掉输出并不能省掉格式化 —— 所以开关要放在**格式化之前**，写成
+# `if _DEBUG:` 包住整段，而不是在写函数里判断。
+#
+# 失败不跟着消失：每处失败经 _note_eval_failure 计数，顶层写入结束时由
+# _report_eval_failures 给一行汇总。"失败必须看得见"是本项目的规则
+# （SENAITE-Addon开发规则.md 的静默失败一条），但 15568 行逐元素重复不是
+# 看得见，是把日志淹掉。
+#
+# 打开明细：compose 里给 instance 加 MAITUX_CALC_DEBUG=1 然后重启。
+import os as _dbg_os
+
+_DEBUG = _dbg_os.environ.get("MAITUX_CALC_DEBUG", "").strip().lower() \
+    not in ("", "0", "false", "no", "off")
+
+_fail_local = threading.local()
+
+
+# 归并后仍可能有很多种：错误文本里带行内数据（"key '未知杂质' not found"
+# 每一行一个键），所以种类数**不是**由配置规模封顶的。加一个上限，超出的
+# 并成一条，免得这个只为观测而存在的 dict 在一次大写入里长到不可控。
+_FAIL_KINDS_CAP = 200
+
+
+def _fail_suppress_push():
+    _fail_local.suppress = getattr(_fail_local, "suppress", 0) + 1
+
+
+def _fail_suppress_pop():
+    _fail_local.suppress = max(0, getattr(_fail_local, "suppress", 1) - 1)
+
+
+def _note_eval_failure(keyword, err):
+    """记一次公式求值失败（按 关键字 + 错误文本 归并）。
+
+    整体包在 try 里：本函数只为观测存在，调用点全在 except 分支中 ——
+    它自己抛异常会把原来的错误处理链改掉，那是拿观测换行为，绝不接受。
+    """
+    try:
+        counts = getattr(_fail_local, "counts", None)
+        if counts is None:
+            counts = {}
+            _fail_local.counts = counts
+        if len(counts) >= _FAIL_KINDS_CAP:
+            key = (u"…", u"其余种类（已达 %d 种上限）" % _FAIL_KINDS_CAP)
+        else:
+            try:
+                # [PY2-UNICODE] R13：异常参数里带中文时 str() 会抛
+                msg = _safe_text(str(err))[:120]
+            except Exception:
+                try:
+                    msg = _safe_text(err)[:120]
+                except Exception:
+                    msg = u"?"
+            key = (_safe_text(keyword), msg)
+        counts[key] = counts.get(key, 0) + 1
+    except Exception:
+        pass
+
+
+def _report_eval_failures(analysis):
+    """顶层写入结束：把本次写入的求值失败汇总成一行，然后清零。
+
+    suppress 期间既不报也不清：见 patched_setInterimValue —— 它在
+    setInterimFields 返回**之后**还要再求值一次，那一段的失败必须并进
+    同一条汇总，否则会挂到下一次写入头上。
+    """
+    if getattr(_fail_local, "suppress", 0):
+        return
+    counts = getattr(_fail_local, "counts", None)
+    _fail_local.counts = None
+    _fail_local.order_seen = None
+    if not counts:
+        return
+    try:
+        from bika.lims import logger as _fail_logger
+        total = sum(counts.values())
+        top = sorted(counts.items(), key=lambda kv: -kv[1])[:5]
+        listed = u"; ".join(
+            u"%s ×%d: %s" % (_safe_text(kw), n, msg) for (kw, msg), n in top)
+        _fail_logger.warn(
+            u"maitux.calcenhance: %s 本次写入有 %d 处公式求值失败（%d 种）：%s"
+            u"%s；明细需 MAITUX_CALC_DEBUG=1 重启后查看"
+            % (getattr(analysis, "id", "?"), total, len(counts), listed,
+               u"" if len(counts) <= 5 else u" …"))
+    except Exception:
+        pass
 
 
 # --- LOOKUP 源数据：求值期缓存 ------------------------------------------
@@ -4131,7 +4249,20 @@ def _interim_order_violations(interims):
 
 
 def _report_interim_order(analysis, interims):
-    """Log any forward reference.  Reports only, changes nothing."""
+    """Log any forward reference.  Reports only, changes nothing.
+
+    每个分析每次顶层写入只报一次。实测一次单字段保存里同一条被重复报
+    41 遍（清空一个面板 914 遍），而 `needed sweep` 始终是 0 —— 重复的
+    那 40 遍不带任何新信息。
+    """
+    seen = getattr(_fail_local, "order_seen", None)
+    if seen is None:
+        seen = set()
+        _fail_local.order_seen = seen
+    seen_key = getattr(analysis, "id", "?")
+    if seen_key in seen:
+        return
+    seen.add(seen_key)
     try:
         violations = _interim_order_violations(interims)
     except Exception:
@@ -4246,8 +4377,9 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
     # factor "F" in the README example is exactly that) would then look
     # unchanged, and dependent analyses would never be re-evaluated.
     interims = deepcopy(self.getInterimFields())
-    _eci_sys.stderr.write("maitux: _evaluate_calculated_interims called, %d interims\n" % len(interims))
-    _eci_sys.stderr.flush()
+    if _DEBUG:
+        _eci_sys.stderr.write("maitux: _evaluate_calculated_interims called, %d interims\n" % len(interims))
+        _eci_sys.stderr.flush()
     if not interims:
         return
 
@@ -4266,15 +4398,17 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
 
     if not calculated:
         # Even if no "calculated" interims, still try calculatedlist evaluation
-        _eci_sys.stderr.write("maitux: no calculated interims found, trying calculatedlist only\n")
-        _eci_sys.stderr.flush()
+        if _DEBUG:
+            _eci_sys.stderr.write("maitux: no calculated interims found, trying calculatedlist only\n")
+            _eci_sys.stderr.flush()
         if chain:
             _evaluate_calculatedlist_interims(self)
         return
 
-    _eci_sys.stderr.write("maitux: found %d calculated interims: %s\n" % (
-        len(calculated), [c["keyword"] for c in calculated]))
-    _eci_sys.stderr.flush()
+    if _DEBUG:
+        _eci_sys.stderr.write("maitux: found %d calculated interims: %s\n" % (
+            len(calculated), [c["keyword"] for c in calculated]))
+        _eci_sys.stderr.flush()
 
     # --- Step 2: build value map from current non-calculated values ---
     value_map = {}
@@ -4610,10 +4744,12 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
                 result = eval(expr, safe_globals, {})
                 new_value = _stringify_result(result)
             except Exception as _nv_err:
-                _eci_sys.stderr.write(
-                    "maitux: [%s] literal-only eval FAILED: %s expr=%s\n"
-                    % (kw, str(_nv_err), expr[:200]))
-                _eci_sys.stderr.flush()
+                _note_eval_failure(kw, _nv_err)
+                if _DEBUG:
+                    _eci_sys.stderr.write(
+                        "maitux: [%s] literal-only eval FAILED: %s expr=%s\n"
+                        % (kw, str(_nv_err), expr[:200]))
+                    _eci_sys.stderr.flush()
                 # A formula that cannot be evaluated has no result.
                 # Leaving the field untouched kept a previously computed
                 # number on display even though it no longer follows from
@@ -4634,9 +4770,11 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
             new_value = _stringify_result(result)
 
         except Exception as _eval_err:
-            _eci_sys.stderr.write("maitux: [%s] eval FAILED: %s expr=%s vars=%s\n" % (
-                kw, str(_eval_err), expr[:200], str(sorted(variables))[:200]))
-            _eci_sys.stderr.flush()
+            _note_eval_failure(kw, _eval_err)
+            if _DEBUG:
+                _eci_sys.stderr.write("maitux: [%s] eval FAILED: %s expr=%s vars=%s\n" % (
+                    kw, str(_eval_err), expr[:200], str(sorted(variables))[:200]))
+                _eci_sys.stderr.flush()
             # Either an input is missing (an operator refused the
             # sentinel) or the formula genuinely cannot be evaluated.
             # Both mean "no result": write the placeholder rather than
@@ -4665,8 +4803,9 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
     if not chain:
         return
     import sys as _eci_sys
-    _eci_sys.stderr.write("maitux: _evaluate_calculated_interims -> calling _evaluate_calculatedlist_interims\n")
-    _eci_sys.stderr.flush()
+    if _DEBUG:
+        _eci_sys.stderr.write("maitux: _evaluate_calculated_interims -> calling _evaluate_calculatedlist_interims\n")
+        _eci_sys.stderr.flush()
     _evaluate_calculatedlist_interims(self)
 
 
@@ -4839,13 +4978,14 @@ def _evaluate_calculatedlist_interims(self, only=None):
                     calc_scalars[kw] = _safe_text(val)
 
     import sys as _dl_sys
-    _dl_sys.stderr.write("maitux: CALCULATEDLIST start, cl_items=%d\n" % len(cl_items))
-    for _dl in cl_items:
-        _dl_sys.stderr.write("maitux:   cl: kw=%s formula=%s\n" % (_dl.get("keyword","?"), _dl.get("formula","")[:80]))
-    _dl_sys.stderr.write("maitux:   list_arrays=%s\n" % {k:len(v) for k,v in list_arrays.items()})
-    _dl_sys.stderr.write("maitux:   str_arrays=%s\n" % {k:len(v) for k,v in str_arrays.items()})
-    _dl_sys.stderr.write("maitux:   calc_scalars=%s\n" % {k:v for k,v in calc_scalars.items()})
-    _dl_sys.stderr.flush()
+    if _DEBUG:
+        _dl_sys.stderr.write("maitux: CALCULATEDLIST start, cl_items=%d\n" % len(cl_items))
+        for _dl in cl_items:
+            _dl_sys.stderr.write("maitux:   cl: kw=%s formula=%s\n" % (_dl.get("keyword","?"), _dl.get("formula","")[:80]))
+        _dl_sys.stderr.write("maitux:   list_arrays=%s\n" % {k:len(v) for k,v in list_arrays.items()})
+        _dl_sys.stderr.write("maitux:   str_arrays=%s\n" % {k:len(v) for k,v in str_arrays.items()})
+        _dl_sys.stderr.write("maitux:   calc_scalars=%s\n" % {k:v for k,v in calc_scalars.items()})
+        _dl_sys.stderr.flush()
     if not cl_items:
         return
 
@@ -6417,8 +6557,9 @@ def _evaluate_calculatedlist_interims(self, only=None):
         all_array_refs = array_refs + str_refs  # for length validation
         scalar_refs = [r for r in all_refs if r not in list_arrays and r not in str_arrays]
 
-        _dl_sys.stderr.write("maitux:   processing cl kw=%s all_refs=%s array_refs=%s str_refs=%s scalar_refs=%s all_array_refs=%s\n" % (
-            kw, all_refs, array_refs, str_refs, scalar_refs, all_array_refs))
+        if _DEBUG:
+            _dl_sys.stderr.write("maitux:   processing cl kw=%s all_refs=%s array_refs=%s str_refs=%s scalar_refs=%s all_array_refs=%s\n" % (
+                kw, all_refs, array_refs, str_refs, scalar_refs, all_array_refs))
         if not all_array_refs:
             # No array deps -- single evaluation, store as [result]
             svm = {}
@@ -6431,9 +6572,11 @@ def _evaluate_calculatedlist_interims(self, only=None):
             try:
                 r = _eval_expr(formula, svm)
             except Exception as _nad_err:
-                _dl_sys.stderr.write(
-                    "maitux:   no-array-dep eval FAIL kw=%s: %s\n"
-                    % (kw, _nad_err))
+                _note_eval_failure(kw, _nad_err)
+                if _DEBUG:
+                    _dl_sys.stderr.write(
+                        "maitux:   no-array-dep eval FAIL kw=%s: %s\n"
+                        % (kw, _nad_err))
                 r = None
             if r is None:
                 new_value = _jj.dumps([_PLACEHOLDER])
@@ -6469,11 +6612,14 @@ def _evaluate_calculatedlist_interims(self, only=None):
             elif r in str_arrays:
                 lens.add(len(str_arrays[r]))
         if len(lens) != 1:
-            _dl_sys.stderr.write("maitux:   SKIP kw=%s: mismatched lens=%s\n" % (kw, lens))
+            _note_eval_failure(kw, "mismatched lens=%s" % (lens,))
+            if _DEBUG:
+                _dl_sys.stderr.write("maitux:   SKIP kw=%s: mismatched lens=%s\n" % (kw, lens))
             continue  # mismatched lengths -- skip
 
         n = list(lens)[0]
-        _dl_sys.stderr.write("maitux:   eval kw=%s n=%d\n" % (kw, n))
+        if _DEBUG:
+            _dl_sys.stderr.write("maitux:   eval kw=%s n=%d\n" % (kw, n))
         element_results = []
 
         # Detect formulas that need full arrays (GROUP_*, RESULT_STATUS)
@@ -6538,7 +6684,9 @@ def _evaluate_calculatedlist_interims(self, only=None):
                 elif r is not None:
                     element_results = [float(r)]
             except Exception as _dle:
-                _dl_sys.stderr.write("maitux:   ARRAY_FN eval FAIL kw=%s: %s\n" % (kw, _dle))
+                _note_eval_failure(kw, _dle)
+                if _DEBUG:
+                    _dl_sys.stderr.write("maitux:   ARRAY_FN eval FAIL kw=%s: %s\n" % (kw, _dle))
                 # Emit one placeholder per row rather than nothing: an
                 # empty result is never written, which would leave the
                 # previously computed value on display even though it no
@@ -6573,10 +6721,13 @@ def _evaluate_calculatedlist_interims(self, only=None):
                     else:
                         element_results.append(float(r))
                 except Exception as _dle:
-                    _dl_sys.stderr.write("maitux:   eval[%d] FAIL: %s svm=%s\n" % (i, _dle, svm))
+                    _note_eval_failure(kw, _dle)
+                    if _DEBUG:
+                        _dl_sys.stderr.write("maitux:   eval[%d] FAIL: %s svm=%s\n" % (i, _dle, svm))
                     element_results.append(_PLACEHOLDER)
 
-        _dl_sys.stderr.write("maitux:   result kw=%s element_results=%s (len=%d)\n" % (kw, element_results[:5], len(element_results)))
+        if _DEBUG:
+            _dl_sys.stderr.write("maitux:   result kw=%s element_results=%s (len=%d)\n" % (kw, element_results[:5], len(element_results)))
 
         if element_results:
             new_value = _jj.dumps(element_results)
