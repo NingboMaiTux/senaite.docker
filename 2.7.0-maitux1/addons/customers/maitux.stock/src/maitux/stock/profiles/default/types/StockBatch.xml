@@ -31,6 +31,10 @@
   <property name="behaviors">
     <element value="plone.app.dexterity.behaviors.metadata.IBasic"/>
     <element value="plone.app.referenceablebehavior.referenceable.IReferenceable" />
+    <!-- 中文注释：必须启用多目录行为，否则 senaite 的 CatalogMultiplexProcessor
+         会拒绝为 StockBatch 做目录索引（reindexObject 变成空操作），
+         导致批次列表/低库存/到期同步/分装候选都查不到新建批次。 -->
+    <element value="bika.lims.interfaces.IMultiCatalogBehavior"/>
   </property>
 
   <alias from="(Default)" to="(dynamic view)"/>

@@ -13,4 +13,6 @@
  <object name="StockPurchaseOrder" meta_type="Dexterity FTI"/>
  <object name="StockBatches" meta_type="Dexterity FTI"/>
  <object name="StockBatch" meta_type="Dexterity FTI"/>
+ <object name="StockUsageTrace" meta_type="Dexterity FTI"/>
+ <object name="StockUsageReport" meta_type="Dexterity FTI"/>
 </object>

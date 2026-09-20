@@ -26,6 +26,32 @@ LOW_STOCK_ID = "low_stock"
 LOW_STOCK_TITLE = _(u"Low Quantity", default=u"Low Quantity")
 SIDEBAR_DEPTH = 2
 
+USAGE_TRACE_ID = "usage_trace"
+USAGE_TRACE_TITLE = _(u"Usage Trace", default=u"Usage Trace")
+USAGE_REPORT_ID = "usage_report"
+USAGE_REPORT_TITLE = _(u"Usage Report", default=u"Usage Report")
+
+# 库存使用记录查询界面（两个独立节点，侧边栏按 path 倒序展示，u 开头排在最前）
+USAGE_SECTION_DEFINITIONS = (
+    (USAGE_TRACE_ID, "StockUsageTrace", USAGE_TRACE_TITLE),
+    (USAGE_REPORT_ID, "StockUsageReport", USAGE_REPORT_TITLE),
+)
+
+# 库存相关类型的图标（图标名必须是 senaite 图标表里真实存在的，
+# 否则会回退成 icon-not-found —— 即界面上的"问号"图标）。
+# 与 senaite core 各类型一致，使用 ``senaite_theme/icon/<名称>`` 形式。
+TYPE_ICONS = (
+    ("LowStockSection", "senaite_theme/icon/warning"),
+    ("StockUsageTrace", "senaite_theme/icon/auditlog"),
+    ("StockUsageReport", "senaite_theme/icon/report"),
+    ("StockSection", "senaite_theme/icon/clientfolder"),
+    ("StockType", "senaite_theme/icon/category"),
+    ("StockUnit", "senaite_theme/icon/container"),
+)
+
+# 只有命中这些历史取值才覆盖，避免冲掉客户自定义的图标
+BROKEN_ICON_EXPRS = ("", None, "senaite_theme/icon/folder")
+
 STOCK_CHILDREN = (
     (STOCK_UNITS_ID, "StockUnits", _(u"Units", default=u"Units")),
     (STOCK_TYPES_ID, "StockTypes", _(u"Stock Types", default=u"Stock Types")),
@@ -67,11 +93,40 @@ def setup_stock_content(context):
 def run_install_steps(portal):
     """按官方安装器风格拆分步骤，逐步执行并保留完整日志。"""
     setup_type_constraints()
+    setup_type_icons()
     stock_manager = setup_site_structure(portal)
     setup_permissions(stock_manager)
     setup_sidebar()
     setup_workflows()
     reindex_stock_structure(stock_manager)
+
+
+def setup_type_icons():
+    """修正库存相关类型的图标，避免侧边栏/列表出现"问号"图标。
+
+    背景：senaite 的图标表（``@@senaite_theme`` 的 ``icons()``）按
+    ``senaite.core/browser/static/assets/icons`` 下的文件名建索引，
+    取不到的图标名会回退成 ``icon-not-found``（问号）。历史 FTI 里写的
+    ``senaite_theme/icon/folder`` 并不存在（图标表里没有 ``folder``），
+    因此这几个节点一直显示问号。
+    """
+    logger.info("*** Setup Stock Type Icons ***")
+    types_tool = api.get_tool("portal_types")
+    if types_tool is None:
+        raise RuntimeError("portal_types tool not found")
+
+    for type_name, icon_expr in TYPE_ICONS:
+        fti = types_tool.getTypeInfo(type_name)
+        if fti is None:
+            logger.error("Skip icon for '%s': portal type is not registered yet.",
+                         type_name)
+            continue
+        current = fti.getProperty("icon_expr", None)
+        if current not in BROKEN_ICON_EXPRS:
+            logger.info("Skip icon for '%s': already '%s'", type_name, current)
+            continue
+        fti.manage_changeProperties(icon_expr=icon_expr)
+        logger.info("Set icon '%s' for '%s' (was %r)", icon_expr, type_name, current)
 
 
 def setup_type_constraints():
@@ -82,6 +137,18 @@ def setup_type_constraints():
 
     ensure_allowed_content_type(types_tool, "Plone Site", "StockManager")
     ensure_allowed_content_type(types_tool, "StockManager", "LowStockSection")
+    for obj_id, portal_type, title in USAGE_SECTION_DEFINITIONS:
+        if types_tool.getTypeInfo(portal_type) is None:
+            # 中文注释：本环境的 GenericSetup 步骤依赖图存在历史遗留的环，
+            # types.xml 的导入（typeinfo）有可能排在本步骤之后。这里只记录明确
+            # 错误、不抛异常，避免一次 profile 导入被整体回滚；导入完成后再跑一次
+            # profile（或访问 @@stock_usage_setup）即可补齐。
+            logger.error(
+                "Skip allowed_content_types for '%s': portal type is not "
+                "registered yet. Please run the maitux.stock profile import "
+                "once more.", portal_type)
+            continue
+        ensure_allowed_content_type(types_tool, "StockManager", portal_type)
 
 
 def ensure_allowed_content_type(types_tool, type_name, allowed_type):
@@ -113,6 +180,7 @@ def setup_site_structure(portal):
         for child_id, portal_type, title in STOCK_CHILDREN:
             ensure_content(stock_manager, portal_type, child_id, title)
 
+        ensure_usage_sections(stock_manager)
         ensure_low_stock_section(stock_manager)
         return stock_manager
 
@@ -258,6 +326,26 @@ def move_root_stock_items_into_folder(stock_manager, stock_folder):
         logger.info("Skip root stock item migration")
 
 
+def ensure_usage_sections(stock_manager):
+    """创建库存使用记录查询界面的两个节点（幂等）。
+
+    与其它子目录不同，这两个类型的 FTI 是本次新增的，可能因为 GenericSetup
+    步骤依赖图存在环而尚未导入。此时记录明确的 error 日志并跳过，不中断整个
+    profile 导入；再执行一次 profile 导入（或访问 ``@@stock_usage_setup``）即可。
+    """
+    logger.info("*** Ensure Stock Usage Sections ***")
+    types_tool = api.get_tool("portal_types")
+    for obj_id, portal_type, title in USAGE_SECTION_DEFINITIONS:
+        if types_tool is not None and types_tool.getTypeInfo(portal_type) is None:
+            logger.error(
+                "Cannot create '%s': portal type '%s' is not registered yet. "
+                "Re-run the maitux.stock profile import (or visit "
+                "@@stock_usage_setup on the stock manager) to create it.",
+                obj_id, portal_type)
+            continue
+        ensure_content(stock_manager, portal_type, obj_id, title)
+
+
 def ensure_low_stock_section(stock_manager):
     logger.info("*** Ensure Low Stock Section ***")
     if LOW_STOCK_ID in stock_manager:
@@ -282,6 +370,8 @@ def setup_permissions(stock_manager):
         stock_manager.get(STOCK_BATCHES_ID),
         stock_manager.get(LOW_STOCK_ID),
     ]
+    for obj_id, portal_type, title in USAGE_SECTION_DEFINITIONS:
+        targets.append(stock_manager.get(obj_id))
 
     for obj in filter(None, targets):
         obj.manage_permission("View", roles=roles, acquire=0)
@@ -389,6 +479,8 @@ def reindex_stock_structure(stock_manager):
         stock_manager.get(STOCK_BATCHES_ID),
         stock_manager.get(LOW_STOCK_ID),
     ]
+    for obj_id, portal_type, title in USAGE_SECTION_DEFINITIONS:
+        targets.append(stock_manager.get(obj_id))
 
     for obj in filter(None, targets):
         obj.reindexObject()

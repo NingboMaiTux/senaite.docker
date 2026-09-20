@@ -20,7 +20,8 @@ class StockBatchView(BrowserView):
         parts = uid.splitlines()
         uid = parts[0] if parts else ""
         obj = api.get_object_by_uid(uid, default=None) if uid else None
-        return api.get_title(obj) if obj else ""
+        # 中文注释：统一返回 unicode，避免中文标题以 utf8 字节串进入模板
+        return api.safe_unicode(api.get_title(obj)) if obj else u""
 
     def usage_records(self):
         return getattr(self.context, "usage_records", []) or []

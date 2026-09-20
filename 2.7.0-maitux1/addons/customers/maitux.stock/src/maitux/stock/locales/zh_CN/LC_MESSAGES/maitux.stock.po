@@ -532,3 +532,9 @@ msgstr "分装"
 
 msgid "operation_stocktake"
 msgstr "盘存"
+
+msgid "Usage Trace"
+msgstr "使用记录追溯"
+
+msgid "Usage Report"
+msgstr "对照品使用记录"

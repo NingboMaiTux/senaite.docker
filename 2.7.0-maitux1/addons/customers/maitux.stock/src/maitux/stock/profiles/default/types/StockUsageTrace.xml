@@ -1,25 +1,25 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
-<object name="LowStockSection" meta_type="Dexterity FTI"
+<?xml version="1.0" encoding="UTF-8"?>
+<object name="StockUsageTrace" meta_type="Dexterity FTI"
         i18n:domain="maitux.stock"
         xmlns:i18n="http://xml.zope.org/namespaces/i18n"
         purge="True">
 
-  <property name="title" i18n:translate="">Low Quantity</property>
-  <property name="description" i18n:translate=""></property>
+  <property name="title" i18n:translate="">Usage Trace</property>
+  <property name="description" i18n:translate="">Stock usage traceability</property>
 
-  <property name="icon_expr">senaite_theme/icon/warning</property>
-  <property name="factory">LowStockSection</property>
-  <property name="add_view_expr">string:${folder_url}/++add++LowStockSection</property>
-  <property name="immediate_view">low_stock</property>
+  <property name="icon_expr">senaite_theme/icon/auditlog</property>
+  <property name="factory">StockUsageTrace</property>
+  <property name="add_view_expr">string:${folder_url}/++add++StockUsageTrace</property>
+  <property name="immediate_view">stock_usage_trace</property>
 
   <property name="global_allow">False</property>
   <property name="filter_content_types">False</property>
   <property name="allowed_content_types"/>
   <property name="allow_discussion">False</property>
 
-  <property name="default_view">low_stock</property>
+  <property name="default_view">stock_usage_trace</property>
   <property name="view_methods">
-    <element value="low_stock"/>
+    <element value="stock_usage_trace"/>
   </property>
   <property name="default_view_fallback">False</property>
 
@@ -39,4 +39,3 @@
   <alias from="view" to="(selected layout)"/>
 
 </object>
-
