@@ -107,9 +107,8 @@ bash /tmp/gen-custom-addon.sh
 step "写入 buildout.cfg 的口令"
 python - <<'PYEOF'
 # -*- coding: utf-8 -*-
-# PEP 263：本块有中文注释，Py2 没有这行会直接
-#   SyntaxError: Non-ASCII character ... but no encoding declared
-# 而且是 entrypoint 阶段报错，容器起不来只能看日志猜。删了它等于把容器锁死。
+# ↑ 必须有：容器里的 `python` 是 2.7，源码带中文注释而没有 encoding 声明时
+#   直接 SyntaxError，entrypoint 在 set -e 下退出 → 容器无限重启。
 import io
 import os
 import sys

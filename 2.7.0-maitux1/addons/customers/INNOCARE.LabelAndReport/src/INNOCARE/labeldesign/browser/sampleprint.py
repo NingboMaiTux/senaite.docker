@@ -147,6 +147,8 @@ class SampleLabelPrintView(BrowserView):
         return [
             {"id": "INNOCARE.LabelAndReport:SampleNormal_40x30mm.pt",
              "title": "样品标签 (Sample Normal)", "selected": False},
+            {"id": "INNOCARE.LabelAndReport:SampleNormal_60x40mm.pt",
+             "title": "样品标签·大号 60x40mm (Sample Normal 60x40mm)", "selected": False},
             {"id": "INNOCARE.LabelAndReport:SampleStability_40x30mm.pt",
              "title": "样品标签·稳定性 (Sample Stability)", "selected": False},
         ]
