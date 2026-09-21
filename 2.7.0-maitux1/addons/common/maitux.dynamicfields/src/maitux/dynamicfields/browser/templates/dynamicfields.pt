@@ -52,10 +52,32 @@
             padding:1px 4px;border-radius:3px; }
 .mdf-stat { display:inline-flex;flex-direction:column;padding-right:22px;
             margin-right:22px;border-right:1px solid #e3e8ea; }
-.mdf-drawer { border:1px solid #d7dbdc;border-radius:4px;background:#fff;
-              margin-top:14px; }
-.mdf-drawer > summary { background:#35708F;color:#fff;padding:10px 14px;
-                        cursor:pointer;font-weight:600; }
+/* 添加字段：从右侧拉出的抽屉，覆盖在字段列表上。
+   为什么是覆盖而不是把右栏劈两半：字段表格固定列宽加起来最少 816px，
+   劈完放不下；抽屉压上去，表单能拿到 780px 的净宽。
+
+   固定定位的抽屉离了 JS 就永远打不开，所以样式挂在 body.mdf-js 上——
+   JS 一进来先打这个标记。没有 JS 时下面这几条都不生效，那块表单就是
+   页面底部一块普通区域，跟改成抽屉之前一样能用。 */
+.mdf-panel { border:1px solid #d7dbdc;border-radius:4px;background:#fff;
+             margin-top:14px; }
+.mdf-backdrop { display:none; }
+#mdf_open { display:none; }
+body:not(.mdf-js) .mdf-panel-x { display:none; }
+body.mdf-js #mdf_open { display:inline-block; }
+body.mdf-js .mdf-panel { display:none;position:fixed;top:0;right:0;bottom:0;
+             width:780px;max-width:94vw;z-index:1040;overflow-y:auto;
+             margin-top:0;border:0;border-radius:0;
+             box-shadow:-2px 0 14px rgba(0,0,0,.18); }
+body.mdf-js .mdf-backdrop { position:fixed;top:0;left:0;right:0;bottom:0;
+             background:rgba(0,0,0,.25);z-index:1039; }
+body.mdf-js.mdf-open .mdf-panel,
+body.mdf-js.mdf-open .mdf-backdrop { display:block; }
+body.mdf-js.mdf-open { overflow:hidden; }
+.mdf-panel-head { position:sticky;top:0;background:#35708F;color:#fff;
+                  padding:10px 14px;font-weight:600;z-index:1; }
+.mdf-panel-x { float:right;background:none;border:0;color:#fff;font-size:20px;
+               line-height:1;cursor:pointer;padding:0 4px; }
 .mdf-grp { border:1px solid #d7dbdc;border-radius:4px;margin-bottom:10px; }
 .mdf-grp > summary { background:#f4f7f8;padding:8px 12px;cursor:pointer; }
 /* 添加字段表单：每一项一行，形状统一为 名词 | 控件 | 说明。
@@ -161,12 +183,15 @@
     </div>
 
     <div class="col-md-9" tal:condition="info">
+      <!-- AT / DX 和「经 schemaextender 扩展」是实现细节，实施人员不需要
+           知道，也帮不上他任何忙。加字段的按钮放在这一行右端，不再是页面
+           最底下那条横幅。 -->
       <div class="d-flex align-items-center mb-2">
         <h2 class="h4 mb-0 mr-2" tal:content="info/title">Title</h2>
-        <span class="mdf-code mr-2" tal:content="info/portal_type">Type</span>
-        <span tal:attributes="class string:mdf-mech mdf-mech-${info/mechanism}"
-              tal:content="info/mechanism">AT</span>
-        <span class="small text-muted ml-2" tal:content="info/mechanism_note">note</span>
+        <span class="mdf-code" tal:content="info/portal_type">Type</span>
+        <button type="button" class="btn btn-sm ml-auto" id="mdf_open"
+                style="background:#35708F;border-color:#2c5f7a;color:#fff;"
+                i18n:translate="">Add field</button>
       </div>
 
       <div class="alert alert-danger py-2 small" tal:condition="info/deprecated">
@@ -262,25 +287,6 @@
 
         <details class="mdf-sec">
           <summary>
-            <span class="text-muted" i18n:translate="">Added by other add-ons</span>
-            <span class="mdf-cnt" tal:content="python:len(sections['addon'])">0</span>
-            <span class="float-right mdf-lock font-weight-normal"
-                  i18n:translate="">read only · cannot be deleted</span>
-          </summary>
-          <div class="mdf-row mdf-row-ro" tal:repeat="field sections/addon">
-            <span class="mdf-c" style="width:170px;">
-              <span class="mdf-code" tal:content="field/name">name</span></span>
-            <span class="mdf-c text-muted" style="width:92px;" tal:content="field/type">type</span>
-            <span class="mdf-c" style="flex-grow:1;" tal:content="field/label">label</span>
-            <span class="mdf-c" style="width:260px;">
-              <span class="mdf-code" tal:content="field/source">src</span></span>
-            <span class="mdf-c mdf-lock" style="width:130px;"
-                  i18n:translate="">cannot be deleted</span>
-          </div>
-        </details>
-
-        <details class="mdf-sec">
-          <summary>
             <span class="text-muted" i18n:translate="">Native fields</span>
             <span class="mdf-cnt" tal:content="python:len(sections['native'])">0</span>
             <span class="float-right mdf-lock font-weight-normal"
@@ -298,16 +304,35 @@
           </div>
         </details>
 
+        <details class="mdf-sec">
+          <summary>
+            <span class="text-muted" i18n:translate="">Added by other add-ons</span>
+            <span class="mdf-cnt" tal:content="python:len(sections['addon'])">0</span>
+            <span class="float-right mdf-lock font-weight-normal"
+                  i18n:translate="">read only · cannot be deleted</span>
+          </summary>
+          <div class="mdf-row mdf-row-ro" tal:repeat="field sections/addon">
+            <span class="mdf-c" style="width:170px;">
+              <span class="mdf-code" tal:content="field/name">name</span></span>
+            <span class="mdf-c text-muted" style="width:92px;" tal:content="field/type">type</span>
+            <span class="mdf-c" style="flex-grow:1;" tal:content="field/label">label</span>
+            <span class="mdf-c" style="width:260px;">
+              <span class="mdf-code" tal:content="field/source">src</span></span>
+            <span class="mdf-c mdf-lock" style="width:130px;"
+                  i18n:translate="">cannot be deleted</span>
+          </div>
+        </details>
+
       </tal:sections>
 
-      <!-- ============ 添加字段（同页展开，不跳新页） ============ -->
-      <details class="mdf-drawer">
-        <!-- 不要在这儿加 "+"：浏览器给 <summary> 自带的展开三角还在
-             （.mdf-drawer 没有像 .mdf-sec 那样关掉 list-style），
-             加号叠在三角旁边，看着像个能点的按钮。 -->
-        <summary>
+      <!-- ============ 添加字段：右侧抽屉（同页，不跳新页） ============ -->
+      <div class="mdf-backdrop" id="mdf_backdrop"></div>
+      <div class="mdf-panel" id="mdf_panel">
+        <div class="mdf-panel-head">
+          <button type="button" class="mdf-panel-x" id="mdf_close"
+                  aria-label="Close">&#215;</button>
           <span i18n:translate="">Add field</span>
-        </summary>
+        </div>
         <form method="post" class="p-3" tal:attributes="action base">
           <input type="hidden" name="action" value="save_field" />
           <input type="hidden" name="tab" value="objects" />
@@ -752,12 +777,39 @@
             sync();
           })();
 
+          /* 右侧抽屉的开合。
+             保存失败时不自动重开：表单不回填，重开只会拿一张空表挡住页面
+             顶部那条红色报错。让它关着，用户看见错误再点一次。 */
+          (function () {
+            var opener = document.getElementById("mdf_open");
+            var panel = document.getElementById("mdf_panel");
+            if (!opener || !panel) { return; }
+            var body = document.body;
+            // 先声明「这一页有 JS」，样式表里的抽屉规则才生效
+            body.className += " mdf-js";
+            function show(on) {
+              var cls = body.className.replace(/\s*\bmdf-open\b/g, "");
+              body.className = on ? cls + " mdf-open" : cls;
+            }
+            opener.addEventListener("click", function () { show(true); });
+            var shut = document.getElementById("mdf_close");
+            if (shut) {
+              shut.addEventListener("click", function () { show(false); });
+            }
+            var back = document.getElementById("mdf_backdrop");
+            if (back) {
+              back.addEventListener("click", function () { show(false); });
+            }
+            document.addEventListener("keydown", function (ev) {
+              if (ev.keyCode === 27) { show(false); }
+            });
+          })();
           </script>
           <span class="small text-muted ml-2" i18n:translate="">
             Takes effect immediately; no container restart needed.
           </span>
         </form>
-      </details>
+      </div>
     </div>
   </div>
   </div>
