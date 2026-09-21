@@ -1,0 +1,22 @@
+<tal:entry xmlns:tal="http://xml.zope.org/namespaces/tal"
+           xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+           i18n:domain="maitux.dynamicfields">
+  <div class="card border-0 mb-3"
+       style="background:#f4f7f8;border-left:3px solid #428AAF !important;">
+    <div class="card-body py-2 px-3 d-flex align-items-center">
+      <div class="flex-grow-1">
+        <a href="#"
+           class="font-weight-bold"
+           style="color:#35708F;"
+           tal:attributes="href view/url"
+           i18n:translate="">Dynamic Fields</a>
+        <div class="small text-muted" i18n:translate="">
+          Add custom fields to SENAITE objects without restarting the container
+        </div>
+      </div>
+      <a href="#" class="btn btn-sm btn-outline-secondary"
+         tal:attributes="href view/url"
+         i18n:translate="">Open</a>
+    </div>
+  </div>
+</tal:entry>

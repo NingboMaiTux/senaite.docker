@@ -1,0 +1,55 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:i18n="http://namespaces.zope.org/i18n"
+    i18n_domain="maitux.dynamicfields">
+
+  <include package="plone.behavior" file="meta.zcml" />
+
+  <!-- 配置页界面文案：常规 gettext -->
+  <i18n:registerTranslations directory="locales" />
+
+  <!--
+    用户自建字段标签的翻译域：查配置库，不查 .mo。
+
+    字段是运行时通过网页建出来的，不可能预先准备 .po；运行时写 .po/.mo 也没用
+    （已注册的 catalog 不重新加载，按 R8 得重启容器）。翻译域在 Zope 里就是一个
+    实现了 translate() 的 utility，接口并没规定它必须查 .mo —— 所以这里注册一个
+    自己的实现。注册成具名 utility，zope.i18n.translate 就是按域名找它的。
+  -->
+  <utility
+      component=".i18n.dynamic_labels_domain"
+      provides="zope.i18n.interfaces.ITranslationDomain"
+      name="maitux.dynamicfields.labels"
+      />
+
+  <!--
+    Dexterity：把动态 schema 挂到对象上，不写 FTI、不需要 profile。
+    getAdditionalSchemata() 走的是 IBehaviorAssignable，且每次都调、无缓存。
+  -->
+  <adapter factory=".assignable.DynamicFieldsAssignable" />
+
+  <!--
+    Archetypes：按配置返回扩展字段。
+    schemaextender 自己的缓存挂在 request 上，跨请求不保留，所以配置改完
+    下一个请求就生效。
+  -->
+  <adapter
+      factory=".atextender.DynamicFieldsExtender"
+      provides="archetypes.schemaextender.interfaces.ISchemaExtender"
+      for="Products.Archetypes.interfaces.IBaseObject"
+      />
+
+  <include package=".browser" />
+
+  <!--
+    刻意**不**注册 GenericSetup profile。
+
+    本包随镜像发布、站点侧不安装：common-addons.cfg 里 [plonesite] profiles
+    那段是死代码（buildout.cfg 在 extends 之后用普通赋值重新定义了 profiles，
+    实测一条都进不去），所以 profile 根本拿不到执行时机。凡是靠 profile 才生效
+    的东西——browserlayer.xml / registry.xml / controlpanel.xml / catalog.xml /
+    setuphandlers 里的 enable_behavior——本包一律不用，改由 ZCML + 运行时代码
+    完成。回滚方式见 README。
+  -->
+
+</configure>

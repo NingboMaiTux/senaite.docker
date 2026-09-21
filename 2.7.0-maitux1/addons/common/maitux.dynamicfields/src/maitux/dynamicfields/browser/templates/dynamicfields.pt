@@ -1,0 +1,593 @@
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      i18n:domain="maitux.dynamicfields"
+      metal:use-macro="context/main_template/macros/master">
+<body>
+<metal:content-core fill-slot="content-core">
+
+<tal:page define="tab view/tab;
+                  info view/selected_info;
+                  languages view/language_slugs;
+                  base view/base_url;">
+
+<style type="text/css">
+/* SENAITE 实测配色：#293333 深色条 / #428AAF 主色 / #f8f9fa 浅底。
+   正文链接用 #35708F —— #428AAF 在白底上只有 3.8:1，正文号字达不到 4.5:1。 */
+.mdf-wrap { color:#293333; }
+.mdf-wrap a { color:#35708F; }
+.mdf-mech { display:inline-block;font-size:10px;line-height:1;padding:3px 5px;
+            border-radius:3px;font-weight:700;letter-spacing:.04em; }
+.mdf-mech-AT { background:#f3ece0;color:#6b5c3c;border:1px solid #ded0b4; }
+.mdf-mech-DX { background:#e7f0f5;color:#2f6a8a;border:1px solid #bcd6e3; }
+.mdf-cnt { display:inline-block;min-width:20px;text-align:center;font-size:11px;
+           line-height:1;padding:4px 6px;border-radius:9px;background:#eef2f4;color:#606969; }
+.mdf-cnt-on { background:#428AAF;color:#fff; }
+.mdf-pos { display:inline-flex;align-items:center;justify-content:center;width:22px;
+           height:22px;border-radius:3px;font-size:11px;margin-right:3px; }
+.mdf-pos-on { background:#428AAF;color:#fff;border:1px solid #35708F; }
+.mdf-pos-off { background:#fff;color:#c2c9cc;border:1px dashed #d7dbdc; }
+.mdf-type { display:block;padding:6px 10px;border-left:3px solid transparent;
+            text-decoration:none;color:#293333; }
+.mdf-type:hover { background:#f2f6f8;text-decoration:none; }
+.mdf-type-on { background:rgba(66,138,175,.16);border-left-color:#428AAF; }
+.mdf-sec { border:1px solid #d7dbdc;border-radius:4px;margin-bottom:12px;background:#fff; }
+.mdf-sec > summary { background:#f8f9fa;padding:10px 14px;cursor:pointer;
+                     font-weight:600;font-size:13.5px;list-style:none; }
+.mdf-sec > summary::-webkit-details-marker { display:none; }
+.mdf-sec > summary:before { content:"\25B8";margin-right:8px;color:#909a9a; }
+.mdf-sec[open] > summary:before { content:"\25BE";color:#35708F; }
+.mdf-row { display:flex;align-items:center;border-top:1px solid #eef1f2;font-size:13px; }
+.mdf-row-ro { background:#fcfdfd; }
+.mdf-hrow { display:flex;align-items:center;background:#fcfdfd;
+            border-top:1px solid #d7dbdc;font-size:11.5px;font-weight:600;color:#606969; }
+.mdf-c { padding:8px 10px;min-width:0;overflow:hidden;text-overflow:ellipsis;
+         white-space:nowrap; }
+.mdf-lock { font-size:11.5px;color:#909a9a; }
+.mdf-code { font-family:Consolas,monospace;font-size:12px;background:#f4f6f7;
+            padding:1px 4px;border-radius:3px; }
+.mdf-stat { display:inline-flex;flex-direction:column;padding-right:22px;
+            margin-right:22px;border-right:1px solid #e3e8ea; }
+.mdf-drawer { border:1px solid #d7dbdc;border-radius:4px;background:#fff;
+              margin-top:14px; }
+.mdf-drawer > summary { background:#35708F;color:#fff;padding:10px 14px;
+                        cursor:pointer;font-weight:600; }
+.mdf-grp { border:1px solid #d7dbdc;border-radius:4px;margin-bottom:10px; }
+.mdf-grp > summary { background:#f4f7f8;padding:8px 12px;cursor:pointer; }
+</style>
+
+<div class="mdf-wrap">
+
+  <h1 class="documentFirstHeading" i18n:translate="">Dynamic Fields</h1>
+  <p class="text-muted small" i18n:translate="">
+    Add custom fields to SENAITE objects. Native fields and fields provided by
+    other add-ons are read only.
+  </p>
+
+  <!-- 状态消息 -->
+  <div class="alert alert-info py-2" tal:condition="view/messages">
+    <div tal:repeat="msg view/messages" tal:content="msg">ok</div>
+  </div>
+  <div class="alert alert-danger py-2" tal:condition="view/errors">
+    <div tal:repeat="err view/errors" tal:content="err">error</div>
+  </div>
+
+  <!-- 本包的 assignable 被别的 add-on 旁路掉时的告警 -->
+  <div class="alert alert-warning py-2"
+       tal:define="shadow view/shadow_warning"
+       tal:condition="shadow"
+       tal:content="shadow">shadow</div>
+
+  <!-- tabs -->
+  <ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+      <a class="nav-link"
+         tal:attributes="class python:'nav-link active' if tab == 'objects' else 'nav-link';
+                         href string:${base}?tab=objects"
+         i18n:translate="">Browse by object</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link"
+         tal:attributes="class python:'nav-link active' if tab == 'all' else 'nav-link';
+                         href string:${base}?tab=all"
+         i18n:translate="">All custom fields</a>
+    </li>
+    <li class="nav-item ml-auto">
+      <a class="nav-link" tal:attributes="href view/export_url"
+         i18n:translate="">Export JSON</a>
+    </li>
+  </ul>
+
+  <!-- ================= tab 1：按对象浏览 ================= -->
+  <div tal:condition="python:tab == 'objects'">
+  <div class="row">
+
+    <div class="col-md-3">
+      <div class="border rounded" style="background:#fcfdfd;">
+        <tal:groups repeat="group view/type_groups">
+          <div class="px-3 pt-2 pb-1 small font-weight-bold text-muted"
+               tal:content="group/title">group</div>
+          <tal:items repeat="item group/items">
+            <a class="mdf-type"
+               tal:attributes="href string:${base}?tab=objects&amp;portal_type=${item/portal_type};
+                               class python:'mdf-type mdf-type-on' if info and item['portal_type'] == info['portal_type'] else 'mdf-type'">
+              <span class="d-flex align-items-center">
+                <span class="flex-grow-1" tal:content="item/title">title</span>
+                <span tal:attributes="class string:mdf-mech mdf-mech-${item/mechanism}"
+                      tal:content="item/mechanism">AT</span>
+                <span tal:attributes="class python:'mdf-cnt mdf-cnt-on' if item['count'] else 'mdf-cnt'"
+                      class="ml-1" tal:content="item/count">0</span>
+              </span>
+              <span class="d-block text-muted" style="font-size:11px;"
+                    tal:content="item/portal_type">Type</span>
+            </a>
+          </tal:items>
+        </tal:groups>
+      </div>
+    </div>
+
+    <div class="col-md-9" tal:condition="info">
+      <div class="d-flex align-items-center mb-2">
+        <h2 class="h4 mb-0 mr-2" tal:content="info/title">Title</h2>
+        <span class="mdf-code mr-2" tal:content="info/portal_type">Type</span>
+        <span tal:attributes="class string:mdf-mech mdf-mech-${info/mechanism}"
+              tal:content="info/mechanism">AT</span>
+        <span class="small text-muted ml-2" tal:content="info/mechanism_note">note</span>
+      </div>
+
+      <tal:sections define="sections view/field_sections">
+
+        <details class="mdf-sec" open="open">
+          <summary>
+            <span i18n:translate="">Fields added here</span>
+            <span class="mdf-cnt mdf-cnt-on" tal:content="python:len(sections['own'])">0</span>
+            <span class="float-right small font-weight-normal"
+                  style="color:#35708F;" i18n:translate="">editable · deletable</span>
+          </summary>
+          <div class="mdf-hrow" tal:condition="sections/own">
+            <span class="mdf-c" style="width:170px;" i18n:translate="">Name</span>
+            <span class="mdf-c" style="width:92px;" i18n:translate="">Type</span>
+            <span class="mdf-c" style="flex-grow:1;" i18n:translate="">Label</span>
+            <span class="mdf-c" style="width:128px;" i18n:translate="">Shown in</span>
+            <span class="mdf-c" style="width:62px;" i18n:translate="">Index</span>
+            <span class="mdf-c" style="width:150px;" i18n:translate="">Actions</span>
+          </div>
+          <div class="mdf-row" tal:repeat="field sections/own">
+            <span class="mdf-c" style="width:170px;">
+              <span class="mdf-code" tal:content="field/name">name</span>
+            </span>
+            <span class="mdf-c text-muted" style="width:92px;"
+                  tal:content="field/type_title">type</span>
+            <span class="mdf-c" style="flex-grow:1;" tal:content="field/label">label</span>
+            <span class="mdf-c" style="width:128px;">
+              <span tal:repeat="slot field/positions"
+                    tal:attributes="class python:'mdf-pos mdf-pos-on' if slot['on'] else 'mdf-pos mdf-pos-off';
+                                    title slot/key"
+                    tal:content="slot/text">x</span>
+            </span>
+            <span class="mdf-c text-muted" style="width:62px;"
+                  tal:content="field/index_label">-</span>
+            <span class="mdf-c" style="width:150px;">
+              <form method="post" class="d-inline"
+                    tal:attributes="action base">
+                <input type="hidden" name="action" value="reindex_field" />
+                <input type="hidden" name="tab" value="objects" />
+                <input type="hidden" name="portal_type"
+                       tal:attributes="value field/portal_type" />
+                <input type="hidden" name="field_id"
+                       tal:attributes="value field/id" />
+                <button type="submit" class="btn btn-sm btn-link p-0 mr-2"
+                        tal:condition="field/indexed"
+                        i18n:translate="">Reindex</button>
+              </form>
+              <form method="post" class="d-inline"
+                    tal:attributes="action base"
+                    onsubmit="return confirm('删除后该字段不再显示；对象上已写入的值会保留。确定删除？');">
+                <input type="hidden" name="action" value="delete_field" />
+                <input type="hidden" name="tab" value="objects" />
+                <input type="hidden" name="portal_type"
+                       tal:attributes="value field/portal_type" />
+                <input type="hidden" name="field_id"
+                       tal:attributes="value field/id" />
+                <button type="submit" class="btn btn-sm btn-link text-danger p-0"
+                        i18n:translate="">Delete</button>
+              </form>
+            </span>
+          </div>
+          <div class="p-4 text-center text-muted" tal:condition="not:sections/own"
+               i18n:translate="">No custom fields on this object yet.</div>
+        </details>
+
+        <details class="mdf-sec">
+          <summary>
+            <span class="text-muted" i18n:translate="">Added by other add-ons</span>
+            <span class="mdf-cnt" tal:content="python:len(sections['addon'])">0</span>
+            <span class="float-right mdf-lock font-weight-normal"
+                  i18n:translate="">read only · cannot be deleted</span>
+          </summary>
+          <div class="mdf-row mdf-row-ro" tal:repeat="field sections/addon">
+            <span class="mdf-c" style="width:170px;">
+              <span class="mdf-code" tal:content="field/name">name</span></span>
+            <span class="mdf-c text-muted" style="width:92px;" tal:content="field/type">type</span>
+            <span class="mdf-c" style="flex-grow:1;" tal:content="field/label">label</span>
+            <span class="mdf-c" style="width:260px;">
+              <span class="mdf-code" tal:content="field/source">src</span></span>
+            <span class="mdf-c mdf-lock" style="width:130px;"
+                  i18n:translate="">cannot be deleted</span>
+          </div>
+        </details>
+
+        <details class="mdf-sec">
+          <summary>
+            <span class="text-muted" i18n:translate="">Native fields</span>
+            <span class="mdf-cnt" tal:content="python:len(sections['native'])">0</span>
+            <span class="float-right mdf-lock font-weight-normal"
+                  i18n:translate="">read only · cannot be deleted</span>
+          </summary>
+          <div class="mdf-row mdf-row-ro" tal:repeat="field sections/native">
+            <span class="mdf-c" style="width:170px;">
+              <span class="mdf-code" tal:content="field/name">name</span></span>
+            <span class="mdf-c text-muted" style="width:92px;" tal:content="field/type">type</span>
+            <span class="mdf-c" style="flex-grow:1;" tal:content="field/label">label</span>
+            <span class="mdf-c" style="width:260px;">
+              <span class="mdf-code" tal:content="field/source">src</span></span>
+            <span class="mdf-c mdf-lock" style="width:130px;"
+                  i18n:translate="">cannot be deleted</span>
+          </div>
+        </details>
+
+      </tal:sections>
+
+      <!-- ============ 添加字段（同页展开，不跳新页） ============ -->
+      <details class="mdf-drawer">
+        <summary>
+          + <span i18n:translate="">Add field</span>
+        </summary>
+        <form method="post" class="p-3" tal:attributes="action base">
+          <input type="hidden" name="action" value="save_field" />
+          <input type="hidden" name="tab" value="objects" />
+          <input type="hidden" name="portal_type"
+                 tal:attributes="value info/portal_type" />
+
+          <div class="alert alert-secondary py-2 small">
+            <span i18n:translate="">Target object</span>
+            <strong tal:content="info/title">Title</strong>
+            <span class="mdf-code" tal:content="info/portal_type">Type</span>
+            <span tal:attributes="class string:mdf-mech mdf-mech-${info/mechanism}"
+                  tal:content="info/mechanism">AT</span>
+            <span class="mdf-lock ml-2" i18n:translate="">
+              taken from the selection on the left; cannot be changed
+            </span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group col-md-4">
+              <label class="small" i18n:translate="">Field name</label>
+              <input type="text" name="name" class="form-control form-control-sm"
+                     pattern="[a-z][a-z0-9_]{1,49}" required="required" />
+              <small class="form-text text-muted" i18n:translate="">
+                ASCII lower case, digits and underscore. Cannot be changed later.
+              </small>
+            </div>
+            <div class="form-group col-md-4">
+              <label class="small" i18n:translate="">Field type</label>
+              <select name="type" class="form-control form-control-sm">
+                <option tal:repeat="ft view/field_types"
+                        tal:attributes="value ft/id" tal:content="ft/title">type</option>
+              </select>
+              <small class="form-text text-muted" i18n:translate="">
+                Cannot be changed later; delete and re-create instead.
+              </small>
+            </div>
+            <div class="form-group col-md-2">
+              <label class="small" i18n:translate="">Fieldset</label>
+              <input type="text" name="fieldset" value="default"
+                     class="form-control form-control-sm" />
+            </div>
+            <div class="form-group col-md-2">
+              <label class="small" i18n:translate="">Order</label>
+              <input type="text" name="order" value="0"
+                     class="form-control form-control-sm" />
+            </div>
+          </div>
+
+          <fieldset class="border rounded p-2 mb-3">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Labels (stored as data, applied without a restart)</legend>
+            <div class="form-row">
+              <div class="form-group col-md-6" tal:repeat="lang languages">
+                <label class="small">
+                  <span i18n:translate="">Label</span> · <span tal:content="lang/label">zh</span>
+                </label>
+                <input type="text" class="form-control form-control-sm"
+                       tal:attributes="name string:label_${lang/slug}" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group col-md-6 mb-0" tal:repeat="lang languages">
+                <label class="small">
+                  <span i18n:translate="">Description</span> · <span tal:content="lang/label">zh</span>
+                </label>
+                <input type="text" class="form-control form-control-sm"
+                       tal:attributes="name string:desc_${lang/slug}" />
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="border rounded p-2 mb-3">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Where it shows</legend>
+            <div class="custom-control custom-checkbox">
+              <input type="checkbox" class="custom-control-input" id="mdf_edit"
+                     name="show_edit" value="1" checked="checked" />
+              <label class="custom-control-label small" for="mdf_edit"
+                     i18n:translate="">On the edit form</label>
+            </div>
+            <div class="custom-control custom-checkbox">
+              <input type="checkbox" class="custom-control-input" id="mdf_view"
+                     name="show_view" value="1" checked="checked" />
+              <label class="custom-control-label small" for="mdf_view"
+                     i18n:translate="">On the view page</label>
+            </div>
+            <div class="custom-control custom-checkbox">
+              <input type="checkbox" class="custom-control-input" id="mdf_list"
+                     name="show_list" value="1" />
+              <label class="custom-control-label small" for="mdf_list"
+                     i18n:translate="">As a listing column (requires the metadata column below)</label>
+            </div>
+            <div class="custom-control custom-checkbox">
+              <input type="checkbox" class="custom-control-input" id="mdf_listdef"
+                     name="list_default" value="1" />
+              <label class="custom-control-label small" for="mdf_listdef"
+                     i18n:translate="">Visible by default in listings</label>
+            </div>
+            <div class="alert alert-warning py-2 mt-2 mb-0 small">
+              这些开关只对 SENAITE 的<strong>标准编辑 / 查看表单</strong>与列表页生效。
+              样品新建页 <span class="mdf-code">ar_add2</span>、样品与工作表顶部的
+              header_table、工作表结果录入页都是手写模板，<strong>不读 schema</strong>，
+              v1 无法自动把字段放进去。
+            </div>
+          </fieldset>
+
+          <fieldset class="border rounded p-2 mb-3">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Options (Choice type only)</legend>
+            <div class="form-row" tal:repeat="n python:range(5)">
+              <div class="form-group col-md-3 mb-1">
+                <input type="text" name="option_key" placeholder="key (ASCII)"
+                       class="form-control form-control-sm" />
+              </div>
+              <div class="form-group col-md-4 mb-1" tal:repeat="lang languages">
+                <input type="text" class="form-control form-control-sm"
+                       tal:attributes="name string:option_label_${lang/slug};
+                                       placeholder string:${lang/label}" />
+              </div>
+            </div>
+            <div class="alert alert-danger py-2 mb-0 small">
+              <strong>存储值必须是 ASCII key，中文只能当显示标签。</strong>
+              一旦把中文存进对象，这份数据就永远翻译不了，索引、导出、统计也全部
+              锁死在中文上——事后再改需要迁数据。
+            </div>
+          </fieldset>
+
+          <fieldset class="border rounded p-2 mb-3">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Reference / numbers / constraints</legend>
+            <div class="form-row">
+              <div class="form-group col-md-4">
+                <label class="small" i18n:translate="">Allowed object types (reference)</label>
+                <select name="allowed_types" multiple="multiple" size="4"
+                        class="form-control form-control-sm">
+                  <option tal:repeat="rt view/reference_type_options"
+                          tal:attributes="value rt/id" tal:content="rt/title">t</option>
+                </select>
+              </div>
+              <div class="form-group col-md-2">
+                <label class="small" i18n:translate="">Min</label>
+                <input type="text" name="min" class="form-control form-control-sm" />
+              </div>
+              <div class="form-group col-md-2">
+                <label class="small" i18n:translate="">Max</label>
+                <input type="text" name="max" class="form-control form-control-sm" />
+              </div>
+              <div class="form-group col-md-2">
+                <label class="small" i18n:translate="">Decimals</label>
+                <input type="text" name="precision" value="2"
+                       class="form-control form-control-sm" />
+              </div>
+              <div class="form-group col-md-2">
+                <label class="small" i18n:translate="">Max length</label>
+                <input type="text" name="maxlen" class="form-control form-control-sm" />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group col-md-6 mb-0">
+                <label class="small" i18n:translate="">Editable in workflow states (empty = any)</label>
+                <select name="states" multiple="multiple" size="4"
+                        class="form-control form-control-sm">
+                  <option tal:repeat="st info/states"
+                          tal:attributes="value python:st[0]"
+                          tal:content="python:'%s (%s)' % (st[1], st[0])">state</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <div class="custom-control custom-checkbox mt-4">
+                  <input type="checkbox" class="custom-control-input" id="mdf_multi"
+                         name="multi" value="1" />
+                  <label class="custom-control-label small" for="mdf_multi"
+                         i18n:translate="">Multi valued (choice / reference)</label>
+                </div>
+                <div class="custom-control custom-checkbox">
+                  <input type="checkbox" class="custom-control-input" id="mdf_req"
+                         name="required" value="1" />
+                  <label class="custom-control-label small" for="mdf_req"
+                         i18n:translate="">Required</label>
+                </div>
+                <div class="custom-control custom-checkbox">
+                  <input type="checkbox" class="custom-control-input" id="mdf_ro"
+                         name="readonly" value="1" />
+                  <label class="custom-control-label small" for="mdf_ro"
+                         i18n:translate="">Read only</label>
+                </div>
+                <div class="custom-control custom-checkbox">
+                  <input type="checkbox" class="custom-control-input" id="mdf_inact"
+                         name="include_inactive" value="1" />
+                  <label class="custom-control-label small" for="mdf_inact"
+                         i18n:translate="">Reference: include inactive objects</label>
+                </div>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="border rounded p-2 mb-3">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Search</legend>
+            <div class="custom-control custom-checkbox">
+              <input type="checkbox" class="custom-control-input" id="mdf_index"
+                     name="index" value="1" />
+              <label class="custom-control-label small" for="mdf_index"
+                     i18n:translate="">Create a catalog index</label>
+            </div>
+            <div class="custom-control custom-checkbox">
+              <input type="checkbox" class="custom-control-input" id="mdf_meta"
+                     name="metadata" value="1" />
+              <label class="custom-control-label small" for="mdf_meta"
+                     i18n:translate="">Create a metadata column</label>
+            </div>
+            <small class="form-text text-muted" i18n:translate="">
+              Existing objects are only covered after pressing Reindex.
+              Turn indexes off again before rolling the add-on back.
+            </small>
+          </fieldset>
+
+          <button type="submit" class="btn btn-primary btn-sm"
+                  style="background:#35708F;border-color:#2c5f7a;"
+                  i18n:translate="">Save</button>
+          <span class="small text-muted ml-2" i18n:translate="">
+            Takes effect immediately; no container restart needed.
+          </span>
+        </form>
+      </details>
+    </div>
+  </div>
+  </div>
+
+  <!-- ================= tab 2：全部自定义字段 ================= -->
+  <div tal:condition="python:tab == 'all'"
+       tal:define="stats view/stats; broken view/broken_records;">
+
+    <div class="alert alert-danger py-2" tal:condition="broken">
+      <div class="font-weight-bold">
+        <span tal:content="python:len(broken)">1</span>
+        <span i18n:translate="">configuration record(s) skipped</span>
+      </div>
+      <div tal:repeat="b broken" class="small mt-1">
+        <span class="mdf-code" tal:content="b/name">name</span>
+        <span tal:content="b/reason">reason</span>
+        <form method="post" class="d-inline ml-2" tal:attributes="action base">
+          <input type="hidden" name="action" value="drop_broken" />
+          <input type="hidden" name="tab" value="all" />
+          <input type="hidden" name="field_id" tal:attributes="value b/id" />
+          <button type="submit" class="btn btn-sm btn-link text-danger p-0"
+                  i18n:translate="">Delete this record</button>
+        </form>
+      </div>
+      <div class="small mt-1 text-muted" i18n:translate="">
+        Startup skipped them and logged an error; the site itself is unaffected.
+      </div>
+    </div>
+
+    <div class="border rounded p-3 mb-3" style="background:#f8f9fa;">
+      <span class="mdf-stat">
+        <strong style="font-size:21px;" tal:content="stats/total">0</strong>
+        <span class="small text-muted" i18n:translate="">custom fields</span></span>
+      <span class="mdf-stat">
+        <strong style="font-size:21px;" tal:content="stats/types">0</strong>
+        <span class="small text-muted" i18n:translate="">objects covered</span></span>
+      <span class="mdf-stat">
+        <strong style="font-size:21px;"
+                tal:content="python:'%s / %s' % (stats['at'], stats['dx'])">0 / 0</strong>
+        <span class="small text-muted" i18n:translate="">AT / DX objects</span></span>
+      <span class="mdf-stat">
+        <strong style="font-size:21px;" tal:content="stats/indexed">0</strong>
+        <span class="small text-muted" i18n:translate="">indexed</span></span>
+      <span class="mdf-stat" style="border-right:0;">
+        <strong style="font-size:21px;color:#b32d3c;" tal:content="stats/broken">0</strong>
+        <span class="small text-muted" i18n:translate="">broken records</span></span>
+      <span class="small text-muted float-right mt-2">
+        <span i18n:translate="">Limit</span>
+        <span tal:content="stats/max_per_type">50</span> /
+        <span tal:content="stats/max_total">500</span>
+      </span>
+    </div>
+
+    <details class="mdf-grp" tal:repeat="group view/all_field_groups" open="open">
+      <summary>
+        <strong tal:content="group/title">Title</strong>
+        <span class="mdf-code ml-1" tal:content="group/portal_type">Type</span>
+        <span tal:attributes="class string:mdf-mech mdf-mech-${group/mechanism}"
+              tal:content="group/mechanism">AT</span>
+        <span class="mdf-cnt mdf-cnt-on ml-1" tal:content="group/count">0</span>
+      </summary>
+      <div class="mdf-hrow">
+        <span class="mdf-c" style="width:186px;" i18n:translate="">Name</span>
+        <span class="mdf-c" style="width:96px;" i18n:translate="">Type</span>
+        <span class="mdf-c" style="width:168px;" i18n:translate="">Label</span>
+        <span class="mdf-c" style="width:168px;" i18n:translate="">English label</span>
+        <span class="mdf-c" style="width:124px;" i18n:translate="">Shown in</span>
+        <span class="mdf-c" style="width:74px;" i18n:translate="">Index</span>
+        <span class="mdf-c" style="flex-grow:1;" i18n:translate="">Created</span>
+      </div>
+      <div class="mdf-row" tal:repeat="field group/rows">
+        <span class="mdf-c" style="width:186px;">
+          <span class="mdf-code" tal:content="field/name">name</span></span>
+        <span class="mdf-c text-muted" style="width:96px;" tal:content="field/type_title">t</span>
+        <span class="mdf-c" style="width:168px;" tal:content="field/label">label</span>
+        <span class="mdf-c text-muted" style="width:168px;" tal:content="field/label_en">en</span>
+        <span class="mdf-c" style="width:124px;">
+          <span tal:repeat="slot field/positions"
+                tal:attributes="class python:'mdf-pos mdf-pos-on' if slot['on'] else 'mdf-pos mdf-pos-off'"
+                tal:content="slot/text">x</span></span>
+        <span class="mdf-c text-muted" style="width:74px;" tal:content="field/index_label">-</span>
+        <span class="mdf-c text-muted" style="flex-grow:1;"
+              tal:content="python:'%s · %s' % (field['creator'], field['created'])">who</span>
+      </div>
+    </details>
+
+    <details class="mdf-grp mt-3">
+      <summary i18n:translate="">Import configuration (JSON)</summary>
+      <form method="post" class="p-3" enctype="multipart/form-data"
+            tal:attributes="action base">
+        <input type="hidden" name="action" value="import_config" />
+        <input type="hidden" name="tab" value="all" />
+        <div class="form-group">
+          <label class="small" i18n:translate="">Upload the file exported from another site</label>
+          <input type="file" name="upload" class="form-control-file" />
+        </div>
+        <div class="form-group">
+          <label class="small" i18n:translate="">…or paste the JSON here</label>
+          <textarea name="payload" rows="5" class="form-control form-control-sm"></textarea>
+        </div>
+        <div class="form-group">
+          <select name="mode" class="form-control form-control-sm" style="width:220px;">
+            <option value="merge" i18n:translate="">Merge (add and overwrite)</option>
+            <option value="replace" i18n:translate="">Replace (wipe first)</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-sm btn-outline-secondary"
+                i18n:translate="">Import</button>
+        <span class="small text-muted ml-2" i18n:translate="">
+          Configuration does not travel with GenericSetup, so this is the only way
+          to move it between sites.
+        </span>
+      </form>
+    </details>
+  </div>
+
+</div>
+</tal:page>
+
+</metal:content-core>
+</body>
+</html>

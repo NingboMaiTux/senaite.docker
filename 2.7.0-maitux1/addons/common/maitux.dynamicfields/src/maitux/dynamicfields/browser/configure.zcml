@@ -1,0 +1,43 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    i18n_domain="maitux.dynamicfields">
+
+  <!--
+    权限一律用 Plone 原生的 cmf.ManagePortal。
+
+    刻意不碰 senaite.core 的自定义权限：本包靠 z3c.autoinclude 加载，顺序不保证
+    排在 senaite.core 之后，引用它的权限就会撞上 R1 那颗雷
+    （ComponentLookupError: (IPermission, 'senaite.core.permissions...')）。
+    用原生权限从根上绕开。
+  -->
+
+  <browser:page
+      name="dynamic-fields"
+      for="*"
+      class=".view.DynamicFieldsView"
+      permission="cmf.ManagePortal"
+      />
+
+  <browser:page
+      name="dynamic-fields-export"
+      for="*"
+      class=".view.DynamicFieldsExportView"
+      permission="cmf.ManagePortal"
+      />
+
+  <!--
+    Setup 页入口。SENAITE 的 setupview 是按容器里的内容对象渲染磁贴的，
+    既不读 portal_actions，模板里也没有 viewlet manager 挂点；而本包不能建
+    内容对象（写数据库）、不能写 actions.xml（要 profile）、也不能覆盖
+    setupview（要 overrides + 浏览器层）。所以挂到 Plone 原生的
+    plone.abovecontent 上，由 viewlet 自己判断上下文是不是 Setup 页。
+  -->
+  <browser:viewlet
+      name="maitux.dynamicfields.setupentry"
+      manager="plone.app.layout.viewlets.interfaces.IAboveContent"
+      class=".viewlet.SetupEntryViewlet"
+      permission="cmf.ManagePortal"
+      />
+
+</configure>
