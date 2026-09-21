@@ -261,7 +261,11 @@ class DynamicFieldsView(BrowserView):
         return value
 
     def _read_type_specific(self, form, field_type):
-        data = {"multi": self._flag(form, "multi")}
+        # multi 只对可多值的类型生效。界面上那个勾选框按类型联动显隐，但
+        # 藏起来的输入框照样会被提交——服务端不能依赖界面显隐。
+        data = {"multi": (self._flag(form, "multi")
+                          if field_type in config.TYPES_MULTIVALUED
+                          else False)}
 
         if field_type in config.TYPES_WITH_OPTIONS:
             data["options"] = self._read_options(form)

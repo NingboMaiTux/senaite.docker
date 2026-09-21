@@ -580,7 +580,7 @@ REQUIRED = [
     "required", "readonly", "multi",
     # 类型专属
     "option_key", "allowed_types", "include_inactive",
-    "min", "max", "precision", "maxlen",
+    "min", "max", "precision", "maxlen", "regex", "default",
     # 工作流与检索
     "states", "index", "metadata",
     # 其它动作
@@ -594,7 +594,7 @@ check(u"模板里 %d 个必需输入框一个不少" % len(REQUIRED),
 
 # 多语言输入框是按站点语言**动态拼**出来的（name string:label_${lang/slug}），
 # 源码里不会出现 name="label_zh_cn" 这种字面量，所以查的是那个拼接模式
-for prefix in ("label", "desc", "option_label"):
+for prefix in ("label", "desc", "option_label", "regex_msg"):
     pattern = u"name string:%s_${lang/slug}" % prefix
     check(u"多语言输入框模式 %s_*" % prefix, pattern in tpl, pattern)
 
@@ -610,6 +610,32 @@ missing_methods = [m for m in sorted(referenced)
 check(u"模板引用的 %d 个视图方法 / 属性都存在" % len(referenced),
       not missing_methods,
       u"缺: %s" % u", ".join(missing_methods) if missing_methods else u"")
+
+# data-mdf-types 里写的类型 id 必须真的存在——打错一个字，那块就永远不显示，
+# 而且是静默的（JS 找不到匹配就一直藏着）
+declared = set()
+for group in _re.findall(u'data-mdf-types="([^"]*)"', tpl):
+    for one in group.split():
+        declared.add(one)
+bad_types = sorted([t for t in declared if t not in config.FIELD_TYPE_IDS])
+check(u"data-mdf-types 里的 %d 个类型 id 都合法" % len(declared),
+      not bad_types,
+      u"非法: %s" % u", ".join(bad_types) if bad_types else u"")
+
+# 九种类型每一种都要至少被某个块声明过，否则选了它界面上什么专属项都没有
+# date / datetime 确实没有任何类型专属配置：没有选项列表、没有数值范围、
+# 没有文本约束，dxfields/atfields 的 builder 也不读 default。所以它们不出现在
+# data-mdf-types 里是对的。写成显式豁免而不是放宽规则——以后谁误删了某个
+# 类型的专属块，这条照样会红。
+NO_TYPE_SPECIFIC = set(["date", "datetime"])
+uncovered = set([t for t in config.FIELD_TYPE_IDS if t not in declared])
+check(u"除 date/datetime 外，每种类型都有专属配置块",
+      uncovered == NO_TYPE_SPECIFIC,
+      u"实际未覆盖: %s" % u", ".join(sorted(uncovered)))
+
+# JS 要抓的那个 select id 必须在
+check(u"字段类型 select 带 id（JS 靠它联动）",
+      u'id="mdf_fieldtype"' in tpl)
 
 print()
 print("=" * 66)

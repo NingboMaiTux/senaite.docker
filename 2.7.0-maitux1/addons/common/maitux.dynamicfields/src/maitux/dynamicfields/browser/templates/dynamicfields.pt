@@ -324,7 +324,8 @@
             </div>
             <div class="form-group col-md-3">
               <label class="small" i18n:translate="">Field type</label>
-              <select name="type" class="form-control form-control-sm">
+              <select id="mdf_fieldtype" name="type"
+                      class="form-control form-control-sm">
                 <option tal:repeat="ft view/field_types"
                         tal:attributes="value ft/id" tal:content="ft/title">type</option>
               </select>
@@ -427,9 +428,17 @@
               </div>
           </fieldset>
 
-          <fieldset class="border rounded p-2 mb-3">
+          <!--
+            按字段类型联动：每块用 data-mdf-types 声明自己适用于哪些类型，
+            下面那段 JS 按当前选中的类型显隐。没有 JS 时全部显示（可降级）。
+
+            服务端不依赖显隐：_read_type_specific() 本来就只按 field_type 读
+            对应的项，界面藏起来的输入框即使被提交也不会进记录。
+          -->
+
+          <fieldset class="border rounded p-2 mb-3" data-mdf-types="choice">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
-                    i18n:translate="">Options (Choice type only)</legend>
+                    i18n:translate="">Options</legend>
             <div class="form-row" tal:repeat="n python:range(5)">
               <div class="form-group col-md-3 mb-1">
                 <input type="text" name="option_key" placeholder="key (ASCII)"
@@ -442,46 +451,94 @@
               </div>
             </div>
             <div class="alert alert-danger py-2 mb-0 small" i18n:translate="">
-                The stored value must be an ASCII key; localized text
-                belongs in the labels. Once localized text is stored on
-                the objects it can never be translated, and indexes,
-                exports and statistics are locked to that one language.
-                Changing it later means migrating data.
-              </div>
+              The stored value must be an ASCII key; localized text
+              belongs in the labels. Once localized text is stored on
+              the objects it can never be translated, and indexes,
+              exports and statistics are locked to that one language.
+              Changing it later means migrating data.
+            </div>
           </fieldset>
 
-          <fieldset class="border rounded p-2 mb-3">
+          <fieldset class="border rounded p-2 mb-3" data-mdf-types="reference">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
-                    i18n:translate="">Reference / numbers / constraints</legend>
+                    i18n:translate="">Reference target</legend>
             <div class="form-row">
-              <div class="form-group col-md-4">
-                <label class="small" i18n:translate="">Allowed object types (reference)</label>
-                <select name="allowed_types" multiple="multiple" size="4"
+              <div class="form-group col-md-6 mb-0">
+                <label class="small" i18n:translate="">Allowed object types</label>
+                <select name="allowed_types" multiple="multiple" size="5"
                         class="form-control form-control-sm">
                   <option tal:repeat="rt view/reference_type_options"
                           tal:attributes="value rt/id" tal:content="rt/title">t</option>
                 </select>
               </div>
-              <div class="form-group col-md-2">
+              <div class="col-md-6">
+                <div class="custom-control custom-checkbox mt-4">
+                  <input type="checkbox" class="custom-control-input" id="mdf_inact"
+                         name="include_inactive" value="1" />
+                  <label class="custom-control-label small" for="mdf_inact"
+                         i18n:translate="">Include inactive objects</label>
+                </div>
+                <small class="form-text text-muted" i18n:translate="">
+                  Traceability fields usually need this: the object that was
+                  used back then may have been deactivated since.
+                </small>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="border rounded p-2 mb-3"
+                    data-mdf-types="int decimal">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Number range</legend>
+            <div class="form-row">
+              <div class="form-group col-md-3 mb-0">
                 <label class="small" i18n:translate="">Min</label>
                 <input type="text" name="min" class="form-control form-control-sm" />
               </div>
-              <div class="form-group col-md-2">
+              <div class="form-group col-md-3 mb-0">
                 <label class="small" i18n:translate="">Max</label>
                 <input type="text" name="max" class="form-control form-control-sm" />
               </div>
-              <div class="form-group col-md-2">
+              <div class="form-group col-md-3 mb-0" data-mdf-types="decimal">
                 <label class="small" i18n:translate="">Decimals</label>
                 <input type="text" name="precision" value="2"
                        class="form-control form-control-sm" />
               </div>
-              <div class="form-group col-md-2">
+            </div>
+          </fieldset>
+
+          <fieldset class="border rounded p-2 mb-3"
+                    data-mdf-types="text textarea">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Text constraints</legend>
+            <div class="form-row">
+              <div class="form-group col-md-3">
                 <label class="small" i18n:translate="">Max length</label>
                 <input type="text" name="maxlen" class="form-control form-control-sm" />
               </div>
+              <div class="form-group col-md-4">
+                <label class="small" i18n:translate="">Validation regex</label>
+                <input type="text" name="regex" class="form-control form-control-sm" />
+              </div>
+              <div class="form-group col-md-5" tal:repeat="lang languages">
+                <label class="small">
+                  <span i18n:translate="">Message on failure</span> ·
+                  <span tal:content="lang/label">zh</span>
+                </label>
+                <input type="text" class="form-control form-control-sm"
+                       tal:attributes="name string:regex_msg_${lang/slug}" />
+              </div>
             </div>
+            <small class="form-text text-muted" i18n:translate="">
+              If you fill in a regex you must also fill in a failure message.
+            </small>
+          </fieldset>
+
+          <fieldset class="border rounded p-2 mb-3">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Data constraints</legend>
             <div class="form-row">
-              <div class="form-group col-md-6 mb-0">
+              <div class="form-group col-md-6">
                 <label class="small" i18n:translate="">Editable in workflow states (empty = any)</label>
                 <select name="states" multiple="multiple" size="4"
                         class="form-control form-control-sm">
@@ -491,11 +548,23 @@
                 </select>
               </div>
               <div class="col-md-6">
-                <div class="custom-control custom-checkbox mt-4">
+                <div class="form-group"
+                     data-mdf-types="text textarea int decimal bool choice">
+                  <label class="small" for="mdf_default"
+                         i18n:translate="">Default value</label>
+                  <input type="text" id="mdf_default" name="default"
+                         class="form-control form-control-sm" />
+                  <small class="form-text text-muted" i18n:translate="">
+                    Choice: one of the ASCII keys above. Boolean: 1 / true /
+                    yes means checked. Date fields take no default.
+                  </small>
+                </div>
+                <div class="custom-control custom-checkbox"
+                     data-mdf-types="choice reference">
                   <input type="checkbox" class="custom-control-input" id="mdf_multi"
                          name="multi" value="1" />
                   <label class="custom-control-label small" for="mdf_multi"
-                         i18n:translate="">Multi valued (choice / reference)</label>
+                         i18n:translate="">Multi valued</label>
                 </div>
                 <div class="custom-control custom-checkbox">
                   <input type="checkbox" class="custom-control-input" id="mdf_req"
@@ -508,12 +577,6 @@
                          name="readonly" value="1" />
                   <label class="custom-control-label small" for="mdf_ro"
                          i18n:translate="">Read only</label>
-                </div>
-                <div class="custom-control custom-checkbox">
-                  <input type="checkbox" class="custom-control-input" id="mdf_inact"
-                         name="include_inactive" value="1" />
-                  <label class="custom-control-label small" for="mdf_inact"
-                         i18n:translate="">Reference: include inactive objects</label>
                 </div>
               </div>
             </div>
@@ -543,6 +606,30 @@
           <button type="submit" class="btn btn-primary btn-sm"
                   style="background:#35708F;border-color:#2c5f7a;"
                   i18n:translate="">Save</button>
+          <script type="text/javascript">
+          /* 按字段类型显隐配置项。
+             每个块用 data-mdf-types 声明适用类型（空格分隔）；没有这个属性的
+             块恒显示。没有 JS 时什么都不藏，功能不受影响，只是界面长一点。 */
+          (function () {
+            var sel = document.getElementById("mdf_fieldtype");
+            if (!sel) { return; }
+            var blocks = document.querySelectorAll("[data-mdf-types]");
+            function sync() {
+              var current = sel.value;
+              for (var i = 0; i < blocks.length; i++) {
+                var el = blocks[i];
+                var types = (el.getAttribute("data-mdf-types") || "").split(" ");
+                var show = false;
+                for (var j = 0; j < types.length; j++) {
+                  if (types[j] === current) { show = true; break; }
+                }
+                el.style.display = show ? "" : "none";
+              }
+            }
+            sel.addEventListener("change", sync);
+            sync();
+          })();
+          </script>
           <span class="small text-muted ml-2" i18n:translate="">
             Takes effect immediately; no container restart needed.
           </span>

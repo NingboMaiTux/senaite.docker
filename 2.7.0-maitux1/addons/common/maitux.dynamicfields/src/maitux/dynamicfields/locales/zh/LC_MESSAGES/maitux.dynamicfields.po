@@ -377,3 +377,45 @@ msgstr "不显示分组：该类型只有 default 一个分组。"
 
 msgid "Leave it at 0 unless you need a specific order. 0 means the fields appear in the order they were created."
 msgstr "没有特殊需求就保持 0。填 0 表示按创建先后顺序显示，不用管它。"
+
+msgid "Options"
+msgstr "选项列表"
+
+msgid "Reference target"
+msgstr "引用目标"
+
+msgid "Allowed object types"
+msgstr "允许的对象类型"
+
+msgid "Include inactive objects"
+msgstr "包含已停用的对象"
+
+msgid "Traceability fields usually need this: the object that was used back then may have been deactivated since."
+msgstr "追溯类字段通常要勾上：当时用的那个对象，事后可能已经被停用了。"
+
+msgid "Number range"
+msgstr "数值范围"
+
+msgid "Text constraints"
+msgstr "文本约束"
+
+msgid "Validation regex"
+msgstr "校验正则"
+
+msgid "Message on failure"
+msgstr "校验失败提示"
+
+msgid "If you fill in a regex you must also fill in a failure message."
+msgstr "填了校验正则，就必须填校验失败提示。"
+
+msgid "Data constraints"
+msgstr "数据约束"
+
+msgid "Default value"
+msgstr "默认值"
+
+msgid "Choice: one of the ASCII keys above. Boolean: 1 / true / yes means checked. Date fields take no default."
+msgstr "固定选项：填上面某个 ASCII key。布尔：1 / true / yes 表示勾上。日期类型不支持默认值。"
+
+msgid "Multi valued"
+msgstr "多值"
