@@ -155,6 +155,11 @@ docker run --rm \
 覆盖：存储与校验、动态 schema 生成、**同一 schema 在不同语言请求下给出不同标签**、
 behavior 属性转发、脏配置容错。
 
+再跑 ZCML 加载检查（把 `smoke_test.py` 换成 `zcml_check.py`）：验证 configure.zcml
+真的能加载、翻译域与两个适配器都注册上了。**ZCML 错误是启动期报错、站点直接
+起不来的那一类**，等重建完镜像再发现一轮就是几十分钟——这个脚本实际抓到过
+`Undefined permission ID: cmf.ManagePortal`（少了 CMFCore permissions 的 include）。
+
 手工部分：
 
 | 检查点 | 预期信号 |

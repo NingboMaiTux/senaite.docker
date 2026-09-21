@@ -4,6 +4,16 @@
     i18n_domain="maitux.dynamicfields">
 
   <!--
+    R1 的同一套路：ZCML 里用到的权限必须先把定义它的包 include 进来，
+    把注册顺序钉死。本包靠 z3c.autoinclude 加载，不保证排在 CMFCore 之后，
+    少了这一行会在某些加载顺序下报
+        ValueError: ('Undefined permission ID', 'cmf.ManagePortal')
+    ——而且是启动期报错，站点直接起不来。实测（tools 里的 ZCML 加载检查）
+    就是先踩到这条才补上的。
+  -->
+  <include package="Products.CMFCore" file="permissions.zcml" />
+
+  <!--
     权限一律用 Plone 原生的 cmf.ManagePortal。
 
     刻意不碰 senaite.core 的自定义权限：本包靠 z3c.autoinclude 加载，顺序不保证
