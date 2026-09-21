@@ -166,11 +166,18 @@ docker run --rm \
   <镜像> /opt/addons/common/maitux.dynamicfields/tools/smoke_test.py
 ```
 
-覆盖 107 项：存储与校验、动态 schema 生成、**同一 schema 在不同语言请求下给出
+覆盖 116 项：存储与校验、动态 schema 生成、**同一 schema 在不同语言请求下给出
 不同标签**、behavior 属性转发、**九种字段类型在 AT 和 DX 两条路上都能构造**
 （含标签必须是延迟求值的 Message、AT 侧必须带 `add` 键、多值形态）、
 **视图层吃 bytes 中文不崩**、脏配置容错、
-**中英切换**（类型名按语言走、.po 里译文齐全、源码里不许再写死中文界面文案的 lint）。
+**中英切换**（类型名按语言走、.po 里译文齐全、源码里不许再写死中文界面文案的 lint）、
+**完整保存路径吃 bytes 中文**。
+
+> Py2 下 request 给回来的表单值是 utf-8 **bytes**。这个坑踩了两次：第一次在
+> 搜索框（读取路径），第二次在保存带中文标签的字段（写入路径）。现在两头都在
+> 边界上用 `safe_unicode` 归一，`validation` 里再加一层 `_text()` 兜底——防止
+> 导入 JSON、脚本写入这些绕过界面的路径把 bytes 塞进记录。第 7、9 节分别是
+> 两次的回归用例，都做过反向验证。
 
 > 最后一项是踩过坑补的：Py2 下 Zope 的 request 给回来的表单值常常是 utf-8
 > **bytes** 而不是 unicode，对它调 `.encode("utf-8")` 会先用 ASCII 隐式解码，

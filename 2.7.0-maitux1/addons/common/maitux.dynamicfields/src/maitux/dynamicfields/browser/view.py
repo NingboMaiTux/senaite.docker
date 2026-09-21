@@ -126,15 +126,15 @@ class DynamicFieldsView(BrowserView):
             record = dict(existing)
         else:
             record = storage.defaults(
-                form.get("portal_type") or "",
-                (form.get("name") or "").strip(),
-                form.get("type") or "")
+                safe_unicode(form.get("portal_type")),
+                safe_unicode(form.get("name")).strip(),
+                safe_unicode(form.get("type")))
 
         # 目标对象、字段名、字段类型创建后不可改——编辑时一律忽略表单里的值
         if existing is None:
-            record["portal_type"] = form.get("portal_type") or ""
-            record["name"] = (form.get("name") or "").strip()
-            record["type"] = form.get("type") or ""
+            record["portal_type"] = safe_unicode(form.get("portal_type"))
+            record["name"] = safe_unicode(form.get("name")).strip()
+            record["type"] = safe_unicode(form.get("type"))
 
         record.update(self._read_common(form))
         record.update(self._read_type_specific(form, record.get("type")))
@@ -229,7 +229,7 @@ class DynamicFieldsView(BrowserView):
             "descriptions": self._read_lang_map(form, "desc", languages),
             "required": self._flag(form, "required"),
             "readonly": self._flag(form, "readonly"),
-            "default": (form.get("default") or u"").strip(),
+            "default": safe_unicode(form.get("default")).strip(),
             "states": self._read_list(form, "states"),
             "show_edit": self._flag(form, "show_edit"),
             "show_view": self._flag(form, "show_view"),
@@ -237,7 +237,8 @@ class DynamicFieldsView(BrowserView):
             "list_default": self._flag(form, "list_default"),
             # 二期：报告模板尚未接入本包配置，界面上置灰，这里也钉死
             "show_report": False,
-            "fieldset": (form.get("fieldset") or "default").strip() or "default",
+            "fieldset": (safe_unicode(form.get("fieldset")).strip()
+                         or u"default"),
             "order": self._int(form.get("order"), 0),
             "index": self._flag(form, "index"),
             "metadata": self._flag(form, "metadata"),
@@ -257,7 +258,7 @@ class DynamicFieldsView(BrowserView):
             data["precision"] = self._int(form.get("precision"), 2)
         if field_type in (config.TYPE_TEXT, config.TYPE_TEXTAREA):
             data["maxlen"] = self._number(form.get("maxlen"))
-            data["regex"] = (form.get("regex") or u"").strip()
+            data["regex"] = safe_unicode(form.get("regex")).strip()
             data["regex_msg"] = self._read_lang_map(
                 form, "regex_msg", self.languages())
         return data
@@ -266,28 +267,39 @@ class DynamicFieldsView(BrowserView):
         keys = self._as_list(form.get("option_key"))
         options = []
         for index, key in enumerate(keys):
-            key = (key or u"").strip()
+            key = safe_unicode(key).strip()
             if not key:
                 continue
             labels = {}
             for language in self.languages():
                 values = self._as_list(
                     form.get("option_label_%s" % _slug(language)))
-                if index < len(values) and values[index]:
-                    labels[language] = values[index].strip()
+                if index < len(values):
+                    text = safe_unicode(values[index]).strip()
+                    if text:
+                        labels[language] = text
             options.append({"key": key, "labels": labels})
         return options
 
     def _read_lang_map(self, form, prefix, languages):
+        """读多语言文案。
+
+        ★ 必须 safe_unicode。Py2 下 request 给回来的中文是 utf-8 **bytes**，
+        原样存进记录后，validation 里 ``u"%s" % value`` 会隐式 ASCII 解码，
+        保存中文标签直接 UnicodeDecodeError（0xe6 就是「测」的首字节）。
+        """
         mapping = {}
         for language in languages:
-            value = form.get("%s_%s" % (prefix, _slug(language)))
+            value = safe_unicode(
+                form.get("%s_%s" % (prefix, _slug(language)))).strip()
             if value:
-                mapping[language] = value.strip()
+                mapping[language] = value
         return mapping
 
     def _read_list(self, form, name):
-        return [v for v in self._as_list(form.get(name)) if v]
+        return [safe_unicode(v).strip()
+                for v in self._as_list(form.get(name))
+                if safe_unicode(v).strip()]
 
     @staticmethod
     def _as_list(value):

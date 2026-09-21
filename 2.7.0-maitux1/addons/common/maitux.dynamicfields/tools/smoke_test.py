@@ -465,6 +465,98 @@ check(u"源码里没有写死的中文界面文案（%d 处白名单除外）" %
       not offenders,
       u"; ".join(offenders[:4]).encode("utf-8") if offenders else u"")
 
+
+print()
+print("=" * 66)
+print(u"9. 完整保存路径：浏览器发来的中文是 bytes")
+print("=" * 66)
+print(u"    \u2014\u2014 \u201c\u6dfb\u52a0\u4e00\u4e2a\u5e26\u4e2d\u6587\u6807\u7b7e\u7684\u5b57\u6bb5\u201d \u5c31\u62a5 0xe6 \u7684\u56de\u5f52\u7528\u4f8b")
+print()
+
+# 完全照浏览器 POST 的样子构造：所有值都是 utf-8 bytes
+class SaveReq(dict):
+    method = "POST"
+
+
+def b(text):
+    return text.encode("utf-8")
+
+
+form = SaveReq()
+form["action"] = "save_field"
+form["portal_type"] = "AnalysisRequest"
+form["name"] = "testfield"
+form["type"] = config.TYPE_CHOICE
+form["fieldset"] = b(u"\u5408\u540c\u4e0e\u5546\u52a1")      # 合同与商务
+form["order"] = "0"
+form["label_en"] = "testfield"
+form["label_zh_cn"] = b(u"\u6d4b\u8bd5\u5b57\u6bb5")          # 测试字段 <- 0xe6 开头
+form["desc_en"] = "none"
+form["desc_zh_cn"] = b(u"\u6ca1\u6709")                          # 没有
+form["show_edit"] = "1"
+form["show_view"] = "1"
+form["option_key"] = ["a", "b"]
+form["option_label_en"] = ["A", "B"]
+form["option_label_zh_cn"] = [b(u"\u7532"), b(u"\u4e59")]        # 甲 / 乙
+form["default"] = b(u"\u7532")
+form["states"] = [b(u"sample_due")]
+
+v = mdf_view.DynamicFieldsView(None, form)
+
+try:
+    common = v._read_common(form)
+    ok_read = True
+except Exception as exc:
+    common = {}
+    ok_read = False
+    check(u"_read_common 吃 bytes 中文", False, repr(exc))
+if ok_read:
+    check(u"_read_common 吃 bytes 中文", True)
+    labels = common.get("labels") or {}
+    check(u"中文标签存成 unicode 而不是 bytes",
+          isinstance(labels.get("zh-cn"), type(u"")),
+          repr(labels.get("zh-cn")))
+    check(u"中文标签内容正确",
+          labels.get("zh-cn") == u"\u6d4b\u8bd5\u5b57\u6bb5",
+          repr(labels.get("zh-cn")))
+    check(u"fieldset 也归一成 unicode",
+          isinstance(common.get("fieldset"), type(u"")),
+          repr(common.get("fieldset")))
+
+try:
+    specific = v._read_type_specific(form, config.TYPE_CHOICE)
+    check(u"_read_type_specific 吃 bytes 中文", True)
+    opts = specific.get("options") or []
+    check(u"选项中文标签存成 unicode",
+          bool(opts) and isinstance(
+              (opts[0].get("labels") or {}).get("zh-cn"), type(u"")),
+          repr(opts[:1]))
+except Exception as exc:
+    specific = {}
+    check(u"_read_type_specific 吃 bytes 中文", False, repr(exc))
+
+# 校验这条路——原 bug 就死在 validation._has_any_label 里
+rec = storage.defaults("AnalysisRequest", "testfield", config.TYPE_CHOICE)
+rec.update(common)
+rec.update(specific)
+try:
+    problems = validation.validate_record(rec, skip_uniqueness=True)
+    check(u"validate_record 吃 bytes 中文不抛异常（原 bug 死在这）", True)
+    check(u"带中文标签的记录能通过校验",
+          not problems, u"; ".join([u"%s" % p for p in problems[:2]]))
+except Exception as exc:
+    check(u"validate_record 吃 bytes 中文不抛异常（原 bug 死在这）",
+          False, repr(exc))
+
+# 就算有人绕过边界直接塞 bytes 进记录，校验也不能炸（兜底那层）
+raw = storage.defaults("Client", "rawbytes", config.TYPE_TEXT)
+raw["labels"] = {"zh-cn": b(u"\u76f4\u63a5\u585e\u8fdb\u6765\u7684")}
+try:
+    validation.validate_record(raw, skip_uniqueness=True)
+    check(u"绕过边界直接塞 bytes，校验也不炸（兜底层）", True)
+except Exception as exc:
+    check(u"绕过边界直接塞 bytes，校验也不炸（兜底层）", False, repr(exc))
+
 print()
 print("=" * 66)
 if FAILED:

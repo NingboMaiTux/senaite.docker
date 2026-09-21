@@ -69,10 +69,31 @@ def validate_record(record, portal=None, existing_id=None,
 
 # --------------------------------------------------------------------------
 
+def _text(value):
+    """任何东西 -> unicode。
+
+    ★ 兜底用。Py2 下 ``u"%s" % <utf-8 bytes>`` 会隐式 ASCII 解码然后抛
+    UnicodeDecodeError —— 保存中文标签炸掉就是这条。正经的修法是在
+    view.py 的写入边界归一，这里再挡一层，防止别的调用方（导入 JSON、
+    脚本写入）绕过边界。
+    """
+    if value is None:
+        return u""
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except Exception:
+            return value.decode("utf-8", "ignore")
+    try:
+        return u"%s" % value
+    except Exception:
+        return u""
+
+
 def _has_any_label(record):
     labels = record.get("labels") or {}
     for value in labels.values():
-        if value and u"%s" % value.strip():
+        if _text(value).strip():
             return True
     return False
 
@@ -146,7 +167,7 @@ def _validate_type_specific(record, field_type):
 def _option_has_label(option):
     labels = (option or {}).get("labels") or {}
     for value in labels.values():
-        if value and u"%s" % value.strip():
+        if _text(value).strip():
             return True
     return False
 
@@ -154,7 +175,7 @@ def _option_has_label(option):
 def _regex_msg_ok(record):
     messages = record.get("regex_msg") or {}
     for value in messages.values():
-        if value and u"%s" % value.strip():
+        if _text(value).strip():
             return True
     return False
 
