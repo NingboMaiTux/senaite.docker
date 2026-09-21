@@ -289,8 +289,19 @@ def test_count_values_rows(p, r):
 #              -> 79 (XAGG_AVG_OFSUM/_RSD_OFSUM/_MAX_OFSUM/_MIN_OFSUM/
 #                     _COUNT_OFSUM -- array table only, all literal-arg
 #                     "no array deps" like XAGG_KEYS; 跨AS聚合 S3)
-EXPECTED_SAFE_ENTRIES = 79
-EXPECTED_SCALAR_ENTRIES = 26
+#   (no arrow: this one moved the SCALAR table only) the rounding and
+#              formatting family -- ROUND / ROUND_EVEN / ROUND_UP /
+#              ROUND_DOWN / FORMAT -- was hoisted to module level so the
+#              scalar engine could reference it too, taking that table 26
+#              -> 31 and leaving _SAFE at 79.  Recorded late: the count had
+#              been red ever since, which is how a shared counter fails --
+#              everybody reads it, nobody owns it.
+#              -> 88 (V16 引擎能力: XAGG_KEYS2 / XAGG_KEYS_WHERE2 /
+#                     XAGG_NTH2 / XAGG_AVG2 / _RSD2 / _MAX2 / _MIN2 /
+#                     _COUNT2 / INDEX_BY_GROUP -- array table only, the
+#                     dual-key branch; 裁决 §7 ②③④⑤)
+EXPECTED_SAFE_ENTRIES = 88
+EXPECTED_SCALAR_ENTRIES = 31
 
 
 def test_registry_totals(p, r):
@@ -777,12 +788,21 @@ def _rebuild_baseline(p, owner):
 
 
 def _rebuild_round_even(p):
-    """Rebuild ROUND_EVEN, which recurses and so closes over itself.
+    """ROUND_EVEN, wherever it is defined today.
 
-    Python 2 has no writable cell, so the self-reference goes in as a
-    trampoline that is pointed at the real function once it exists.  Only
-    the list branch follows it; the scalar calls below never do.
+    It used to live inside the calculatedlist engine and had to be rebuilt
+    out of the enclosing code object.  It has since been hoisted to module
+    level (so the scalar engine can reference it too), where it is simply an
+    attribute -- and `rebuild` then returns None, which this test read as
+    "the function is gone".  Prefer the attribute, keep the rebuild as the
+    fallback: either way what gets tested is the shipped function.
     """
+    fn = getattr(p, "_round_half_even", None)
+    if fn is not None:
+        return fn
+    # The pre-hoist path: it recurses, and Python 2 has no writable cell,
+    # so the self-reference goes in as a trampoline pointed at the real
+    # function once it exists.  Only the list branch follows it.
     box = {}
     fn = rebuild(p, "_round_half_even", defaults=(0,), freevars={
         "_round_half_even": lambda *a, **kw: box["fn"](*a, **kw),
@@ -792,8 +812,19 @@ def _rebuild_round_even(p):
 
 
 def _rebuild_round_up(p):
-    """Rebuild ROUND_UP.  Same shape as _rebuild_round_even: it recurses on
-    the list branch, so the self-reference goes in as a trampoline."""
+    """ROUND_UP, wherever it is defined today.
+
+    It used to live inside the calculatedlist engine and had to be rebuilt
+    out of the enclosing code object.  It has since been hoisted to module
+    level (so the scalar engine can reference it too), where it is simply an
+    attribute -- and `rebuild` then returns None, which this test read as
+    "the function is gone".  Prefer the attribute, keep the rebuild as the
+    fallback: either way what gets tested is the shipped function.
+    """
+    fn = getattr(p, "_round_up", None)
+    if fn is not None:
+        return fn
+    # Pre-hoist path -- same trampoline as _rebuild_round_even.
     box = {}
     fn = rebuild(p, "_round_up", defaults=(0,), freevars={
         "_round_up": lambda *a, **kw: box["fn"](*a, **kw),
@@ -848,8 +879,19 @@ def test_round_up(p, r):
 
 
 def _rebuild_round_down(p):
-    """Rebuild ROUND_DOWN.  Same shape as _rebuild_round_up: it recurses on
-    the list branch, so the self-reference goes in as a trampoline."""
+    """ROUND_DOWN, wherever it is defined today.
+
+    It used to live inside the calculatedlist engine and had to be rebuilt
+    out of the enclosing code object.  It has since been hoisted to module
+    level (so the scalar engine can reference it too), where it is simply an
+    attribute -- and `rebuild` then returns None, which this test read as
+    "the function is gone".  Prefer the attribute, keep the rebuild as the
+    fallback: either way what gets tested is the shipped function.
+    """
+    fn = getattr(p, "_round_down", None)
+    if fn is not None:
+        return fn
+    # Pre-hoist path -- same trampoline as _rebuild_round_even.
     box = {}
     fn = rebuild(p, "_round_down", defaults=(0,), freevars={
         "_round_down": lambda *a, **kw: box["fn"](*a, **kw),
@@ -1312,8 +1354,11 @@ def test_xagg_row_space_registration(p, r):
     src = open(p.__source_path__, "rb").read().decode("utf-8")
     r.check("XAGG_\\w+ named in the dispatch regex in source",
             u"|XAGG_\\w+" in src, True)
+    # Named in the alternation -- NOT necessarily last in it.  Asserting
+    # "|APPEND)" made this test fail the day another name was appended
+    # after it (INDEX_BY_GROUP, V16), which says nothing about APPEND.
     r.check("APPEND named in the dispatch regex in source",
-            u"|APPEND)" in src, True)
+            u"|APPEND" in src, True)
 
     array_fn_re = re.compile(
         r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS'
