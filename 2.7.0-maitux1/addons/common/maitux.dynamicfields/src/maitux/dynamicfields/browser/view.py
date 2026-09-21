@@ -330,10 +330,13 @@ class DynamicFieldsView(BrowserView):
         if not portal_type:
             return None
         mechanism = introspect.get_mechanism(portal_type)
+        replacement = config.DEPRECATED_TYPES.get(portal_type)
         return {
             "portal_type": portal_type,
             "title": introspect.get_type_title(portal_type),
             "mechanism": mechanism,
+            "deprecated": bool(replacement),
+            "replaced_by": replacement or u"",
             "mechanism_note": (
                 u"Archetypes · 经 schemaextender 扩展"
                 if mechanism == introspect.MECH_AT

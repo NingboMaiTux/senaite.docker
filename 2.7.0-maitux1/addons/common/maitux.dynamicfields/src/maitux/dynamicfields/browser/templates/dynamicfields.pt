@@ -140,6 +140,9 @@
                 <span class="flex-grow-1" tal:content="item/title">title</span>
                 <span tal:attributes="class string:mdf-mech mdf-mech-${item/mechanism}"
                       tal:content="item/mechanism">AT</span>
+                <span class="mdf-mech" tal:condition="item/deprecated"
+                      style="background:#fdf1f2;color:#8d232f;border:1px solid #e9b7bd;"
+                      i18n:translate="">deprecated</span>
                 <span tal:attributes="class python:'mdf-cnt mdf-cnt-on' if item['count'] else 'mdf-cnt'"
                       class="ml-1" tal:content="item/count">0</span>
               </span>
@@ -158,6 +161,11 @@
         <span tal:attributes="class string:mdf-mech mdf-mech-${info/mechanism}"
               tal:content="info/mechanism">AT</span>
         <span class="small text-muted ml-2" tal:content="info/mechanism_note">note</span>
+      </div>
+
+      <div class="alert alert-danger py-2 small" tal:condition="info/deprecated">
+        <strong i18n:translate="">This object type is deprecated.</strong>
+        <span tal:content="python:u'%s 已被 %s 取代（AT→DX 迁移遗留），两个类型在站点上都还注册着。给它加的字段不会出现在实际使用的那个类型上。确认你要的不是 %s 再继续。' % (info['portal_type'], info['replaced_by'], info['replaced_by'])">x</span>
       </div>
 
       <form method="get" class="mb-2" tal:attributes="action base">

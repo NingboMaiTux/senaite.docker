@@ -104,12 +104,15 @@ def list_types(include_empty=True, query=None):
         if query and not _matches(query, portal_type,
                                   get_type_title(portal_type)):
             continue
+        replacement = config.DEPRECATED_TYPES.get(portal_type)
         items.append({
             "portal_type": portal_type,
             "title": get_type_title(portal_type),
             "mechanism": mechanism,
             "count": count,
             "primary": portal_type in config.PRIMARY_TYPES,
+            "deprecated": bool(replacement),
+            "replaced_by": replacement or u"",
         })
     return items
 

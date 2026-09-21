@@ -222,6 +222,68 @@ check("没赋过值时回落默认值而不是抛 AttributeError",
 
 print()
 print("=" * 66)
+print(u"6. 九种字段类型：AT 和 DX 两条路都要能造出来")
+print("=" * 66)
+
+from maitux.dynamicfields import atfields   # noqa: E402
+from maitux.dynamicfields import dxfields   # noqa: E402
+
+check(u"Archetypes 可用（否则下面 AT 那一列没意义）", atfields.HAVE_AT)
+check(u"senaite 字段可用（引用类型要用到）", atfields.HAVE_SENAITE)
+
+for type_id, cn, en in config.FIELD_TYPES:
+    rec = storage.defaults("Client", "probe_%s" % type_id, type_id)
+    rec["labels"] = {"zh-cn": cn, "en": en}
+    if type_id == config.TYPE_CHOICE:
+        rec["options"] = [{"key": "a", "labels": {"zh-cn": u"甲", "en": u"A"}}]
+    if type_id == config.TYPE_REFERENCE:
+        rec["allowed_types"] = ["Client"]
+
+    try:
+        dx = dxfields.build_field(rec)
+        dx_err = None
+    except Exception as exc:
+        dx, dx_err = None, repr(exc)
+    try:
+        at = atfields.build_field(rec)
+        at_err = None
+    except Exception as exc:
+        at, at_err = None, repr(exc)
+
+    check(u"%-8s DX 侧构造 (%s)" % (cn, dx.__class__.__name__ if dx else u"None"),
+          dx is not None, dx_err or u"")
+    check(u"%-8s AT 侧构造 (%s)" % (cn, at.__class__.__name__ if at else u"None"),
+          at is not None, at_err or u"")
+
+    # 标签必须是延迟求值的 Message，不能是已翻译的字符串
+    if dx is not None:
+        check(u"%-8s DX 标签是 Message" % cn,
+              getattr(dx.title, "domain", None) == "maitux.dynamicfields.labels")
+    if at is not None:
+        label = at.widget.label
+        check(u"%-8s AT 标签是 Message" % cn,
+              getattr(label, "domain", None) == "maitux.dynamicfields.labels")
+    # AT 侧必须带 add 键，否则样品新建页上不出现
+    if at is not None:
+        visible = at.widget.visible or {}
+        check(u"%-8s AT visible 带 add 键（样品新建页要用）" % cn,
+              visible.get("add") == "edit", repr(visible))
+
+# 多值形态也要能造
+for type_id in config.TYPES_MULTIVALUED:
+    rec = storage.defaults("Client", "probe_multi_%s" % type_id, type_id)
+    rec["labels"] = {"en": u"Multi"}
+    rec["multi"] = True
+    if type_id == config.TYPE_CHOICE:
+        rec["options"] = [{"key": "a", "labels": {"en": u"A"}}]
+    else:
+        rec["allowed_types"] = ["Client"]
+    check(u"%s 多值 DX 构造" % type_id, dxfields.build_field(rec) is not None)
+    check(u"%s 多值 AT 构造" % type_id, atfields.build_field(rec) is not None)
+
+
+print()
+print("=" * 66)
 print("5. 脏配置不许把页面搞挂")
 print("=" * 66)
 

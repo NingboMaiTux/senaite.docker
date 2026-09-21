@@ -56,6 +56,7 @@ SECONDARY_TYPES = (
     "SampleMatrix",
     "SubGroup",
     "ContainerType",
+    "ARTemplate",
 )
 
 ALLOWED_TYPES = PRIMARY_TYPES + SECONDARY_TYPES
@@ -71,11 +72,20 @@ EXCLUDED_TYPES = (
     "ReferenceAnalysis",
     "RejectAnalysis",
     "BikaSetup",
-    "ARTemplate",
     "ARReport",
     "Plone Site",
     "Plone_Site",
 )
+
+#: 已废弃但仍保留的类型：AT→DX 迁移遗留，两个 FTI 在站点上都真实注册着。
+#:
+#: 不排除（第二优先级要求全部支持），但界面上必须打「已废弃」标记——否则用户
+#: 选了 ARTemplate 加字段，字段在实际使用的 SampleTemplate 上死活不出现，
+#: 排查起来毫无线索。需求文档 §3.2 原话是「显式屏蔽或『已废弃』标记」，
+#: 这里取后者。
+DEPRECATED_TYPES = {
+    "ARTemplate": "SampleTemplate",
+}
 
 #: 业务名（中文）。取不到时回落 portal_type 本身
 TYPE_TITLES = {
@@ -114,13 +124,14 @@ TYPE_TITLES = {
     "SampleMatrix": u"样品基质",
     "SubGroup": u"子分组",
     "ContainerType": u"容器类型",
+    "ARTemplate": u"样品模板（旧）",
 }
 
 #: 配置页左侧的业务分组
 TYPE_GROUPS = (
     (u"样品与检测", ("AnalysisRequest", "AnalysisService", "Batch", "Worksheet",
                      "AnalysisSpec", "AnalysisProfile", "SampleTemplate",
-                     "WorksheetTemplate", "Attachment")),
+                     "WorksheetTemplate", "Attachment", "ARTemplate")),
     (u"客户与供应商", ("Client", "Contact", "Supplier")),
     (u"实验室资源", ("Instrument", "Method", "LabContact", "Laboratory",
                      "Calculation", "InstrumentCalibration",

@@ -152,13 +152,26 @@ docker run --rm \
   <镜像> /opt/addons/common/maitux.dynamicfields/tools/smoke_test.py
 ```
 
-覆盖：存储与校验、动态 schema 生成、**同一 schema 在不同语言请求下给出不同标签**、
-behavior 属性转发、脏配置容错。
+覆盖 74 项：存储与校验、动态 schema 生成、**同一 schema 在不同语言请求下给出
+不同标签**、behavior 属性转发、**九种字段类型在 AT 和 DX 两条路上都能构造**
+（含标签必须是延迟求值的 Message、AT 侧必须带 `add` 键、多值形态）、脏配置容错。
 
 再跑 ZCML 加载检查（把 `smoke_test.py` 换成 `zcml_check.py`）：验证 configure.zcml
 真的能加载、翻译域与两个适配器都注册上了。**ZCML 错误是启动期报错、站点直接
 起不来的那一类**，等重建完镜像再发现一轮就是几十分钟——这个脚本实际抓到过
 `Undefined permission ID: cmf.ManagePortal`（少了 CMFCore permissions 的 include）。
+
+第三个脚本 `site_check.py` 需要**站点起着**，走 `bin/instance run`：
+
+```bash
+docker exec <容器名> /home/senaite/senaitelims/bin/instance run   /opt/addons/common/maitux.dynamicfields/tools/site_check.py lims2
+```
+
+它对白名单里 36 个类型逐个走一遍配置页实际用的代码路径（机制判定、找实例、
+三段内省、工作流状态、九种字段构造、DX 的 assignable 有没有被旁路），报告
+哪个类型会炸。**只读，可以在生产上跑。** 手工点 36 个类型要几十分钟，
+而真正的风险不在「加字段」本身（字段构造跟 portal_type 无关），在**内省**
+——某个类型的 schema 读崩了，那一页就 500。
 
 手工部分：
 
@@ -220,7 +233,9 @@ maitux.dynamicfields/
 ├── setup.py / MANIFEST.in / README.md
 ├── tools/
 │   ├── compile_mo.py       # .po -> .mo（纯标准库；顺带同步 zh / zh-cn 别名）
-│   └── smoke_test.py       # 冒烟测试，在镜像的 zopepy 里跑
+│   ├── smoke_test.py       # 冒烟测试（74 项），镜像的 zopepy 里跑，不需要站点
+│   ├── zcml_check.py       # ZCML 注册检查，能查出跨包注册冲突
+│   └── site_check.py       # **在运行中的站点上**逐个验证 36 个类型的内省不崩
 └── src/maitux/dynamicfields/
     ├── configure.zcml      # 翻译域 utility + 两个适配器；**不注册 profile**
     ├── config.py           # 白名单、字段类型、保留名、上限
