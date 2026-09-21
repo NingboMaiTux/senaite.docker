@@ -106,6 +106,10 @@ bash /tmp/gen-custom-addon.sh
 : "${PASSWORD:?PASSWORD is not set - copy .env.example to .env}"
 step "写入 buildout.cfg 的口令"
 python - <<'PYEOF'
+# -*- coding: utf-8 -*-
+# （镜像里是 Python 2.7：下面有中文注释，没有这一行会报
+#   "SyntaxError: Non-ASCII character ... but no encoding declared"，
+#   容器就一直重启。）
 import io
 import os
 import sys
