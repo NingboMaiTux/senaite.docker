@@ -90,12 +90,31 @@ def _widget_kwargs(record):
 
 
 def _visibility(record):
-    """把「在编辑表单显示 / 在查看页显示」翻译成 AT 的 visible 字典"""
-    edit = "visible" if record.get("show_edit") else "invisible"
-    if record.get("readonly"):
-        edit = "visible"
-    view = "visible" if record.get("show_view") else "invisible"
-    return {"edit": edit, "view": view}
+    """把「在编辑表单显示 / 在查看页显示」翻译成 AT 的 visible 字典
+
+    ★ 必须带 ``add`` 键。样品新建页 ar_add2 **是读 AR schema 的**
+    （add2.py:290 "Return the AR schema fields (including extendend fields)"），
+    但它按 ``field.widget.isVisible(context, mode="add", default='invisible')``
+    过滤——字典里没有 ``add`` 键就落到 default='invisible'，字段在新建页上
+    根本不出现。senaite 自己的 AR 字段写的是 ``{"add": "edit"}``（值是 edit
+    不是 visible），这里照抄。
+
+    ``header_table`` 同理，控制样品/工作表顶部信息栏。
+    """
+    show_edit = bool(record.get("show_edit"))
+    show_view = bool(record.get("show_view"))
+    readonly = bool(record.get("readonly"))
+
+    visible = {
+        "edit": "visible" if (show_edit or readonly) else "invisible",
+        "view": "visible" if show_view else "invisible",
+    }
+    # 新建页：可编辑 -> "edit"；只读 -> "view"；不显示 -> 干脆不给键
+    if show_edit:
+        visible["add"] = "view" if readonly else "edit"
+    if show_view:
+        visible["header_table"] = "visible"
+    return visible
 
 
 def _base_kwargs(record):

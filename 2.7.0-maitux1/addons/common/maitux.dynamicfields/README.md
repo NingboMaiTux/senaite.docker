@@ -185,12 +185,23 @@ behavior 属性转发、脏配置容错。
 
 ## 9. 已知限制
 
-1. **加了字段 ≠ 界面上一定看得见。** 自动生效的只有 DX 的标准 `@@edit`/`@@add`
-   与 AT 的 `base_edit`/`base_view`。SENAITE 把最关键的几个界面全部重写过，
-   它们**不读 schema**：样品新建页 `ar_add2`（字段清单写在代码里）、样品与工作表
-   顶部的 `header_table` viewlet、全部列表页（`senaite.app.listing` 的列来自
-   `self.columns` 字典）、工作表结果录入页页头。这几处需要二期各做一个读同一份
-   配置的通用挂载点。配置页上对此有明示。
+1. **加了字段在哪儿看得见。**（此条原先写错过，已按源码更正）
+
+   **会自动出现的：**
+   - DX 的标准 `@@edit` / `@@add` 表单
+   - AT 的 `base_edit` / `base_view`
+   - **样品新建页 `ar_add2`** —— 它**是读 AR schema 的**，且明确包含 extender
+     字段（`add2.py:290` 注释原文 "Return the AR schema fields (including
+     extendend fields)"）。前提是 widget 的 `visible` 字典里有 `"add"` 键，
+     否则 `isVisible(..., mode="add", default='invisible')` 会把它判为不可见
+     ——`atfields._visibility()` 已按 senaite 自己的写法给了 `{"add": "edit"}`。
+   - 样品 / 工作表顶部的 header_table（同理给了 `"header_table": "visible"`，
+     实际效果待站点上验证）
+
+   **仍然不会自动出现的：**
+   - 全部列表页：`senaite.app.listing` 的列来自 `self.columns` 字典，与 schema
+     无关，需要二期做一个读同一份配置的通用挂载点
+   - 工作表结果录入页页头：手写模板
 2. **别的 add-on 可能把本包旁路掉。** `INNOCARE.labid` 为 `ILaboratory` 注册了
    自己的 `IBehaviorAssignable`，比本包的 `IDexterityContent` 更具体，zope 会挑它
    ——本包在 Laboratory 上不生效。配置页用 `assignable.is_assignable_active()`

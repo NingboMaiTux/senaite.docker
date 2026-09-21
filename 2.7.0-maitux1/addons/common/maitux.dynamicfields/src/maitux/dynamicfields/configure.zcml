@@ -25,8 +25,15 @@
   <!--
     Dexterity：把动态 schema 挂到对象上，不写 FTI、不需要 profile。
     getAdditionalSchemata() 走的是 IBehaviorAssignable，且每次都调、无缓存。
+
+    ★ 注册在 overrides.zcml 里，不在这里。本包的 IBehaviorAssignable 适配器
+    签名是 (IDexterityContent,) -> IBehaviorAssignable, name=u''，与
+    plone.dexterity/configure.zcml:42 的 DexterityBehaviorAssignable **完全同签名**，
+    写在 configure.zcml 里会 ConfigurationConflictError 让整站起不来（实测）。
+    这正是 R5b 说的「跨 addon 同接口+同名 adapter 必须进 overrides.zcml」。
+    本包的类继承自 DexterityBehaviorAssignable 并 super() 调用它，所以覆盖是安全的：
+    FTI 上登记的 behavior 照常枚举，只是末尾多追加本包的动态 schema。
   -->
-  <adapter factory=".assignable.DynamicFieldsAssignable" />
 
   <!--
     Archetypes：按配置返回扩展字段。

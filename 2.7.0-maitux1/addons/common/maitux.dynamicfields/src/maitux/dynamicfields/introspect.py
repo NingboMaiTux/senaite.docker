@@ -132,6 +132,46 @@ def list_type_groups():
     return groups
 
 
+def list_reference_targets():
+    """对象引用字段能指向哪些类型——**读全部 portal_type，不用白名单**
+
+    白名单 ALLOWED_TYPES 管的是「哪些类型能被加字段」，跟「引用能指向谁」是
+    两件事。早期两者共用一份清单，结果 Project / HazardCategory /
+    StorageCondition 这些选不到，arextension 里三个引用字段直接复现不了。
+
+    这里只排掉明显无意义的：临时对象、Plone 基础设施类型。
+    """
+    if api is None:
+        return []
+    try:
+        tool = api.get_tool("portal_types")
+        type_ids = tool.objectIds()
+    except Exception:
+        return []
+
+    skip_prefixes = ("Temporary", "ATBooleanCriterion", "ATCurrentAuthor",
+                     "ATDate", "ATList", "ATPath", "ATPortalType",
+                     "ATReference", "ATRelative", "ATSelection",
+                     "ATSimpleInt", "ATSimpleString", "ATSort", "ATBoolean")
+    skip_exact = set(["Plone Site", "TempFolder", "Discussion Item",
+                      "Topic", "Collection", "Document", "File", "Image",
+                      "Folder", "Link", "News Item", "Event"])
+
+    items = []
+    for type_id in type_ids:
+        if type_id in skip_exact:
+            continue
+        if any(type_id.startswith(prefix) for prefix in skip_prefixes):
+            continue
+        items.append({
+            "portal_type": type_id,
+            "title": config.TYPE_TITLES.get(type_id, type_id),
+            "known": type_id in config.ALLOWED_TYPES,
+        })
+    items.sort(key=lambda i: (not i["known"], i["portal_type"]))
+    return items
+
+
 def get_workflow_states(portal_type):
     """该类型绑定的工作流状态 [(id, title)]，供「可编辑状态」下拉使用"""
     if api is None:

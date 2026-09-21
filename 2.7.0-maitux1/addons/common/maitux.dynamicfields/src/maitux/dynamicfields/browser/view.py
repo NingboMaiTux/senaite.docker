@@ -455,9 +455,15 @@ class DynamicFieldsView(BrowserView):
                 for t in config.FIELD_TYPES]
 
     def reference_type_options(self):
+        """引用字段能指向的类型。
+
+        用 list_reference_targets() 而不是 list_types()：能被加字段的类型
+        和引用能指向的类型是两件事。共用一份清单的话，Project /
+        HazardCategory / StorageCondition 这些别的 addon 提供的类型选不到。
+        """
         return [{"id": item["portal_type"],
                  "title": u"%s (%s)" % (item["title"], item["portal_type"])}
-                for item in introspect.list_types()]
+                for item in introspect.list_reference_targets()]
 
     def types_with_options(self):
         return list(config.TYPES_WITH_OPTIONS)
