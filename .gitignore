@@ -1,0 +1,30 @@
+# 编译产物：.mo 由各包 tools/compile_mo.py 从同目录的 .po 生成。
+#
+# 为什么不跟踪：addons/customers 是 bind mount（compose:106），容器里任何
+# 重新编译都会直接落回宿主机的工作区，于是 git status 常年脏一片，真正的改动
+# 反而被淹掉。.po 才是源，.mo 是产物。
+#
+# ⚠️ 但**不要把磁盘上的 .mo 删掉**：本环境没有开启 zope.i18n 的自动编译
+# （zope_i18n_compile_mo_files 在 compose / Dockerfile / buildout 里都没设，
+# config.COMPILE_MO_FILES 默认 unset），启动时不会从 .po 重建。删了等于
+# 所有 addon 的中文标签直接没了。
+#
+# 新克隆仓库、或改了 .po 之后，在对应包目录下跑：
+#     python tools/compile_mo.py
+*.mo
+
+# 例外：这两个不是编译产物，是**构建输入**——Dockerfile:67 把它们 COPY 进镜像，
+# 用来覆盖 senaite.impress 的中文翻译（Dockerfile:165-168 install 到 locales 下）。
+# 忽略掉的话，新克隆的仓库里没有这两个文件，docker build 会直接失败。
+!2.7.0-maitux1/senaite.impress.mo
+!latest/senaite.impress.mo
+
+# Python 编译产物
+*.pyc
+*.pyo
+__pycache__/
+*.egg-info/
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
