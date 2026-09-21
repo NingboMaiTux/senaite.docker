@@ -623,3 +623,9 @@ msgstr "元数据列"
 
 msgid "Needed before the field can be shown as a listing column."
 msgstr "字段要作为列表的一列显示，必须先有它。"
+
+msgid "Basics"
+msgstr "基础信息"
+
+msgid "The stored value takes letters, digits and underscore only - it is what gets written onto the objects. Chinese goes in the label next to it. Store Chinese here and the data can never be translated, and indexes, exports and statistics are locked to that one language; changing it later means migrating data."
+msgstr "存储值只能用字母、数字和下划线——真正写到对象上的是它。中文填在旁边的标签里。把中文存进来，这份数据就永远翻译不了，索引、导出、统计也全锁死在那一种语言上，事后再改要迁数据。"

@@ -311,15 +311,22 @@
           <input type="hidden" name="portal_type"
                  tal:attributes="value info/portal_type" />
 
-          <div class="alert alert-secondary py-2 small">
-            <span i18n:translate="">Target object</span>
-            <strong tal:content="info/title">Title</strong>
-            <span class="mdf-code" tal:content="info/portal_type">Type</span>
-            <span tal:attributes="class string:mdf-mech mdf-mech-${info/mechanism}"
-                  tal:content="info/mechanism">AT</span>
-            <span class="mdf-lock ml-2" i18n:translate="">
-              taken from the selection on the left; cannot be changed
-            </span>
+          <fieldset class="border rounded p-2 mb-3">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Basics</legend>
+
+          <!-- 目标对象就是第一行，跟其它设置一个形状。原来是一条灰色 alert
+               横幅，又是徽章又是「不能改」的说明，占一整条还跟下面对不齐。
+               它本来就改不了，不用特地声明；AT / DX 是实现细节，实施人员
+               不需要知道。 -->
+          <div class="mdf-f">
+            <div class="mdf-n" i18n:translate="">Target object</div>
+            <div>
+              <strong tal:content="info/title">Title</strong>
+            </div>
+            <div class="mdf-h">
+              <span class="mdf-code" tal:content="info/portal_type">Type</span>
+            </div>
           </div>
 
           <div class="mdf-f">
@@ -440,6 +447,8 @@
             </div>
           </div>
 
+          </fieldset>
+
           <fieldset class="border rounded p-2 mb-3">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
                     i18n:translate="">Labels (stored as data, applied without a restart)</legend>
@@ -553,7 +562,7 @@
                                        checked python:(n == 0) and 'checked' or None" />
               </div>
               <div class="form-group col-md-3 mb-1">
-                <input type="text" name="option_key" placeholder="key (ASCII)"
+                <input type="text" name="option_key" placeholder="low"
                        class="form-control form-control-sm" />
               </div>
               <div class="form-group col-md-4 mb-1" tal:repeat="lang languages">
@@ -562,12 +571,12 @@
                                        placeholder string:${lang/label}" />
               </div>
             </div>
-            <div class="alert alert-danger py-2 mb-0 small" i18n:translate="">
-              The stored value must be an ASCII key; localized text
-              belongs in the labels. Once localized text is stored on
-              the objects it can never be translated, and indexes,
-              exports and statistics are locked to that one language.
-              Changing it later means migrating data.
+            <div class="alert alert-warning py-2 mb-0 small" i18n:translate="">
+              The stored value takes letters, digits and underscore only -
+              it is what gets written onto the objects. Chinese goes in the
+              label next to it. Store Chinese here and the data can never be
+              translated, and indexes, exports and statistics are locked to
+              that one language; changing it later means migrating data.
             </div>
           </fieldset>
 

@@ -159,9 +159,10 @@ class DynamicFieldsView(BrowserView):
         field_id = form.get("field_id") or ""
         record = storage.get_record(field_id)
         if record is None:
-            self.errors.append(_(
-                u"delete_missing",
-                default=u"The field to delete does not exist"))
+            # 不报错。走到这里只有两种情况：删除按钮被点了两次，或者页面
+            # 是旧的、别人已经删过了。两种情况下用户想要的结果——这个字段
+            # 不在了——都已经达成，弹一条红底的「不存在」只会让人以为
+            # 操作失败了。
             return
         # 先摘索引再删定义：顺序反了就会在目录里留下无人维护的死索引
         for message in indexing.drop_index(record):
