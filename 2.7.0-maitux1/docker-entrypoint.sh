@@ -106,6 +106,9 @@ bash /tmp/gen-custom-addon.sh
 : "${PASSWORD:?PASSWORD is not set - copy .env.example to .env}"
 step "写入 buildout.cfg 的口令"
 python - <<'PYEOF'
+# -*- coding: utf-8 -*-
+# ↑ 必须有：容器里的 `python` 是 2.7，源码带中文注释而没有 encoding 声明时
+#   直接 SyntaxError，entrypoint 在 set -e 下退出 → 容器无限重启。
 import io
 import os
 import sys
