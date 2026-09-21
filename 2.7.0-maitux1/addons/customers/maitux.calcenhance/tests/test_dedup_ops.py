@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for the de-duplication family (第二批 A/B/C).
+"""Tests for the de-duplication family and LOOKUP2 (第二批 A/B/C/D).
 
 Run inside the container (Python 2.7):
 
@@ -22,6 +22,8 @@ What each block is for:
     C  DISTINCT_<OP> -- statistics after de-duplication.  总杂 is a
        broadcast column; an RSD over it is diluted by the repeats and looks
        perfectly reasonable.
+    D  LOOKUP2 -- two-field key, plus the dependency-propagation regexes
+       that have to learn the new name or the downstream value goes stale.
 """
 
 from __future__ import print_function
@@ -35,7 +37,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from harness import (  # noqa: E402
     Results, build_sample, evaluate, install_engine_stubs, load_patches,
-    rebuild)  # noqa: F401
+    rebuild)
 from test_engine import _registry_keys  # noqa: E402
 
 
@@ -322,6 +324,167 @@ def test_distinct_stats_warns_on_disagreement(p, r):
 
 
 # ---------------------------------------------------------------------------
+# D: LOOKUP2
+# ---------------------------------------------------------------------------
+
+def _lookup_fixture():
+    """A 称样量 table: same impurity at three spike levels."""
+    return {
+        u"weigh": {
+            u"imp_name": [A, A, A, B, B, B],
+            u"imp_spike_level": [u"80%", u"100%", u"120%"] * 2,
+            u"imp_weigh": [10.1, 10.2, 10.3, 20.1, 20.2, 20.3],
+            u"one_row": 42.0,
+        },
+        u"dup": {
+            u"imp_name": [A, A],
+            u"imp_spike_level": [u"100%", u"100%"],
+            u"imp_weigh": [1.0, 2.0],
+        },
+        u"empty": {
+            u"imp_name": [],
+            u"imp_spike_level": [],
+            u"imp_weigh": [],
+        },
+    }
+
+
+def _lookups(p):
+    """(logger, LOOKUP, LOOKUP2).
+
+    The logger comes back from here on purpose: install_engine_stubs()
+    REBINDS bika.lims.logger every call, so a logger captured before this
+    one is not the object the code under test writes to -- an assertion on
+    it would silently pass forever.
+    """
+    logger = install_engine_stubs()
+    lookup, lookup2 = p._make_lookup(_lookup_fixture())
+    return logger, lookup, lookup2
+
+
+def test_make_lookup_returns_both(p, r):
+    """D: _make_lookup now hands back both spellings.
+
+    One factory, one `sibling_data` closure, one set of "has this been
+    captured yet" rules -- a second factory would have to copy them, and two
+    copies of that rule is how the two spellings drift apart.
+    """
+    install_engine_stubs()
+    pair = p._make_lookup(_lookup_fixture())
+    r.check("returns a 2-tuple", isinstance(pair, tuple) and len(pair) == 2,
+            True)
+    lookup, lookup2 = pair
+    r.check("LOOKUP still works", lookup(u"weigh", u"imp_weigh",
+                                        u"imp_name", A), 10.1)
+    r.check("LOOKUP2 is callable", callable(lookup2), True)
+
+
+def test_lookup2_two_keys(p, r):
+    """D: 两个键都要命中 —— 单键取回来的是别的加标水平那一行."""
+    _logger, lookup, lookup2 = _lookups(p)
+
+    r.check("单键 LOOKUP 只能拿到第一行（这正是要解决的问题）",
+            lookup(u"weigh", u"imp_weigh", u"imp_name", A), 10.1)
+    r.check("LOOKUP2 标量形式", lookup2(u"weigh", u"imp_weigh",
+                                    u"imp_name", A,
+                                    u"imp_spike_level", u"120%"), 10.3)
+    r.check("换一个键值就换一行", lookup2(u"weigh", u"imp_weigh",
+                                  u"imp_name", B,
+                                  u"imp_spike_level", u"100%"), 20.2)
+
+    r.check("元素级：两列键并排",
+            lookup2(u"weigh", u"imp_weigh", u"imp_name", [A, B, A],
+                    u"imp_spike_level", [u"80%", u"120%", u"100%"]),
+            [10.1, 20.3, 10.2])
+    r.check("一列键 + 一个广播的标量键",
+            lookup2(u"weigh", u"imp_weigh", u"imp_name", [A, B],
+                    u"imp_spike_level", u"100%"),
+            [10.2, 20.2])
+    r.check("键值也可以是 JSON 数组文本（[kw] 替换进来的形状）",
+            lookup2(u"weigh", u"imp_weigh", u"imp_name",
+                    json.dumps([A, B]), u"imp_spike_level",
+                    json.dumps([u"80%", u"80%"])),
+            [10.1, 20.1])
+
+    # 中文键的 str / unicode 边界 (R13)
+    r.check("utf-8 str 键值与 unicode 列相等",
+            lookup2(u"weigh", u"imp_weigh", u"imp_name", A.encode("utf-8"),
+                    u"imp_spike_level", u"80%"), 10.1)
+
+
+def test_lookup2_failures(p, r):
+    """D: 找不到 / 多行 / 列不齐 / 字段缺失 —— 每一种都要看得见."""
+    logger, lookup, lookup2 = _lookups(p)
+
+    r.raises("没有匹配行时抛 KeyError（调用方据此出 '---'）",
+             KeyError, lookup2, u"weigh", u"imp_weigh", u"imp_name", A,
+             u"imp_spike_level", u"200%")
+    r.check("给了默认值就用默认值",
+            lookup2(u"weigh", u"imp_weigh", u"imp_name", A,
+                    u"imp_spike_level", u"200%", 0.0), 0.0)
+    r.check("元素级下默认值逐行生效",
+            lookup2(u"weigh", u"imp_weigh", u"imp_name", [A, A],
+                    u"imp_spike_level", [u"80%", u"200%"], 0.0),
+            [10.1, 0.0])
+
+    r.raises("源 AS 不存在", KeyError, lookup2, u"nobody", u"imp_weigh",
+             u"imp_name", A, u"imp_spike_level", u"80%")
+    r.raises("字段不存在", KeyError, lookup2, u"weigh", u"nope",
+             u"imp_name", A, u"imp_spike_level", u"80%")
+    r.raises("列是空的 = 还没录入，不是空结果", KeyError, lookup2,
+             u"empty", u"imp_weigh", u"imp_name", A,
+             u"imp_spike_level", u"80%")
+    r.raises("两列键值行数不同时拒绝配对", ValueError, lookup2,
+             u"weigh", u"imp_weigh", u"imp_name", [A, B],
+             u"imp_spike_level", [u"80%"])
+    r.raises("键字段必须是字符串", TypeError, lookup2, u"weigh",
+             u"imp_weigh", 1, A, u"imp_spike_level", u"80%")
+
+    before = len(logger.lines)
+    r.check("命中多行取第一行",
+            lookup2(u"dup", u"imp_weigh", u"imp_name", A,
+                    u"imp_spike_level", u"100%"), 1.0)
+    r.check("并且 warn 了一条", len(logger.lines) > before, True)
+
+    # 标量值列（整张表共用一个值）广播到每一行：同一个存储值
+    # 不能“第 0 行答得出、第 3 行报错”。
+    r.check("标量值列被广播到每一行",
+            [lookup2(u"weigh", u"one_row", u"imp_name", A,
+                     u"imp_spike_level", level)
+             for level in (u"80%", u"120%")],
+            [42.0, 42.0])
+    # 但“广播”不等于“不用匹配”—— 不给 LOOKUP 那条「省略键 = 取那
+    # 唯一一行」的捷径，否则用两个键消歧义的意义就没了。
+    r.raises("键对不上时标量值列照样报错", KeyError, lookup2,
+             u"weigh", u"one_row", u"imp_name", A,
+             u"imp_spike_level", u"200%")
+
+
+def test_lookup2_is_a_dependency(p, r):
+    """D: 依赖传播必须认识 LOOKUP2.
+
+    `_LOOKUP_SRC_RE` used to read `LOOKUP\\s*\\(`, which does not match
+    `LOOKUP2(`.  A formula whose only cross-AS reference is a LOOKUP2 would
+    look dependency-free: computed once, then never refreshed when the
+    source changes.  No '---', no log line -- just an old number on screen.
+    That is the exact failure v1.5.0 fixed for LOOKUP.
+    """
+    sources = p._extract_lookup_sources(
+        u'LOOKUP2("imp_rec_weigh","imp_weigh","imp_name",[imp_name],'
+        u'"imp_spike_level",[imp_spike_level])')
+    r.check("LOOKUP2 的源 AS 被登记为依赖",
+            u"imp_rec_weigh" in sources, True)
+    r.check("LOOKUP 的照旧",
+            u"a" in p._extract_lookup_sources(u'LOOKUP("a","b","c",1)'), True)
+    r.check("动态选源也认 LOOKUP2",
+            p._lookup_has_dynamic_source(u'LOOKUP2([src],"b","c",1,"d",2)'),
+            True)
+    r.check("字面量源不算动态",
+            p._lookup_has_dynamic_source(u'LOOKUP2("src","b","c",1,"d",2)'),
+            False)
+
+
+# ---------------------------------------------------------------------------
 # registration + through the engine
 # ---------------------------------------------------------------------------
 
@@ -331,8 +494,10 @@ def test_dedup_registration(p, r):
     scalar = _registry_keys(p, "safe_globals")
     for name in ("DISTINCT_SEQlist", "GROUP_REPORT_TOPlist", "DISTINCT_RSD",
                  "DISTINCT_RANGE", "DISTINCT_MAX", "DISTINCT_MIN",
-                 "DISTINCT_AVG", "DISTINCT_COUNT"):
+                 "DISTINCT_AVG", "DISTINCT_COUNT", "LOOKUP2"):
         r.check("%s registered in _SAFE" % name, name in safe, True)
+    r.check("LOOKUP2 also in the scalar table, like LOOKUP",
+            "LOOKUP2" in scalar, True)
     r.check("DISTINCT_* stay out of the scalar table",
             [n for n in scalar if n.startswith("DISTINCT_")], [])
 
@@ -435,7 +600,7 @@ def test_dedup_readme(p, r):
     text = open(readme, "rb").read().decode("utf-8")
     for name in ("DISTINCT_SEQlist", "GROUP_REPORT_TOPlist", "DISTINCT_RSD",
                  "DISTINCT_RANGE", "DISTINCT_MAX", "DISTINCT_MIN",
-                 "DISTINCT_AVG", "DISTINCT_COUNT"):
+                 "DISTINCT_AVG", "DISTINCT_COUNT", "LOOKUP2"):
         r.check("README documents %s" % name, name in text, True)
     r.check("README 写明序号列是用来数个数的",
             u"有几个" in text or u"个数" in text, True)
@@ -457,11 +622,16 @@ def main():
     test_seq_and_top_line_up(p, r)
     test_distinct_stats(p, r)
     test_distinct_stats_warns_on_disagreement(p, r)
+    test_make_lookup_returns_both(p, r)
+    test_lookup2_two_keys(p, r)
+    test_lookup2_failures(p, r)
+    test_lookup2_is_a_dependency(p, r)
     test_dedup_registration(p, r)
     test_dedup_through_the_engine(p, r)
     test_dedup_readme(p, r)
     return r.report(
-        "去重族: DISTINCT_SEQlist / GROUP_REPORT_TOPlist / DISTINCT_<OP>")
+        "去重族: DISTINCT_SEQlist / GROUP_REPORT_TOPlist / DISTINCT_<OP> "
+        "+ LOOKUP2")
 
 
 if __name__ == "__main__":

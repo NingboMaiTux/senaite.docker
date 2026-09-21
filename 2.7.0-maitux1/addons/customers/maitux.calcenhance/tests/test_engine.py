@@ -300,11 +300,13 @@ def test_count_values_rows(p, r):
 #                     XAGG_NTH2 / XAGG_AVG2 / _RSD2 / _MAX2 / _MIN2 /
 #                     _COUNT2 / INDEX_BY_GROUP -- array table only, the
 #                     dual-key branch; 裁决 §7 ②③④⑤)
-#              -> 96 (去重族: DISTINCT_SEQlist / GROUP_REPORT_TOPlist /
-#                     DISTINCT_RSD / _RANGE / _MAX / _MIN / _AVG / _COUNT
-#                     -- array table only)
-EXPECTED_SAFE_ENTRIES = 96
-EXPECTED_SCALAR_ENTRIES = 31
+#              -> 97 (去重族 + LOOKUP2: DISTINCT_SEQlist /
+#                     GROUP_REPORT_TOPlist / DISTINCT_RSD / _RANGE / _MAX /
+#                     _MIN / _AVG / _COUNT on the array table, LOOKUP2 on
+#                     BOTH -- the scalar table therefore goes 31 -> 32,
+#                     the first time it has moved since the rounding hoist)
+EXPECTED_SAFE_ENTRIES = 97
+EXPECTED_SCALAR_ENTRIES = 32
 
 
 def test_registry_totals(p, r):

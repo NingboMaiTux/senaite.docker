@@ -21,13 +21,13 @@
 
 | | 条目 | = 常量 | + 函数 |
 | -- | ---- | ---- | ---- |
-| CalculatedList `_SAFE` | **96** | 3 | **93** |
-| 标量 `safe_globals` | **31** | 3 | **28** |
+| CalculatedList `_SAFE` | **97** | 3 | **94** |
+| 标量 `safe_globals` | **32** | 3 | **29** |
 
-较 v1.14.0：CalculatedList 88 -> 96（新增 8 个）。标量表未变动
-（这一族都只对整列有意义）。
+较 v1.14.0：CalculatedList 88 -> 97（新增 9 个）。标量表 31 -> 32
+（只多了 `LOOKUP2`，与 `LOOKUP` 一样两张表都进）。
 
-### 新增函数（8 个）
+### 新增函数（9 个）
 
 | 函数 | 用途 |
 | ---- | ---- |
@@ -37,9 +37,11 @@
 | `DISTINCT_RANGE(值列, 去重键)` | 同上：极差 |
 | `DISTINCT_MAX / _MIN / _AVG(值列, 去重键)` | 同上：最大 / 最小 / 平均 |
 | `DISTINCT_COUNT(值列, 去重键)` | 同上：去重后参与统计的个数（审计列）|
+| `LOOKUP2(源AS, 取值字段, 键1字段, 键1值, 键2字段, 键2值[, 默认])` | `LOOKUP` 的**双键**版 |
 
 详见下文「[`DISTINCT_SEQlist` / `GROUP_REPORT_TOPlist` —— 去重序号与单杂报告值](#distinct_seqlist--group_report_toplist--去重序号与单杂报告值)」、
-「[`DISTINCT_<OP>` —— 先去重再统计](#distinct_op--先去重再统计)」。
+「[`DISTINCT_<OP>` —— 先去重再统计](#distinct_op--先去重再统计)」、
+「[`LOOKUP2` —— 双键跨 AS 取值](#lookup2--双键跨-as-取值)」。
 
 不需要重建镜像（customers 层 bind-mount，`docker restart` 即可生效）。
 
@@ -993,6 +995,7 @@ bin/instance restart
 | `DISTINCT_SEQlist(k1[,k2…])`   | 去重序号，重复行留空                 | `DISTINCT_SEQlist([imp_name],[imp_pct_group])` |
 | `GROUP_REPORT_TOPlist(v,k1[,k2…])` | 每组最高档报告值，只在首行       | `GROUP_REPORT_TOPlist([imp_report],[imp_name],[imp_pct_group])` |
 | `DISTINCT_RSD/RANGE/MAX/MIN/AVG/COUNT(v,k)` | 先去重再统计（标量）    | `DISTINCT_RSD([imp_total],[g_sample_id])` |
+| `LOOKUP2(源,取值,键1,值1,键2,值2[,默认])` | 双键跨 AS 取值              | `LOOKUP2("imp_rec_weigh","imp_weigh","imp_name",[imp_name],"imp_spike_level",[imp_spike_level])` |
 | `ROUND(x,n)`                    | 四舍五入，返回**数值**               | `ROUND([A], 3)`                         |
 | `ROUND_EVEN(x,n)`               | 四舍六入五留双（GB/T 8170），**数值** | `ROUND_EVEN([A], 3)`                    |
 | `ROUND_UP(x,n)`                 | 远离零只进不舍，**数值**             | `ROUND_UP([A], 1)`                      |
@@ -2282,6 +2285,42 @@ imp_total_n     = DISTINCT_COUNT([imp_total], [g_sample_id])
 
 **标量函数**：放在 CalculatedList 字段里会得到**单元素数组**（与 `GROUP_AVG` 这类
 整列标量版同理）；要一个真标量就放 Calculated 字段。
+
+---
+
+## LOOKUP2 —— 双键跨 AS 取值
+
+v1.15.0 新增。`LOOKUP` 只能按一个键匹配；AS-18「加入杂质称样量」要按
+**物质名称 + 加标水平**去 `imp_rec_weigh` 取 —— 同一个杂质在源表里有好几个加标
+水平各一行，**单键取回来的是其中第一行**，一个看着完全合理的错数。
+
+```
+LOOKUP2(源AS, 取值字段, 键1字段, 键1值, 键2字段, 键2值[, 默认])
+
+imp_rec_spec_weigh = LOOKUP2("imp_rec_weigh", "imp_weigh",
+                             "imp_name", [imp_name],
+                             "imp_spike_level", [imp_spike_level])
+```
+
+语义与 `LOOKUP` 一致（源 AS 解析、「还没录入」的判定、元素级/标量两种调用形式、
+默认值），只是**两个键都要命中**。两处刻意不同：
+
+| | `LOOKUP` | `LOOKUP2` |
+| ---- | ---- | ---- |
+| 省略键 = 取那唯一一行 | 支持（32 处配置这么写）| **不支持** —— 用两个键就是为了消歧义 |
+| 命中多行 | 取第一个 | 取第一行 **+ warn 一条** |
+
+- 键值可以是列（逐行查）、也可以是一个值（广播到每行）；两列键值**行数不同**时
+  拒绝配对并报错，不截断到短的那个。
+- **取值字段是标量**时广播到每一行（整张表共用一个值，比如稀释体积）；但广播不等于
+  不用匹配，键对不上照样报错。
+- 中文键两边都过 `_safe_text` 再比 —— `str` 与 `unicode` 在 Python 2 里直接比
+  不报错、只是永远不相等。
+
+> ★ **依赖传播也认识它了**：`_LOOKUP_SRC_RE` 原来写的是 `LOOKUP\s*\(`，
+> 匹配不到 `LOOKUP2(`。只靠 LOOKUP2 引用别的 AS 的公式会被当成「没有跨 AS 依赖」，
+> 于是**算过一次就再也不刷新**，源数据改了屏幕上还是旧值 —— 没有 `---`、没有日志，
+> 正是 v1.5.0 为 LOOKUP 修掉的那个静默失败。现在两个名字都认。
 
 ---
 

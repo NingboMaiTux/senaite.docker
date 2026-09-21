@@ -2834,7 +2834,168 @@ def _make_lookup(sibling_data):
                 u"LOOKUP: key '%s' not found in '%s' array of '%s'"
                 % (key_val, key_kw, source_kw))
 
-    return lookup
+    def lookup2(source_kw, target_kw, key1_kw, key1_val, key2_kw, key2_val,
+                default=_NO_DEFAULT):
+        """LOOKUP with a TWO-field key: both have to match.
+
+            LOOKUP2(源AS, 取值字段, 键字段1, 键值1, 键字段2, 键值2 [, 默认])
+
+            imp_rec_spec_weigh = LOOKUP2("imp_rec_weigh", "imp_weigh",
+                                         "imp_name", [imp_name],
+                                         "imp_spike_level", [imp_spike_level])
+
+        AS-18 「加入杂质称样量」要按「物质名称 + 加标水平」取：同一个
+        杂质在源表里有好几个加标水平各一行，单键 LOOKUP 取回来的是其中
+        第一行 —— 一个看着完全合理的错数。
+
+        除了「两个键都要命中」，语义与 LOOKUP 一致：源 AS 的解析、
+        「还没录入」的判定、元素级 / 标量两种调用形式、默认值的含义都一样。
+        两处刻意不同：
+
+        - **不提供 LOOKUP 那条「省略键 = 取那唯一一行」的捷径**。用两个键
+          就是为了消歧义，遇到单行源就把键忽略掉，恰好把消歧义丢了。
+        - **命中多行取第一行并 warn**（与导入器的 `matches %d existing
+          objects` 同款）。两个键还撞上，说明源表里真有重复行 ——
+          那是数据问题，不该在这里静默地挑一个。
+
+        [PY2-UNICODE] 两边的键都过 _safe_text 再比 —— 杂质名大量是中文，
+        str 与 unicode 直接比在 Python 2 里不报错、只是永远不相等。
+        """
+        for label, value in ((u"source_kw", source_kw),
+                             (u"target_kw", target_kw),
+                             (u"key1_kw", key1_kw),
+                             (u"key2_kw", key2_kw)):
+            if not isinstance(value, basestring):
+                raise TypeError("LOOKUP2 %s must be a string" % label)
+
+        if source_kw not in sibling_data:
+            raise KeyError(
+                "LOOKUP2: source service '%s' not found or has no "
+                "cross-referenceable fields" % source_kw)
+
+        data = sibling_data[source_kw]
+        columns = {}
+        for label, field_kw in ((u"target", target_kw), (u"key1", key1_kw),
+                                (u"key2", key2_kw)):
+            arr = data.get(field_kw)
+            if arr is None:
+                raise KeyError(
+                    "LOOKUP2: %s field '%s' not found in '%s'"
+                    % (label.encode("ascii"), field_kw, source_kw))
+            if isinstance(arr, list):
+                # Same rule as LOOKUP: a field that has not been captured
+                # yet must not read as a value.  Raising lets the caller
+                # emit '---' instead of a blank that looks like a result.
+                if not arr:
+                    raise KeyError(
+                        "LOOKUP2: field '%s' of '%s' has no data yet"
+                        % (field_kw, source_kw))
+                columns[label] = list(arr)
+            elif arr == "":
+                raise KeyError(
+                    "LOOKUP2: field '%s' of '%s' has no data yet"
+                    % (field_kw, source_kw))
+            else:
+                # A SCALAR field on a keyed source is one value that belongs
+                # to every row of it -- a dilution factor for the whole
+                # prep, say.  Broadcasting it is the only reading that does
+                # not depend on WHICH row matched: taking it as a one-row
+                # column would answer for key row 0 and raise for key row 3,
+                # from the same stored value.
+                columns[label] = [arr]
+
+        # Broadcast a scalar VALUE column to the key length (see above).  A
+        # scalar KEY column stays one row long: it cannot tell two rows
+        # apart, which is the whole point of this function, so it should
+        # match one row and no more.
+        rows = min(len(columns[u"key1"]), len(columns[u"key2"]))
+        if len(columns[u"target"]) == 1 and rows > 1:
+            columns[u"target"] = columns[u"target"] * rows
+
+        target_arr = columns[u"target"]
+        key1_arr = [_safe_text(v) for v in columns[u"key1"]]
+        key2_arr = [_safe_text(v) for v in columns[u"key2"]]
+
+        import json as _l2_json
+
+        def _as_column(value):
+            """The key argument as a list, or None when it is one value."""
+            if isinstance(value, list):
+                return list(value)
+            if isinstance(value, basestring):
+                try:
+                    parsed = _l2_json.loads(_safe_text(value))
+                except Exception:
+                    return None
+                if isinstance(parsed, list):
+                    return parsed
+            return None
+
+        wanted1 = _as_column(key1_val)
+        wanted2 = _as_column(key2_val)
+        element_wise = not (wanted1 is None and wanted2 is None)
+        if not element_wise:
+            pairs = [(key1_val, key2_val)]
+        else:
+            if wanted1 is None:
+                wanted1 = [key1_val] * len(wanted2)
+            if wanted2 is None:
+                wanted2 = [key2_val] * len(wanted1)
+            if len(wanted1) != len(wanted2):
+                # Two key columns of different lengths cannot be paired by
+                # position; zipping them would ask for a row that nobody
+                # wrote.  Refuse rather than truncate to the shorter one.
+                raise ValueError(
+                    "LOOKUP2: key values have different row counts "
+                    "(%d vs %d) -- the two columns are not aligned"
+                    % (len(wanted1), len(wanted2)))
+            pairs = list(zip(wanted1, wanted2))
+
+        results = []
+        ambiguous = []
+        for value1, value2 in pairs:
+            want1 = _safe_text(value1)
+            want2 = _safe_text(value2)
+            hits = [index for index in range(rows)
+                    if key1_arr[index] == want1 and key2_arr[index] == want2]
+            if not hits:
+                if default is not _NO_DEFAULT:
+                    results.append(default)
+                    continue
+                raise KeyError(
+                    u"LOOKUP2: key ('%s', '%s') not found in '%s'/'%s' of "
+                    u"'%s'" % (want1, want2, key1_kw, key2_kw, source_kw))
+            if len(hits) > 1 and (want1, want2) not in ambiguous:
+                ambiguous.append((want1, want2))
+            if hits[0] >= len(target_arr):
+                # key columns longer than the value column
+                if default is not _NO_DEFAULT:
+                    results.append(default)
+                    continue
+                raise KeyError(
+                    u"LOOKUP2: '%s' of '%s' has no value on the row key "
+                    u"('%s', '%s') matched" % (target_kw, source_kw,
+                                               want1, want2))
+            results.append(target_arr[hits[0]])
+
+        if ambiguous:
+            from bika.lims import logger as _l2_logger
+            for want1, want2 in ambiguous:
+                _l2_logger.warn((
+                    u"maitux.calcenhance: LOOKUP2 on '%s': key "
+                    u"('%s', '%s') matches more than one row of '%s'/'%s' "
+                    u"-- using the first.  Two keys still colliding means "
+                    u"the source table really holds duplicate rows."
+                    % (source_kw, want1, want2, key1_kw, key2_kw)
+                ).encode("utf-8"))
+
+        return results if element_wise else results[0]
+
+    # Both, because LOOKUP2 needs the same `sibling_data` closure and the
+    # same _NO_DEFAULT sentinel.  A second factory would have to duplicate
+    # the source-resolution rules, and two copies of "has this been
+    # captured yet" is exactly how the two spellings drift apart.
+    return lookup, lookup2
 
 
 # ==============================================================================
@@ -2842,13 +3003,18 @@ def _make_lookup(sibling_data):
 # ==============================================================================
 
 import re as _lookup_re
-_LOOKUP_SRC_RE = _lookup_re.compile(r'LOOKUP\s*\(\s*["\']([^"\']+)["\']')
+# LOOKUP2? -- LOOKUP2's source AS sits in the same first argument, and a
+# formula whose only cross-AS reference is a LOOKUP2 would otherwise look
+# dependency-free: the downstream value would be computed once and then never
+# refreshed when the source changes (the stale-value failure v1.5.0 fixed for
+# LOOKUP).  No log line, no '---' -- just an old number.
+_LOOKUP_SRC_RE = _lookup_re.compile(r'''LOOKUP2?\s*\(\s*["']([^"']+)["']''')
 
 # LOOKUP whose source service is a [keyword] reference rather than a literal,
 # e.g. LOOKUP([imp_src_as], "imp_correction_factor", "imp_name", [imp_name]).
 # The value only exists at evaluation time, so _LOOKUP_SRC_RE -- which reads
 # quoted literals -- finds nothing and the formula looks dependency-free.
-_LOOKUP_DYNAMIC_SRC_RE = _lookup_re.compile(r'LOOKUP\s*\(\s*\[')
+_LOOKUP_DYNAMIC_SRC_RE = _lookup_re.compile(r'LOOKUP2?\s*\(\s*\[')
 
 # Cross-AS aggregation (XAGG_*) reads its source AS from string-literal
 # arguments too, but unlike LOOKUP the source is not a fixed position:
@@ -4649,7 +4815,7 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
 
     # --- Step 3c: collect cross-referenceable sibling data for LOOKUP ---
     sibling_data = _collect_cross_referenceable_data(self)
-    LOOKUP = _make_lookup(sibling_data)
+    LOOKUP, LOOKUP2 = _make_lookup(sibling_data)
 
     def _scalar_coalesce(*values):
         """First present value.  See the list engine's _coalesce."""
@@ -4714,6 +4880,9 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
             "log10": __import__("math").log10,
             "exp": __import__("math").exp,
             "LOOKUP": LOOKUP,
+            # Two-field key.  In BOTH tables, exactly like LOOKUP: a
+            # scalar Calculated field is its most common home.
+            "LOOKUP2": LOOKUP2,
             # Registered in BOTH tables.  A scalar Calculated field is just as
             # entitled to gate a correction factor as a CalculatedList one,
             # and a name missing from one table fails as NameError -> "---",
@@ -5034,7 +5203,7 @@ def _evaluate_calculatedlist_interims(self, only=None):
 
     # Collect cross-referenceable sibling data for LOOKUP
     sibling_data = _collect_cross_referenceable_data(self)
-    _LOOKUP = _make_lookup(sibling_data)
+    _LOOKUP, _LOOKUP2 = _make_lookup(sibling_data)
 
     # Every service keyword actually present in this sample, UNFILTERED by
     # the cross_referenceable flag -- XAGG_* needs this to tell "that
@@ -7292,6 +7461,7 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "log10": __import__("math").log10,
         "exp": __import__("math").exp,
         "LOOKUP": _LOOKUP,
+        "LOOKUP2": _LOOKUP2,
         # 去重族 —— see the "去重族" block just before the XAGG_* one.
         # DISTINCT_SEQlist 与 GROUP_REPORT_TOPlist 必须在同样的行上有值，
         # 它们共用 _distinct_first_rows。DISTINCT_<OP> 是标量，先去重再统计
