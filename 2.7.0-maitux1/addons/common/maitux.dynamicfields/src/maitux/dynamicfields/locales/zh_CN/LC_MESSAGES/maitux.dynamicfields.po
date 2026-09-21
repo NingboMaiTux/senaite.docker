@@ -539,3 +539,87 @@ msgstr "不设默认值——每次由用户自己选"
 
 msgid "v_default_not_option"
 msgstr "默认值 ${value} 不是选项里的任何一个存储值"
+
+msgid "Starts with a letter. Cannot be changed later."
+msgstr "字母开头。创建后不能改。"
+
+msgid "Filled in automatically when a new object is created."
+msgstr "新建时自动填好的内容。"
+
+msgid "picked in the Options list below"
+msgstr "在下面的选项列表里指定"
+
+msgid "It has to be one of the options, so it is picked there. The first option is the default."
+msgstr "它必须是选项之一，所以在那边指定。默认是第一个选项。"
+
+msgid "Once on, existing records have to fill it in the next time anyone edits them."
+msgstr "勾上后，已有记录下次被编辑时会被要求补填。"
+
+msgid "For values that come from an import, an instrument or a script."
+msgstr "适用于值来自导入、仪器或脚本的字段。"
+
+msgid "Multiple values"
+msgstr "多值"
+
+msgid "More than one value may be picked."
+msgstr "允许选多个。"
+
+msgid "The name shown on the form and the view page."
+msgstr "字段在表单和查看页上显示的名字。"
+
+msgid "Optional. Shown as help text under the field."
+msgstr "可不填。作为提示文字显示在字段下方。"
+
+msgid "Edit form"
+msgstr "编辑页"
+
+msgid "Show the field on the object's edit form."
+msgstr "在对象的编辑表单上显示这个字段。"
+
+msgid "View page"
+msgstr "查看页"
+
+msgid "Show the field on the object's view page."
+msgstr "在对象的查看页上显示这个字段。"
+
+msgid "Listing column"
+msgstr "列表列"
+
+msgid "Needs the metadata column under Search below as well."
+msgstr "还需要同时勾选下面「搜索」里的元数据列。"
+
+msgid "On by default"
+msgstr "默认显示"
+
+msgid "The column comes up without the user switching it on."
+msgstr "列表打开时就带出这一列，用户不用手动打开。"
+
+msgid "Leave it empty for no limit."
+msgstr "留空表示不限。"
+
+msgid "How many decimal places to keep."
+msgstr "保留几位小数。"
+
+msgid "Leave it empty and anything is accepted."
+msgstr "留空表示不做校验。"
+
+msgid "State restriction"
+msgstr "状态限制"
+
+msgid "Unrestricted by default: the field is editable in every workflow state. Switch this on only when the value has to be locked once the sample moves on."
+msgstr "默认不限制，该字段在所有工作流状态下均可编辑。仅当字段值需要在样品流转后锁定、不允许事后修改时，才启用此项。"
+
+msgid "Editable only in the states ticked below"
+msgstr "只有在下面勾选的状态下才允许编辑"
+
+msgid "Catalog index"
+msgstr "目录索引"
+
+msgid "Without an index the field cannot be searched or filtered on."
+msgstr "没有索引，这个字段无法被搜索和筛选。"
+
+msgid "Metadata column"
+msgstr "元数据列"
+
+msgid "Needed before the field can be shown as a listing column."
+msgstr "字段要作为列表的一列显示，必须先有它。"

@@ -58,6 +58,15 @@
                         cursor:pointer;font-weight:600; }
 .mdf-grp { border:1px solid #d7dbdc;border-radius:4px;margin-bottom:10px; }
 .mdf-grp > summary { background:#f4f7f8;padding:8px 12px;cursor:pointer; }
+/* 添加字段表单：每一项一行，形状统一为 名词 | 控件 | 说明。
+   三列宽度写死，所以不同 fieldset 里的行也能对齐。整行显隐时对包裹
+   div 设 display:none 即可，不会像按列排版那样留下半行空洞。 */
+.mdf-f { display:grid;grid-template-columns:110px 300px minmax(0,1fr);
+         align-items:center;gap:4px 16px;margin-bottom:9px; }
+.mdf-f > .mdf-n { text-align:right;font-size:13px;color:#2c3e44; }
+.mdf-f > .mdf-h { font-size:12px;color:#707c80;line-height:1.5; }
+.mdf-f .form-control { width:100%; }
+.mdf-fsub { margin:0 0 9px 126px; }
 </style>
 
 <div class="mdf-wrap">
@@ -313,167 +322,195 @@
             </span>
           </div>
 
-          <div class="form-row">
-            <div class="form-group col-md-4">
-              <label class="small" i18n:translate="">Field name</label>
+          <div class="mdf-f">
+            <div class="mdf-n" i18n:translate="">Field name</div>
+            <div>
               <input type="text" name="name" class="form-control form-control-sm"
                      pattern="[a-z][a-z0-9_]{1,49}" required="required" />
-              <small class="form-text text-muted" i18n:translate="">
-                ASCII lower case, digits and underscore. Cannot be changed later.
-              </small>
             </div>
-            <div class="form-group col-md-3">
-              <label class="small" i18n:translate="">Field type</label>
+            <div class="mdf-h" i18n:translate="">
+              Starts with a letter. Cannot be changed later.
+            </div>
+          </div>
+
+          <div class="mdf-f">
+            <div class="mdf-n" i18n:translate="">Field type</div>
+            <div>
               <select id="mdf_fieldtype" name="type"
                       class="form-control form-control-sm">
                 <option tal:repeat="ft view/field_types"
                         tal:attributes="value ft/id" tal:content="ft/title">type</option>
               </select>
-              <small class="form-text text-muted" i18n:translate="">
-                Cannot be changed later; delete and re-create instead.
-              </small>
             </div>
-            <div class="form-group col-md-3"
-                 tal:define="fs_ok view/fieldset_supported">
-              <label class="small" for="mdf_fieldset"
-                     i18n:translate="">Fieldset</label>
+            <div class="mdf-h" i18n:translate="">
+              Cannot be changed later; delete and re-create instead.
+            </div>
+          </div>
+
+          <div class="mdf-f" tal:define="fs_ok view/fieldset_supported">
+            <div class="mdf-n" i18n:translate="">Fieldset</div>
+            <div>
               <tal:ok condition="fs_ok">
                 <select id="mdf_fieldset" name="fieldset"
                         class="form-control form-control-sm">
                   <option tal:repeat="fs view/fieldset_options"
                           tal:attributes="value fs" tal:content="fs">default</option>
                 </select>
-                <small class="form-text text-muted" i18n:translate="">
-                  Puts the field into one of the tabs on the edit form. Only
-                  groups this object type already has are offered.
-                </small>
               </tal:ok>
               <tal:no condition="not:fs_ok">
                 <input type="hidden" name="fieldset" value="default" />
                 <div class="form-control form-control-sm bg-light text-muted"
                      style="border-style:dashed;">default</div>
-                <small class="form-text text-muted"
-                       tal:content="view/fieldset_skip_reason">why</small>
               </tal:no>
             </div>
-            <div class="form-group col-md-2">
-              <label class="small" for="mdf_order"
-                     i18n:translate="">Order</label>
-              <input type="text" id="mdf_order" name="order" value="0"
-                     class="form-control form-control-sm" />
-              <small class="form-text text-muted" i18n:translate="">
-                Leave it at 0 unless you need a specific order. 0 means the
-                fields appear in the order they were created.
-              </small>
+            <div class="mdf-h">
+              <tal:ok condition="fs_ok" i18n:translate="">
+                Puts the field into one of the tabs on the edit form. Only
+                groups this object type already has are offered.
+              </tal:ok>
+              <tal:no condition="not:fs_ok"
+                      tal:content="view/fieldset_skip_reason">why</tal:no>
             </div>
           </div>
 
-          <!-- 第二行还是「字段本身长什么样」：必填 / 只读 / 默认值 / 多值。
-               这些是字段的基本属性，跟字段名、类型是一类东西，不该埋到下面
-               单独一段里——实施人员在这儿才找得到。 -->
-          <div class="form-row">
-            <div class="form-group col-md-5"
-                 data-mdf-types="text textarea int decimal bool">
-              <label class="small" for="mdf_default"
-                     i18n:translate="">Pre-fill it with</label>
+          <div class="mdf-f">
+            <div class="mdf-n" i18n:translate="">Order</div>
+            <div>
+              <input type="text" id="mdf_order" name="order" value="0"
+                     class="form-control form-control-sm" style="width:90px;" />
+            </div>
+            <div class="mdf-h" i18n:translate="">
+              Leave it at 0 unless you need a specific order. 0 means the
+              fields appear in the order they were created.
+            </div>
+          </div>
+
+          <!-- 默认值分两行：能手打的类型给输入框；固定选项给一句话，指路到
+               下面的选项列表。日期 / 对象引用 两行都不出现（没有默认值可言），
+               整行消失而不是留个空框。 -->
+          <div class="mdf-f" data-mdf-types="text textarea int decimal bool">
+            <div class="mdf-n" i18n:translate="">Default value</div>
+            <div>
               <input type="text" id="mdf_default" name="default"
                      class="form-control form-control-sm" />
-              <small class="form-text text-muted"
-                     data-mdf-types="text textarea" i18n:translate="">
-                Pre-filled when a new object is created. Leave it empty if
-                there is no sensible default.
-              </small>
-              <small class="form-text text-muted"
-                     data-mdf-types="int decimal" i18n:translate="">
-                The number pre-filled when a new object is created. Leave
-                it empty if there is no sensible default.
-              </small>
-              <small class="form-text text-muted"
-                     data-mdf-types="bool" i18n:translate="">
-                Type 1 to have the box ticked by default. Leave it empty
-                and the box starts unticked.
-              </small>
             </div>
-            <div class="col-md-7">
-              <div class="custom-control custom-checkbox">
-                <input type="checkbox" class="custom-control-input" id="mdf_req"
-                       name="required" value="1" />
-                <label class="custom-control-label small" for="mdf_req"
-                       i18n:translate="">It must be filled in before saving</label>
-              </div>
-              <small class="form-text text-muted mb-2" i18n:translate="">
-                Careful with data you already have: once this is on, old
-                records have to fill it in the next time anyone edits them.
-              </small>
-              <div class="custom-control custom-checkbox">
-                <input type="checkbox" class="custom-control-input" id="mdf_ro"
-                       name="readonly" value="1" />
-                <label class="custom-control-label small" for="mdf_ro"
-                       i18n:translate="">Show it, but nobody may type in it</label>
-              </div>
-              <small class="form-text text-muted mb-2" i18n:translate="">
-                For values that come from somewhere else - an import, an
-                instrument, a script. People see it but cannot change it.
-              </small>
-              <div class="custom-control custom-checkbox"
-                   data-mdf-types="choice reference">
-                <input type="checkbox" class="custom-control-input" id="mdf_multi"
-                       name="multi" value="1" />
-                <label class="custom-control-label small" for="mdf_multi"
-                       i18n:translate="">More than one value may be picked</label>
-              </div>
+            <div class="mdf-h" i18n:translate="">
+              Filled in automatically when a new object is created.
+            </div>
+          </div>
+
+          <div class="mdf-f" data-mdf-types="choice">
+            <div class="mdf-n" i18n:translate="">Default value</div>
+            <div class="small text-muted"
+                 i18n:translate="">picked in the Options list below</div>
+            <div class="mdf-h" i18n:translate="">
+              It has to be one of the options, so it is picked there. The
+              first option is the default.
+            </div>
+          </div>
+
+          <div class="mdf-f">
+            <div class="mdf-n" i18n:translate="">Required</div>
+            <div>
+              <input type="checkbox" id="mdf_req" name="required" value="1" />
+            </div>
+            <div class="mdf-h" i18n:translate="">
+              Once on, existing records have to fill it in the next time
+              anyone edits them.
+            </div>
+          </div>
+
+          <div class="mdf-f">
+            <div class="mdf-n" i18n:translate="">Read only</div>
+            <div>
+              <input type="checkbox" id="mdf_ro" name="readonly" value="1" />
+            </div>
+            <div class="mdf-h" i18n:translate="">
+              For values that come from an import, an instrument or a script.
+            </div>
+          </div>
+
+          <div class="mdf-f" data-mdf-types="choice reference">
+            <div class="mdf-n" i18n:translate="">Multiple values</div>
+            <div>
+              <input type="checkbox" id="mdf_multi" name="multi" value="1" />
+            </div>
+            <div class="mdf-h" i18n:translate="">
+              More than one value may be picked.
             </div>
           </div>
 
           <fieldset class="border rounded p-2 mb-3">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
                     i18n:translate="">Labels (stored as data, applied without a restart)</legend>
-            <div class="form-row">
-              <div class="form-group col-md-6" tal:repeat="lang languages">
-                <label class="small">
-                  <span i18n:translate="">Label</span> · <span tal:content="lang/label">zh</span>
-                </label>
+            <div class="mdf-f" tal:repeat="lang languages">
+              <div class="mdf-n">
+                <span i18n:translate="">Label</span> ·
+                <span tal:content="lang/label">zh</span>
+              </div>
+              <div>
                 <input type="text" class="form-control form-control-sm"
                        tal:attributes="name string:label_${lang/slug}" />
               </div>
+              <div class="mdf-h" tal:condition="repeat/lang/start"
+                   i18n:translate="">The name shown on the form and the view page.</div>
             </div>
-            <div class="form-row">
-              <div class="form-group col-md-6 mb-0" tal:repeat="lang languages">
-                <label class="small">
-                  <span i18n:translate="">Description</span> · <span tal:content="lang/label">zh</span>
-                </label>
+            <div class="mdf-f" tal:repeat="lang languages">
+              <div class="mdf-n">
+                <span i18n:translate="">Description</span> ·
+                <span tal:content="lang/label">zh</span>
+              </div>
+              <div>
                 <input type="text" class="form-control form-control-sm"
                        tal:attributes="name string:desc_${lang/slug}" />
               </div>
+              <div class="mdf-h" tal:condition="repeat/lang/start"
+                   i18n:translate="">Optional. Shown as help text under the field.</div>
             </div>
           </fieldset>
 
           <fieldset class="border rounded p-2 mb-3">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
                     i18n:translate="">Where it shows</legend>
-            <div class="custom-control custom-checkbox">
-              <input type="checkbox" class="custom-control-input" id="mdf_edit"
-                     name="show_edit" value="1" checked="checked" />
-              <label class="custom-control-label small" for="mdf_edit"
-                     i18n:translate="">On the edit form</label>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Edit form</div>
+              <div>
+                <input type="checkbox" id="mdf_edit"
+                       name="show_edit" value="1" checked="checked" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Show the field on the object's edit form.
+              </div>
             </div>
-            <div class="custom-control custom-checkbox">
-              <input type="checkbox" class="custom-control-input" id="mdf_view"
-                     name="show_view" value="1" checked="checked" />
-              <label class="custom-control-label small" for="mdf_view"
-                     i18n:translate="">On the view page</label>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">View page</div>
+              <div>
+                <input type="checkbox" id="mdf_view"
+                       name="show_view" value="1" checked="checked" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Show the field on the object's view page.
+              </div>
             </div>
-            <div class="custom-control custom-checkbox">
-              <input type="checkbox" class="custom-control-input" id="mdf_list"
-                     name="show_list" value="1" />
-              <label class="custom-control-label small" for="mdf_list"
-                     i18n:translate="">As a listing column (requires the metadata column below)</label>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Listing column</div>
+              <div>
+                <input type="checkbox" id="mdf_list"
+                       name="show_list" value="1" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Needs the metadata column under Search below as well.
+              </div>
             </div>
-            <div class="custom-control custom-checkbox">
-              <input type="checkbox" class="custom-control-input" id="mdf_listdef"
-                     name="list_default" value="1" />
-              <label class="custom-control-label small" for="mdf_listdef"
-                     i18n:translate="">Visible by default in listings</label>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">On by default</div>
+              <div>
+                <input type="checkbox" id="mdf_listdef"
+                       name="list_default" value="1" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                The column comes up without the user switching it on.
+              </div>
             </div>
             <div class="alert alert-warning py-2 mt-2 mb-0 small" i18n:translate="">
                 These switches apply to the standard edit and view forms,
@@ -506,21 +543,14 @@
                 <span tal:content="lang/label">zh</span>
               </div>
             </div>
-            <div class="form-row align-items-center mb-1">
-              <div class="col-md-1 text-center">
-                <input type="radio" name="default_option" value=""
-                       id="mdf_defopt_none" checked="checked" />
-              </div>
-              <div class="col-md-11">
-                <label class="small text-muted mb-0" for="mdf_defopt_none"
-                       i18n:translate="">No default - the user picks every time</label>
-              </div>
-            </div>
+            <!-- 第一行的单选钮预先选中：固定选项字段总有一个默认值，没有
+                 「不设默认值」这个选项。 -->
             <div class="form-row align-items-center"
                  tal:repeat="n python:range(5)">
               <div class="col-md-1 text-center">
                 <input type="radio" name="default_option"
-                       tal:attributes="value n; id string:mdf_defopt_${n}" />
+                       tal:attributes="value n; id string:mdf_defopt_${n};
+                                       checked python:(n == 0) and 'checked' or None" />
               </div>
               <div class="form-group col-md-3 mb-1">
                 <input type="text" name="option_key" placeholder="key (ASCII)"
@@ -544,30 +574,30 @@
           <fieldset class="border rounded p-2 mb-3" data-mdf-types="reference">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
                     i18n:translate="">Reference target</legend>
-            <div class="form-row">
-              <div class="form-group col-md-6 mb-0">
-                <label class="small" i18n:translate="">Allowed object types</label>
+            <div class="mdf-f" style="align-items:start;">
+              <div class="mdf-n" style="padding-top:6px;"
+                   i18n:translate="">Allowed object types</div>
+              <div>
                 <select name="allowed_types" multiple="multiple" size="5"
                         class="form-control form-control-sm">
                   <option tal:repeat="rt view/reference_type_options"
                           tal:attributes="value rt/id" tal:content="rt/title">t</option>
                 </select>
-                <small class="form-text text-muted" i18n:translate="">
-                  Which kind of object this field points at. Hold Ctrl (Cmd on
-                  a Mac) to pick more than one.
-                </small>
               </div>
-              <div class="col-md-6">
-                <div class="custom-control custom-checkbox mt-4">
-                  <input type="checkbox" class="custom-control-input" id="mdf_inact"
-                         name="include_inactive" value="1" />
-                  <label class="custom-control-label small" for="mdf_inact"
-                         i18n:translate="">Include inactive objects</label>
-                </div>
-                <small class="form-text text-muted" i18n:translate="">
-                  Traceability fields usually need this: the object that was
-                  used back then may have been deactivated since.
-                </small>
+              <div class="mdf-h" style="padding-top:6px;" i18n:translate="">
+                Which kind of object this field points at. Hold Ctrl (Cmd on
+                a Mac) to pick more than one.
+              </div>
+            </div>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Include inactive objects</div>
+              <div>
+                <input type="checkbox" id="mdf_inact"
+                       name="include_inactive" value="1" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Traceability fields usually need this: the object that was
+                used back then may have been deactivated since.
               </div>
             </div>
           </fieldset>
@@ -576,19 +606,30 @@
                     data-mdf-types="int decimal">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
                     i18n:translate="">Number range</legend>
-            <div class="form-row">
-              <div class="form-group col-md-3 mb-0">
-                <label class="small" i18n:translate="">Min</label>
-                <input type="text" name="min" class="form-control form-control-sm" />
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Min</div>
+              <div>
+                <input type="text" name="min"
+                       class="form-control form-control-sm" style="width:110px;" />
               </div>
-              <div class="form-group col-md-3 mb-0">
-                <label class="small" i18n:translate="">Max</label>
-                <input type="text" name="max" class="form-control form-control-sm" />
+              <div class="mdf-h" i18n:translate="">Leave it empty for no limit.</div>
+            </div>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Max</div>
+              <div>
+                <input type="text" name="max"
+                       class="form-control form-control-sm" style="width:110px;" />
               </div>
-              <div class="form-group col-md-3 mb-0" data-mdf-types="decimal">
-                <label class="small" i18n:translate="">Decimals</label>
+              <div class="mdf-h" i18n:translate="">Leave it empty for no limit.</div>
+            </div>
+            <div class="mdf-f" data-mdf-types="decimal">
+              <div class="mdf-n" i18n:translate="">Decimals</div>
+              <div>
                 <input type="text" name="precision" value="2"
-                       class="form-control form-control-sm" />
+                       class="form-control form-control-sm" style="width:110px;" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                How many decimal places to keep.
               </div>
             </div>
           </fieldset>
@@ -596,61 +637,77 @@
           <fieldset class="border rounded p-2 mb-3"
                     data-mdf-types="text textarea">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
-                    i18n:translate="">What may be typed in</legend>
-            <div class="form-row">
-              <div class="form-group col-md-3">
-                <label class="small" i18n:translate="">Max length</label>
-                <input type="text" name="maxlen" class="form-control form-control-sm" />
+                    i18n:translate="">Text constraints</legend>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Max length</div>
+              <div>
+                <input type="text" name="maxlen"
+                       class="form-control form-control-sm" style="width:110px;" />
               </div>
-              <div class="form-group col-md-4">
-                <label class="small" i18n:translate="">Validation regex</label>
-                <input type="text" name="regex" class="form-control form-control-sm" />
+              <div class="mdf-h" i18n:translate="">Leave it empty for no limit.</div>
+            </div>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Validation regex</div>
+              <div>
+                <input type="text" name="regex"
+                       class="form-control form-control-sm" />
               </div>
-              <div class="form-group col-md-5" tal:repeat="lang languages">
-                <label class="small">
-                  <span i18n:translate="">Message on failure</span> ·
-                  <span tal:content="lang/label">zh</span>
-                </label>
+              <div class="mdf-h" i18n:translate="">
+                Leave it empty and anything is accepted.
+              </div>
+            </div>
+            <div class="mdf-f" tal:repeat="lang languages">
+              <div class="mdf-n">
+                <span i18n:translate="">Message on failure</span> ·
+                <span tal:content="lang/label">zh</span>
+              </div>
+              <div>
                 <input type="text" class="form-control form-control-sm"
                        tal:attributes="name string:regex_msg_${lang/slug}" />
               </div>
+              <div class="mdf-h" tal:condition="repeat/lang/start"
+                   i18n:translate="">
+                If you fill in a regex you must also fill in a failure message.
+              </div>
             </div>
-            <small class="form-text text-muted" i18n:translate="">
-              If you fill in a regex you must also fill in a failure message.
-            </small>
           </fieldset>
 
           <fieldset class="border rounded p-2 mb-3">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
-                    i18n:translate="">When it may be changed</legend>
-            <div class="form-row">
-              <div class="form-group col-md-6 mb-0">
-                <label class="small"
-                       i18n:translate="">It may only be changed in these stages</label>
-                <div class="border rounded p-2"
-                     style="max-height:150px;overflow-y:auto;background:#fcfdfd;">
-                  <div class="custom-control custom-checkbox"
-                       tal:repeat="st info/states">
-                    <input type="checkbox" class="custom-control-input"
-                           name="states"
-                           tal:attributes="value python:st[0];
-                                           id python:'mdf_st_%s' % st[0]" />
-                    <label class="custom-control-label small"
-                           tal:attributes="for python:'mdf_st_%s' % st[0]"
-                           tal:content="python:'%s (%s)' % (st[1], st[0])">state</label>
-                  </div>
-                  <div class="small text-muted" tal:condition="not:info/states"
-                       i18n:translate="">This object type has no workflow stages.</div>
-                </div>
+                    i18n:translate="">Data constraints</legend>
+            <!-- 状态列表默认收起。不限制是绝大多数字段的情况，把一长串
+                 状态复选框常驻在页面上，等于让每个人都去读一遍跟自己无关
+                 的东西。勾上开关才展开。 -->
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">State restriction</div>
+              <div>
+                <input type="checkbox" id="mdf_st_limit" />
               </div>
-              <div class="col-md-6">
-                <p class="small text-muted mt-4" i18n:translate="">
-                  Tick nothing and it can be changed at any time - that is the
-                  normal case, and what you want unless someone asked for
-                  otherwise. Only tick stages when the value has to be frozen
-                  once the sample moves on, so that nobody edits it after the
-                  fact.
-                </p>
+              <div class="mdf-h" i18n:translate="">
+                Unrestricted by default: the field is editable in every
+                workflow state. Switch this on only when the value has to be
+                locked once the sample moves on.
+              </div>
+            </div>
+            <!-- 不在 HTML 里写 display:none —— 没有 JS 时这块就永远打不开了。
+                 由下面那段 JS 在初始化时收起，跟模板里其它联动一个路子。 -->
+            <div class="mdf-fsub" id="mdf_st_box">
+              <div class="small text-muted mb-1"
+                   i18n:translate="">Editable only in the states ticked below</div>
+              <div class="border rounded p-2"
+                   style="max-height:150px;overflow-y:auto;background:#fcfdfd;">
+                <div class="custom-control custom-checkbox"
+                     tal:repeat="st info/states">
+                  <input type="checkbox" class="custom-control-input"
+                         name="states"
+                         tal:attributes="value python:st[0];
+                                         id python:'mdf_st_%s' % st[0]" />
+                  <label class="custom-control-label small"
+                         tal:attributes="for python:'mdf_st_%s' % st[0]"
+                         tal:content="python:'%s (%s)' % (st[1], st[0])">state</label>
+                </div>
+                <div class="small text-muted" tal:condition="not:info/states"
+                     i18n:translate="">This object type has no workflow stages.</div>
               </div>
             </div>
           </fieldset>
@@ -658,17 +715,23 @@
           <fieldset class="border rounded p-2 mb-3">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
                     i18n:translate="">Search</legend>
-            <div class="custom-control custom-checkbox">
-              <input type="checkbox" class="custom-control-input" id="mdf_index"
-                     name="index" value="1" />
-              <label class="custom-control-label small" for="mdf_index"
-                     i18n:translate="">Create a catalog index</label>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Catalog index</div>
+              <div>
+                <input type="checkbox" id="mdf_index" name="index" value="1" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Without an index the field cannot be searched or filtered on.
+              </div>
             </div>
-            <div class="custom-control custom-checkbox">
-              <input type="checkbox" class="custom-control-input" id="mdf_meta"
-                     name="metadata" value="1" />
-              <label class="custom-control-label small" for="mdf_meta"
-                     i18n:translate="">Create a metadata column</label>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Metadata column</div>
+              <div>
+                <input type="checkbox" id="mdf_meta" name="metadata" value="1" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Needed before the field can be shown as a listing column.
+              </div>
             </div>
             <small class="form-text text-muted" i18n:translate="">
               Existing objects are only covered after pressing Reindex.
@@ -701,6 +764,24 @@
             }
             sel.addEventListener("change", sync);
             sync();
+          })();
+
+          /* 状态限制开关：勾上才展开状态列表。
+             取消勾选时把里面的复选框全部清掉——藏起来的输入框照样会提交，
+             不清的话会留下一份用户以为已经取消了的限制。 */
+          (function () {
+            var box = document.getElementById("mdf_st_box");
+            var flag = document.getElementById("mdf_st_limit");
+            if (!box || !flag) { return; }
+            function sync(clear) {
+              box.style.display = flag.checked ? "" : "none";
+              if (!flag.checked && clear) {
+                var cbs = box.querySelectorAll("input[name='states']");
+                for (var i = 0; i < cbs.length; i++) { cbs[i].checked = false; }
+              }
+            }
+            flag.addEventListener("change", function () { sync(true); });
+            sync(false);
           })();
           </script>
           <span class="small text-muted ml-2" i18n:translate="">
