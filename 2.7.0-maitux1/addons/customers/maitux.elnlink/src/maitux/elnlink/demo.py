@@ -67,6 +67,23 @@ SERVICES = (
         ],
     },
     {
+        # The "HPLC Request" of the golden demo is purity + largest single
+        # impurity from the same run; the impurity carries the specification
+        # (<= 0.50 %) so an abnormal impurity is what MaiELN flags.
+        "keyword": "HPLC_IMPURITY",
+        "title": "HPLC Largest Single Impurity",
+        "description": "HPLC Largest Single Impurity (% area) - same run as HPLC Purity; RRT vs main peak",
+        "unit": "%",
+        "string_result": False,
+        "precision": 2,
+        "interims": [
+            {"keyword": "main_peak_rt", "title": "Main peak RT (min)", "value": "", "unit": "min"},
+            {"keyword": "impurity_rt", "title": "Impurity RT (min)", "value": "", "unit": "min"},
+            {"keyword": "impurity_rrt", "title": "Impurity RRT", "value": "", "unit": ""},
+            {"keyword": "purity", "title": "Purity of the same run (%)", "value": "", "unit": "%"},
+        ],
+    },
+    {
         "keyword": "LCMS_IDENTITY",
         "title": "LC-MS Identity",
         "description": "LC-MS Identity Confirmation - expected MW vs observed [M+H]+",
@@ -100,6 +117,7 @@ SPEC_TITLE = "INC-KRAS-042 stability screening"
 SPEC_RANGES = (
     {"keyword": "STABILITY_40_75", "min": "0", "max": "2.0", "warn_min": "", "warn_max": "", "hidemin": "", "hidemax": "", "rangecomment": "Main impurity must stay below 2.0 % through Day 14"},
     {"keyword": "HPLC_PURITY", "min": "95", "max": "100", "warn_min": "", "warn_max": "", "hidemin": "", "hidemax": "", "rangecomment": "Purity >= 95 %"},
+    {"keyword": "HPLC_IMPURITY", "min": "0", "max": "0.50", "warn_min": "", "warn_max": "", "hidemin": "", "hidemax": "", "rangecomment": "Any single impurity <= 0.50 % (ICH Q3A identification threshold for the demo)"},
 )
 
 
@@ -254,9 +272,9 @@ def ensure_services(portal, log, departments):
         try:
             # StringResult is read-only for api.edit; the mutator works.
             service.setStringResult(spec["string_result"])
-            # One decimal for the numeric results (96.7 %, 2.4 %) - the stock
-            # precision of 0 would print 97.
-            service.setPrecision(1)
+            # One decimal for the numeric results (98.7 %, 2.4 %; two for the
+            # impurity) - the stock precision of 0 would print 99.
+            service.setPrecision(spec.get("precision", 1))
             service.setInterimFields([dict(i, hidden=False, wide=False) for i in spec["interims"]])
             service.setDescription(spec["description"])
             service.reindexObject()
