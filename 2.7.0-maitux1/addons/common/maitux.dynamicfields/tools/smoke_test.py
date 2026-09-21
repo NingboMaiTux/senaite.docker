@@ -712,6 +712,81 @@ check(u"除 date/datetime 外，每种类型都有专属配置块",
 check(u"字段类型 select 带 id（JS 靠它联动）",
       u'id="mdf_fieldtype"' in tpl)
 
+# --------------------------------------------------------------------------
+# 11. 模板要能真的编译
+#
+# 上面那些 lint 全是对模板做正则匹配，一个字符都没交给 TAL 引擎。所以
+#   tal:attributes="id string:mdf_st_${python:st[0]}"
+# 这种 **语法非法** 的表达式（string: 里的 $ 后面只能跟简单路径，不能跟
+# python: 表达式）能一路过掉 132 条检查，直到 build 完打开页面才炸成
+# ExpressionError。真出过一次，这一节就是为它加的。
+#
+# _cook_check() 走的是 HTML 解析器 + 真正的 zope.tales 引擎，编译期能发现的
+# 错它都能发现：表达式语法、未知表达式类型、python: 里的语法错、同一个元素上
+# 重复的 tal:* 属性（后者会被静默丢掉一个——delete 表单的确认框就这么丢过）。
+#
+# 边界：只编译不渲染，所以路径写错（view/typo）这类要到渲染才知道的错查不出来；
+# HTML 结构错（标签没闭合）也查不出来，那是解析器容忍的。另外运行时实际跑的是
+# Chameleon，这里用的是老引擎，两者对表达式的解析共用 zope.tales，但不排除
+# 个别构造有出入——真遇到误报就在这儿记一笔豁免，别把整节关掉。
+# --------------------------------------------------------------------------
+
+from Products.PageTemplates.PageTemplateFile import (                # noqa: E402
+    PageTemplateFile as _ZPTF)
+import tempfile                                                      # noqa: E402
+
+
+def _compile_errors(path):
+    """编译一个 .pt，返回错误列表（空列表 = 干净）"""
+    t = _ZPTF(path)
+    t._cook_check()
+    return list(getattr(t, "_v_errors", ()) or ())
+
+
+def _compile_source(source):
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, "t.pt")
+    io.open(p, "w", encoding="utf-8").write(source)
+    return _compile_errors(p)
+
+
+# --- 先自检：确认这个检查器对我犯过的错真的会红 ---
+# 不自检的话，哪天 _v_errors 改了名字、或者 _cook_check 变成静默吞异常，
+# 这一节会安静地永远通过 —— 比没有还糟。
+SELFTEST = [
+    (u"string: 里跟简单路径是合法的", True,
+     u'<div tal:attributes="id string:x_${view/foo}">x</div>'),
+    (u"单独用 python: 是合法的", True,
+     u'<div tal:attributes="id python:\'x_%s\' % 1">x</div>'),
+    (u"string: 里塞 python: 要报错", False,
+     u'<div tal:attributes="id string:x_${python:st[0]}">x</div>'),
+    (u"同元素两个 tal:attributes 要报错", False,
+     u'<div tal:attributes="id string:a" tal:attributes="class string:b">x</div>'),
+    (u"未知表达式类型要报错", False,
+     u'<div tal:content="bogus:whatever">x</div>'),
+    (u"python: 语法错要报错", False,
+     u'<div tal:content="python:1 +* 2">x</div>'),
+]
+selftest_bad = []
+for _label, _should_pass, _src in SELFTEST:
+    _errs = _compile_source(_src)
+    if (not _errs) != _should_pass:
+        selftest_bad.append(_label)
+check(u"模板编译检查器自检（%d 条正反用例）" % len(SELFTEST),
+      not selftest_bad,
+      u"失效: %s" % u", ".join(selftest_bad) if selftest_bad else u"")
+
+# --- 再检真模板 ---
+_tpl_dir = os.path.join(os.path.dirname(mdf_view.__file__), "templates")
+_pts = sorted(glob.glob(os.path.join(_tpl_dir, "*.pt")))
+check(u"找得到模板文件", bool(_pts), _tpl_dir)
+for _pt in _pts:
+    _errs = _compile_errors(_pt)
+    check(u"%s 能编译" % os.path.basename(_pt),
+          not _errs,
+          u" | ".join(_u(e) for e in _errs))
+
+
 print()
 print("=" * 66)
 if FAILED:

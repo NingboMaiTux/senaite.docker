@@ -234,8 +234,8 @@
                         i18n:translate="">Reindex</button>
               </form>
               <form method="post" class="d-inline"
-                    tal:attributes="action base"
-                    tal:attributes="onsubmit string:return confirm('${view/delete_confirm_text}');">
+                    tal:attributes="action base;
+                                    onsubmit string:return confirm('${view/delete_confirm_text}');">
                 <input type="hidden" name="action" value="delete_field" />
                 <input type="hidden" name="tab" value="objects" />
                 <input type="hidden" name="portal_type"
@@ -634,9 +634,9 @@
                     <input type="checkbox" class="custom-control-input"
                            name="states"
                            tal:attributes="value python:st[0];
-                                           id string:mdf_st_${python:st[0]}" />
+                                           id python:'mdf_st_%s' % st[0]" />
                     <label class="custom-control-label small"
-                           tal:attributes="for string:mdf_st_${python:st[0]}"
+                           tal:attributes="for python:'mdf_st_%s' % st[0]"
                            tal:content="python:'%s (%s)' % (st[1], st[0])">state</label>
                   </div>
                   <div class="small text-muted" tal:condition="not:info/states"
