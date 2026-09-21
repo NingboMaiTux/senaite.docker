@@ -512,3 +512,9 @@ msgstr "只有在这些阶段才允许改"
 
 msgid "Select nothing and it can be changed at any time - that is the normal case. Only pick stages when the value has to be frozen once the sample moves on, so that nobody edits it after the fact."
 msgstr "什么都不选 = 任何时候都能改，这是常态。只有当这个值在样品流转到下一步之后就该定死、不许事后再改时，才去选阶段。"
+
+msgid "This object type has no workflow stages."
+msgstr "这个对象类型没有工作流阶段。"
+
+msgid "Which kind of object this field points at. Hold Ctrl (Cmd on a Mac) to pick more than one."
+msgstr "这个字段指向哪一类对象。按住 Ctrl（Mac 上是 Cmd）可以多选。"

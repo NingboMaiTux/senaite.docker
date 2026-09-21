@@ -470,6 +470,10 @@
                   <option tal:repeat="rt view/reference_type_options"
                           tal:attributes="value rt/id" tal:content="rt/title">t</option>
                 </select>
+                <small class="form-text text-muted" i18n:translate="">
+                  Which kind of object this field points at. Hold Ctrl (Cmd on
+                  a Mac) to pick more than one.
+                </small>
               </div>
               <div class="col-md-6">
                 <div class="custom-control custom-checkbox mt-4">
@@ -547,12 +551,21 @@
               <div class="form-group col-md-6">
                 <label class="small" for="mdf_states"
                        i18n:translate="">It may only be changed in these stages</label>
-                <select id="mdf_states" name="states" multiple="multiple" size="4"
-                        class="form-control form-control-sm">
-                  <option tal:repeat="st info/states"
-                          tal:attributes="value python:st[0]"
-                          tal:content="python:'%s (%s)' % (st[1], st[0])">state</option>
-                </select>
+                <div class="border rounded p-2"
+                     style="max-height:150px;overflow-y:auto;background:#fcfdfd;">
+                  <div class="custom-control custom-checkbox"
+                       tal:repeat="st info/states">
+                    <input type="checkbox" class="custom-control-input"
+                           name="states"
+                           tal:attributes="value python:st[0];
+                                           id string:mdf_st_${python:st[0]}" />
+                    <label class="custom-control-label small"
+                           tal:attributes="for string:mdf_st_${python:st[0]}"
+                           tal:content="python:'%s (%s)' % (st[1], st[0])">state</label>
+                  </div>
+                  <div class="small text-muted" tal:condition="not:info/states"
+                       i18n:translate="">This object type has no workflow stages.</div>
+                </div>
                 <small class="form-text text-muted" i18n:translate="">
                   Select nothing and it can be changed at any time - that is
                   the normal case. Only pick stages when the value has to be
