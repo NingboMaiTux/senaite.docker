@@ -65,8 +65,11 @@
 #mdf_open { display:none; }
 body:not(.mdf-js) .mdf-panel-x { display:none; }
 body.mdf-js #mdf_open { display:inline-block; }
+/* 1040px = 原来的 780 + 33%。往上顶到这儿而不是更宽：1550px 的屏上抽屉
+   左边缘落在 x≈510，页面标题在 x≈390，还露得出来——看得见自己在给哪个
+   对象加字段。再宽就把标题盖住了。窄屏由 max-width:94vw 兜着。 */
 body.mdf-js .mdf-panel { display:none;position:fixed;top:0;right:0;bottom:0;
-             width:780px;max-width:94vw;z-index:1040;overflow-y:auto;
+             width:1040px;max-width:94vw;z-index:1040;overflow-y:auto;
              margin-top:0;border:0;border-radius:0;
              box-shadow:-2px 0 14px rgba(0,0,0,.18); }
 body.mdf-js .mdf-backdrop { position:fixed;top:0;left:0;right:0;bottom:0;
@@ -224,7 +227,9 @@ body.mdf-js.mdf-open { overflow:hidden; }
 
       <tal:sections define="sections view/field_sections">
 
-        <details class="mdf-sec" open="open">
+        <!-- 三段都默认收起，不给「本包添加的字段」开小灶：数量就写在
+             summary 上的徽章里，要看明细再点。 -->
+        <details class="mdf-sec">
           <summary>
             <span i18n:translate="">Fields added here</span>
             <span class="mdf-cnt mdf-cnt-on" tal:content="python:len(sections['own'])">0</span>
@@ -350,20 +355,10 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
                     i18n:translate="">Basics</legend>
 
-          <!-- 目标对象就是第一行，跟其它设置一个形状。原来是一条灰色 alert
-               横幅，又是徽章又是「不能改」的说明，占一整条还跟下面对不齐。
-               它本来就改不了，不用特地声明；AT / DX 是实现细节，实施人员
-               不需要知道。 -->
-          <div class="mdf-f">
-            <div class="mdf-n" i18n:translate="">Target object</div>
-            <div>
-              <strong tal:content="info/title">Title</strong>
-            </div>
-            <div class="mdf-h">
-              <span class="mdf-code" tal:content="info/portal_type">Type</span>
-            </div>
-          </div>
-
+          <!-- 这里不放「目标对象」那一行：它不是个能填的东西，摆在一堆输入框
+               中间只是噪音。抽屉宽 1040px，左边那半页（对象列表和标题
+               「检验项目 AnalysisService」）照样露在外面，看得见自己在给谁
+               加字段。真正提交用的 portal_type 是上面那个隐藏域。 -->
           <div class="mdf-f">
             <div class="mdf-n" i18n:translate="">Field name</div>
             <div>
