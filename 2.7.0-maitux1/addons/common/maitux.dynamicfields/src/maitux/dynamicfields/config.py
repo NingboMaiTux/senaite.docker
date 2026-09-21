@@ -209,14 +209,35 @@ RESERVED_NAMES = frozenset([
     "manage_options", "isPrincipiaFolderish", "REQUEST",
 ])
 
-#: 「显示分组」对哪些类型**不生效**。
+#: 「显示分组」只在很窄的范围里真的有效，实测（senaite.core 2.7.0）：
 #:
-#: 实测（senaite.core 2.7.0）：
-#: - AnalysisRequest 的 schema 里一个 schemata= 都没有，全部字段在默认组；
-#: - 样品新建页 ar_add2 完全不读 schemata，字段顺序和分组是它自己算的。
-#: 所以在样品上填分组名不会有任何可见效果。界面上置灰并说明，
-#: 不要让人填了个没用的值还以为哪里配错了。
+#: - **DX 全部不行**：senaite 自己的 DX 编辑模板
+#:   （senaite/core/browser/dexterity/templates/edit.pt）里 group / fieldset /
+#:   nav-tabs 一个都没有，schema 上定义了 fieldset 也不画。
+#: - **AT 可以**：senaite 的 edit_macros.pt 开头原文写着
+#:   "Customized fieldsets to bootstrap nav-tabs"，base_edit.cpt 会按
+#:   view.fieldsets() 渲染标签页。
+#: - **AnalysisRequest 例外**：它虽是 AT，但 schema 里一个 schemata= 都没有，
+#:   而且样品新建页 ar_add2 完全不读 schemata。
+#: - **只有 default 一个分组的 AT 类型**：选无可选。
+#:
+#: 所以判定规则是「AT + 不在下面这张表里 + 已有分组多于一个」，
+#: 由 introspect.fieldset_supported() 实现——数据驱动，上游哪天给某个类型
+#: 加了分组就自动可用，不用改代码。
+#:
+#: 另外**不提供「新建分组」**：新分组的标题不走翻译，英文界面上会看到中文
+#: 标签页。只允许挂进 senaite 已有的分组。
 FIELDSET_UNSUPPORTED = ("AnalysisRequest",)
+
+#: 分组下拉里要藏掉的内部 schemata。
+#:
+#: ``metadata`` 是 Plone/AT 的内部分组（creators、rights 这些），实测
+#: AnalysisService 上就有它。把业务字段丢进去技术上能跑，但没有任何道理，
+#: 列出来只会让实施人员犹豫。其余几个是 Plone 基础 schema 带的，这批 AT
+#: 类型上一般看不到，一并防着。
+INTERNAL_FIELDSETS = frozenset([
+    "metadata", "categorization", "dates", "ownership", "settings",
+])
 
 #: 数量上限（NFR-3）
 MAX_FIELDS_PER_TYPE = 50

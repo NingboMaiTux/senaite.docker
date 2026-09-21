@@ -322,7 +322,7 @@
                 ASCII lower case, digits and underscore. Cannot be changed later.
               </small>
             </div>
-            <div class="form-group col-md-4">
+            <div class="form-group col-md-3">
               <label class="small" i18n:translate="">Field type</label>
               <select name="type" class="form-control form-control-sm">
                 <option tal:repeat="ft view/field_types"
@@ -336,33 +336,34 @@
                  tal:define="fs_ok view/fieldset_supported">
               <label class="small" for="mdf_fieldset"
                      i18n:translate="">Fieldset</label>
-              <select id="mdf_fieldset" name="fieldset"
-                      class="form-control form-control-sm"
-                      tal:attributes="disabled python:not fs_ok and 'disabled' or nothing">
-                <option tal:repeat="fs view/fieldset_options"
-                        tal:attributes="value fs" tal:content="fs">default</option>
-              </select>
-              <input type="text" name="fieldset_new" class="form-control
-                     form-control-sm mt-1"
-                     placeholder="or a new group name"
-                     i18n:attributes="placeholder"
-                     tal:attributes="disabled python:not fs_ok and 'disabled' or nothing" />
-              <small class="form-text text-muted" tal:condition="fs_ok"
-                     i18n:translate="">
-                Groups the field into a tab on the edit form. Pick an existing
-                group, or type a new name to create one.
-              </small>
-              <small class="form-text text-danger" tal:condition="not:fs_ok"
-                     i18n:translate="">
-                This object type does not render fieldsets: its schema uses no
-                groups at all and the sample add form ignores them. Anything
-                set here would have no visible effect.
-              </small>
+              <tal:ok condition="fs_ok">
+                <select id="mdf_fieldset" name="fieldset"
+                        class="form-control form-control-sm">
+                  <option tal:repeat="fs view/fieldset_options"
+                          tal:attributes="value fs" tal:content="fs">default</option>
+                </select>
+                <small class="form-text text-muted" i18n:translate="">
+                  Puts the field into one of the tabs on the edit form. Only
+                  groups this object type already has are offered.
+                </small>
+              </tal:ok>
+              <tal:no condition="not:fs_ok">
+                <input type="hidden" name="fieldset" value="default" />
+                <div class="form-control form-control-sm bg-light text-muted"
+                     style="border-style:dashed;">default</div>
+                <small class="form-text text-muted"
+                       tal:content="view/fieldset_skip_reason">why</small>
+              </tal:no>
             </div>
-            <div class="form-group col-md-1">
-              <label class="small" i18n:translate="">Order</label>
-              <input type="text" name="order" value="0"
+            <div class="form-group col-md-2">
+              <label class="small" for="mdf_order"
+                     i18n:translate="">Order</label>
+              <input type="text" id="mdf_order" name="order" value="0"
                      class="form-control form-control-sm" />
+              <small class="form-text text-muted" i18n:translate="">
+                Leave it at 0 unless you need a specific order. 0 means the
+                fields appear in the order they were created.
+              </small>
             </div>
           </div>
 

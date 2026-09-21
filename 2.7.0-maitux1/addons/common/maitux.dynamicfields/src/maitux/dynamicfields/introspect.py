@@ -248,8 +248,28 @@ def list_reference_targets(language=None):
 
 
 def fieldset_supported(portal_type):
-    """该类型的编辑页会不会渲染分组"""
-    return portal_type not in config.FIELDSET_UNSUPPORTED
+    """该类型的编辑页会不会渲染分组，而且真的有分组可选
+
+    三个条件都要满足（理由见 config.FIELDSET_UNSUPPORTED 上面那段）：
+    AT 机制、不在排除表里、已有分组多于一个。不满足时配置页整项不显示——
+    与其给个置灰的控件让人猜，不如干脆不出现。
+    """
+    if portal_type in config.FIELDSET_UNSUPPORTED:
+        return False
+    if get_mechanism(portal_type) != MECH_AT:
+        return False
+    return len(get_fieldsets(portal_type)) > 1
+
+
+def fieldset_skip_reason(portal_type):
+    """不显示分组那一项时，给一句话说明为什么"""
+    if portal_type in config.FIELDSET_UNSUPPORTED:
+        return "excluded"
+    if get_mechanism(portal_type) != MECH_AT:
+        return "dexterity"
+    if len(get_fieldsets(portal_type)) <= 1:
+        return "single"
+    return None
 
 
 def get_fieldsets(portal_type):
@@ -265,8 +285,12 @@ def get_fieldsets(portal_type):
 
     def push(value):
         value = (u"%s" % (value or u"")).strip()
-        if value and value not in names:
-            names.append(value)
+        if not value or value in names:
+            return
+        if value in config.INTERNAL_FIELDSETS:
+            # Plone/AT 的内部分组，不给人选（理由见 config 里的注释）
+            return
+        names.append(value)
 
     mechanism = get_mechanism(portal_type)
     instance = _find_instance(portal_type)

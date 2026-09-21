@@ -244,14 +244,21 @@ class DynamicFieldsView(BrowserView):
         }
 
     def _read_fieldset(self, form):
-        """显示分组：下拉选已有的，或在旁边的输入框里写个新名字
+        """显示分组：只能选该类型**已有**的分组，不提供新建
 
-        新名字优先——用户特意打了字，说明就是要新建一个。
+        新建分组的标题不走翻译，英文界面上会看到中文标签页，所以不给这个口子。
+        提交上来的值不在允许清单里就回落 default——模板管渲染，构造请求绕得过。
         """
-        new_name = safe_unicode(form.get("fieldset_new")).strip()
-        if new_name:
-            return new_name
-        return safe_unicode(form.get("fieldset")).strip() or u"default"
+        portal_type = safe_unicode(
+            form.get("portal_type")) or self.selected_type()
+        value = safe_unicode(form.get("fieldset")).strip()
+        if not value or not portal_type:
+            return u"default"
+        if not introspect.fieldset_supported(portal_type):
+            return u"default"
+        if value not in introspect.get_fieldsets(portal_type):
+            return u"default"
+        return value
 
     def _read_type_specific(self, form, field_type):
         data = {"multi": self._flag(form, "multi")}
@@ -576,8 +583,29 @@ class DynamicFieldsView(BrowserView):
     def fieldset_supported(self):
         portal_type = self.selected_type()
         if not portal_type:
-            return True
+            return False
         return introspect.fieldset_supported(portal_type)
+
+    def fieldset_skip_reason(self):
+        """整项不显示时的一句话说明"""
+        portal_type = self.selected_type()
+        if not portal_type:
+            return u""
+        reason = introspect.fieldset_skip_reason(portal_type)
+        return {
+            "dexterity": _(
+                u"fs_skip_dx",
+                default=u"Fieldsets are not shown: SENAITE does not render "
+                        u"them on Dexterity edit forms."),
+            "excluded": _(
+                u"fs_skip_excluded",
+                default=u"Fieldsets are not shown: this type uses no groups "
+                        u"and its add form ignores them."),
+            "single": _(
+                u"fs_skip_single",
+                default=u"Fieldsets are not shown: this type has only the "
+                        u"default group."),
+        }.get(reason, u"")
 
     def fieldset_options(self):
         portal_type = self.selected_type()

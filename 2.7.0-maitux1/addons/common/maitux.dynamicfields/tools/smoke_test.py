@@ -557,6 +557,60 @@ try:
 except Exception as exc:
     check(u"绕过边界直接塞 bytes，校验也不炸（兜底层）", False, repr(exc))
 
+
+print()
+print("=" * 66)
+print(u"10. 模板表单完整性：视图要读的输入框，模板里必须都有")
+print("=" * 66)
+print(u"    \u2014\u2014 \u6539\u6a21\u677f\u65f6\u6574\u4e2a\u8868\u5355\u683c\u88ab\u5220\u6389\u8fc7\uff0c\u9760\u4eba\u773c\u6ca1\u53d1\u73b0")
+print()
+
+TPL = ("/opt/addons/common/maitux.dynamicfields/src/maitux/dynamicfields/"
+       "browser/templates/dynamicfields.pt")
+tpl = io.open(TPL, encoding="utf-8").read()
+
+# 视图在 _read_common / _read_type_specific / 各 action 里会读的输入名。
+# 少一个 = 那项配置在界面上没法填，而且是静默的（视图读到 None 走默认值）。
+REQUIRED = [
+    # 基础
+    "action", "portal_type", "name", "type", "fieldset", "order",
+    # 前端显示
+    "show_edit", "show_view", "show_list", "list_default",
+    # 数据约束
+    "required", "readonly", "multi",
+    # 类型专属
+    "option_key", "allowed_types", "include_inactive",
+    "min", "max", "precision", "maxlen",
+    # 工作流与检索
+    "states", "index", "metadata",
+    # 其它动作
+    "field_id", "payload", "mode", "upload",
+    # 搜索
+    "q", "fq",
+]
+missing = [n for n in REQUIRED if (u'name="%s"' % n) not in tpl]
+check(u"模板里 %d 个必需输入框一个不少" % len(REQUIRED),
+      not missing, u"缺: %s" % u", ".join(missing) if missing else u"")
+
+# 多语言输入框是按站点语言**动态拼**出来的（name string:label_${lang/slug}），
+# 源码里不会出现 name="label_zh_cn" 这种字面量，所以查的是那个拼接模式
+for prefix in ("label", "desc", "option_label"):
+    pattern = u"name string:%s_${lang/slug}" % prefix
+    check(u"多语言输入框模式 %s_*" % prefix, pattern in tpl, pattern)
+
+# 视图方法被模板引用了，就必须真的存在（打错字是静默 500）。
+# ★ 要拿**实例**判断：errors / messages 是 __init__ 里赋的实例属性，
+#   用类去 hasattr 会漏报。
+import re as _re  # noqa: E402
+
+probe_view = mdf_view.DynamicFieldsView(None, FakeReq())
+referenced = set(_re.findall(u"view/([a-z_]+)", tpl))
+missing_methods = [m for m in sorted(referenced)
+                   if not hasattr(probe_view, m)]
+check(u"模板引用的 %d 个视图方法 / 属性都存在" % len(referenced),
+      not missing_methods,
+      u"缺: %s" % u", ".join(missing_methods) if missing_methods else u"")
+
 print()
 print("=" * 66)
 if FAILED:

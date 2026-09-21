@@ -362,3 +362,18 @@ msgstr "把字段归进编辑页上的一个分组标签页。可以选已有的
 
 msgid "This object type does not render fieldsets: its schema uses no groups at all and the sample add form ignores them. Anything set here would have no visible effect."
 msgstr "该对象类型不渲染分组：它的 schema 里一个分组都没用，样品新建页也完全不读分组。这里填什么都不会有可见效果。"
+
+msgid "Puts the field into one of the tabs on the edit form. Only groups this object type already has are offered."
+msgstr "把字段放进编辑页上的某个标签页。只列该对象类型已有的分组。"
+
+msgid "fs_skip_dx"
+msgstr "不显示分组：SENAITE 的 Dexterity 编辑页不渲染分组。"
+
+msgid "fs_skip_excluded"
+msgstr "不显示分组：该类型自身一个分组都没用，它的新建页也不读分组。"
+
+msgid "fs_skip_single"
+msgstr "不显示分组：该类型只有 default 一个分组。"
+
+msgid "Leave it at 0 unless you need a specific order. 0 means the fields appear in the order they were created."
+msgstr "没有特殊需求就保持 0。填 0 表示按创建先后顺序显示，不用管它。"
