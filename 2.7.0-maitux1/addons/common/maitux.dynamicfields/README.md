@@ -152,9 +152,15 @@ docker run --rm \
   <镜像> /opt/addons/common/maitux.dynamicfields/tools/smoke_test.py
 ```
 
-覆盖 74 项：存储与校验、动态 schema 生成、**同一 schema 在不同语言请求下给出
+覆盖 85 项：存储与校验、动态 schema 生成、**同一 schema 在不同语言请求下给出
 不同标签**、behavior 属性转发、**九种字段类型在 AT 和 DX 两条路上都能构造**
-（含标签必须是延迟求值的 Message、AT 侧必须带 `add` 键、多值形态）、脏配置容错。
+（含标签必须是延迟求值的 Message、AT 侧必须带 `add` 键、多值形态）、
+**视图层吃 bytes 中文不崩**、脏配置容错。
+
+> 最后一项是踩过坑补的：Py2 下 Zope 的 request 给回来的表单值常常是 utf-8
+> **bytes** 而不是 unicode，对它调 `.encode("utf-8")` 会先用 ASCII 隐式解码，
+> 搜索框一输中文就 `UnicodeDecodeError: 'ascii' codec can't decode byte 0xe6`。
+> 第 7 节就是这条的回归用例，且做过反向验证（把 bug 注回去，测试确实变红）。
 
 再跑 ZCML 加载检查（把 `smoke_test.py` 换成 `zcml_check.py`）：验证 configure.zcml
 真的能加载、翻译域与两个适配器都注册上了。**ZCML 错误是启动期报错、站点直接

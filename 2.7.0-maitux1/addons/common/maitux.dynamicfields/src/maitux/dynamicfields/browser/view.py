@@ -38,6 +38,29 @@ except ImportError:  # pragma: no cover
     logger = logging.getLogger("maitux.dynamicfields")
 
 
+def safe_unicode(value):
+    """任何东西 -> unicode。Py2 下 bytes 和 unicode 混用是最常见的崩因。
+
+    优先用 bika.lims.api.safe_unicode（仓库既有的安全函数），拿不到时自己兜底。
+    """
+    if value is None:
+        return u""
+    if api is not None:
+        try:
+            return api.safe_unicode(value)
+        except Exception:
+            pass
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except Exception:
+            return value.decode("utf-8", "ignore")
+    try:
+        return u"%s" % value
+    except Exception:
+        return u""
+
+
 POSITION_SLOTS = (
     ("show_edit", u"编"),
     ("show_view", u"查"),
@@ -301,14 +324,21 @@ class DynamicFieldsView(BrowserView):
 
     def search_query(self):
         """左栏「搜索对象」的关键字"""
-        return (self.request.get("q") or u"").strip()
+        return safe_unicode(self.request.get("q")).strip()
 
     def field_query(self):
         """右栏「筛选字段」的关键字"""
-        return (self.request.get("fq") or u"").strip()
+        return safe_unicode(self.request.get("fq")).strip()
 
     def link_suffix(self):
-        """点类型时把搜索关键字带上，否则一点就丢了筛选"""
+        """点类型时把搜索关键字带上，否则一点就丢了筛选
+
+        ★ Py2 陷阱：request 里的中文是 **byte string**，直接对它调
+        ``.encode("utf-8")`` 会先用 ASCII 隐式解码再编码，立刻
+        ``UnicodeDecodeError: 'ascii' codec can't decode byte 0xe6``。
+        所以先用 safe_unicode() 归一成 unicode，再 encode 给 quote。
+        （规则 R13：Py2 转字符串一律走安全函数。）
+        """
         query = self.search_query()
         if not query:
             return u""
@@ -316,7 +346,11 @@ class DynamicFieldsView(BrowserView):
             from urllib import quote
         except ImportError:  # pragma: no cover - Py3
             from urllib.parse import quote
-        return u"&q=%s" % quote(query.encode("utf-8"))
+        try:
+            return u"&q=%s" % quote(query.encode("utf-8"))
+        except Exception:
+            # 编码失败也不许把整页搞挂，大不了链接上不带关键字
+            return u""
 
     def selected_type(self):
         requested = self.request.get("portal_type")

@@ -154,21 +154,34 @@ def _matches(query, *values):
     """
     if not query:
         return True
-    try:
-        needle = query.strip().lower()
-    except Exception:
-        return True
+    needle = _text(query).strip().lower()
     if not needle:
         return True
     for value in values:
         if value is None:
             continue
-        try:
-            if needle in u"%s" % value.lower():
-                return True
-        except Exception:
-            continue
+        if needle in _text(value).lower():
+            return True
     return False
+
+
+def _text(value):
+    """任何东西 -> unicode。
+
+    ★ Py2 下拿 bytes 的中文跟 unicode 做 ``in`` 比较会触发隐式 ASCII 解码，
+    直接 UnicodeDecodeError。搜索关键字来自 request，必然可能是 bytes。
+    """
+    if value is None:
+        return u""
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except Exception:
+            return value.decode("utf-8", "ignore")
+    try:
+        return u"%s" % value
+    except Exception:
+        return u""
 
 
 def list_reference_targets():

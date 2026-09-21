@@ -303,6 +303,68 @@ try:
 except Exception as exc:
     check("同类型的好字段不受脏记录连累", False, repr(exc))
 
+
+print()
+print("=" * 66)
+print(u"7. 视图层：request 里的中文是 bytes，不是 unicode")
+print("=" * 66)
+print(u"    —— 搜索框输中文就崩的那个 bug 的回归用例")
+print()
+
+# Py2 下 Zope 的 request 给回来的表单值常常是 utf-8 bytes 而不是 unicode。
+# 对 bytes 调 .encode("utf-8") 会先用 ASCII 隐式解码 -> UnicodeDecodeError。
+# 这一节就是复现那条路径。
+
+from maitux.dynamicfields.browser import view as mdf_view  # noqa: E402
+from maitux.dynamicfields import introspect as mdf_intro   # noqa: E402
+
+CN_BYTES = u"样品".encode("utf-8")   # '样品' 的 utf-8 字节串
+CN_TEXT = u"样品"
+
+
+class FakeReq(dict):
+    method = "GET"
+
+
+for label, raw in ((u"bytes", CN_BYTES), (u"unicode", CN_TEXT)):
+    req = FakeReq()
+    req["q"] = raw
+    req["fq"] = raw
+    v = mdf_view.DynamicFieldsView(None, req)
+    try:
+        q = v.search_query()
+        check(u"search_query 吃 %s 中文" % label,
+              q == CN_TEXT, repr(q))
+    except Exception as exc:
+        check(u"search_query 吃 %s 中文" % label, False, repr(exc))
+    try:
+        fq = v.field_query()
+        check(u"field_query 吃 %s 中文" % label, fq == CN_TEXT, repr(fq))
+    except Exception as exc:
+        check(u"field_query 吃 %s 中文" % label, False, repr(exc))
+    try:
+        suffix = v.link_suffix()
+        check(u"link_suffix 吃 %s 中文（原 bug 就死在这）" % label,
+              suffix.startswith(u"&q=") and u"%" in suffix, repr(suffix))
+    except Exception as exc:
+        check(u"link_suffix 吃 %s 中文（原 bug 就死在这）" % label,
+              False, repr(exc))
+
+# 关键字匹配两侧都可能是 bytes / unicode 混搭
+try:
+    check(u"_matches: bytes 关键字 vs unicode 文本",
+          mdf_intro._matches(CN_BYTES, CN_TEXT))
+    check(u"_matches: unicode 关键字 vs bytes 文本",
+          mdf_intro._matches(CN_TEXT, CN_BYTES))
+    check(u"_matches: 不匹配时返回 False",
+          not mdf_intro._matches(CN_BYTES, u"Client"))
+except Exception as exc:
+    check(u"_matches 处理中文", False, repr(exc))
+
+# 空关键字不能把所有东西过滤掉
+check(u"空关键字放行全部", mdf_intro._matches(u"", u"anything"))
+check(u"None 关键字放行全部", mdf_intro._matches(None, u"anything"))
+
 print()
 print("=" * 66)
 if FAILED:
