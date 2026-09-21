@@ -27,7 +27,7 @@ msgstr "导出 JSON"
 msgid "Fields added here"
 msgstr "本包添加的字段"
 
-msgid "editable · deletable"
+msgid "editable / deletable"
 msgstr "可编辑 · 可删除"
 
 msgid "Added by other add-ons"
@@ -36,7 +36,7 @@ msgstr "其它 add-on 添加的字段"
 msgid "Native fields"
 msgstr "原生字段"
 
-msgid "read only · cannot be deleted"
+msgid "read only / cannot be deleted"
 msgstr "只读 · 不可删除"
 
 msgid "cannot be deleted"
@@ -480,7 +480,7 @@ msgstr "上传从别的站点导出的文件"
 msgid "taken from the selection on the left; cannot be changed"
 msgstr "由左侧选中的对象带入，不能改"
 
-msgid "…or paste the JSON here"
+msgid "...or paste the JSON here"
 msgstr "…或者把 JSON 直接粘在这里"
 
 msgid "How this field gets filled in"
