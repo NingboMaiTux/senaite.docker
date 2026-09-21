@@ -297,7 +297,26 @@ class DynamicFieldsView(BrowserView):
             or i18n.get_default_language()
 
     def type_groups(self):
-        return introspect.list_type_groups()
+        return introspect.list_type_groups(query=self.search_query())
+
+    def search_query(self):
+        """左栏「搜索对象」的关键字"""
+        return (self.request.get("q") or u"").strip()
+
+    def field_query(self):
+        """右栏「筛选字段」的关键字"""
+        return (self.request.get("fq") or u"").strip()
+
+    def link_suffix(self):
+        """点类型时把搜索关键字带上，否则一点就丢了筛选"""
+        query = self.search_query()
+        if not query:
+            return u""
+        try:
+            from urllib import quote
+        except ImportError:  # pragma: no cover - Py3
+            from urllib.parse import quote
+        return u"&q=%s" % quote(query.encode("utf-8"))
 
     def selected_type(self):
         requested = self.request.get("portal_type")
@@ -328,9 +347,20 @@ class DynamicFieldsView(BrowserView):
         if not portal_type:
             return {"own": [], "addon": [], "native": []}
         grouped = introspect.group_fields(portal_type)
+        query = self.field_query()
+        own = [self.describe_record(r)
+               for r in storage.get_records_for_type(portal_type)]
+        if query:
+            own = [f for f in own
+                   if introspect._matches(query, f["name"], f["label"])]
+            grouped["addon"] = [
+                f for f in grouped["addon"]
+                if introspect._matches(query, f["name"], f["label"])]
+            grouped["native"] = [
+                f for f in grouped["native"]
+                if introspect._matches(query, f["name"], f["label"])]
         return {
-            "own": [self.describe_record(r)
-                    for r in storage.get_records_for_type(portal_type)],
+            "own": own,
             "addon": grouped["addon"],
             "native": grouped["native"],
         }

@@ -176,3 +176,18 @@ msgstr "选项列表（仅固定选项类型）"
 
 msgid "Reference / numbers / constraints"
 msgstr "对象引用 / 数值 / 数据约束"
+
+msgid "Search objects"
+msgstr "搜索对象"
+
+msgid "Filter fields"
+msgstr "筛选字段"
+
+msgid "Go"
+msgstr "搜索"
+
+msgid "Clear"
+msgstr "清除"
+
+msgid "No object matches this keyword."
+msgstr "没有匹配该关键字的对象。"

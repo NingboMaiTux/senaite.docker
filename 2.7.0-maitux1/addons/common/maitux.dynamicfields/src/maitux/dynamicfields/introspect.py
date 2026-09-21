@@ -83,7 +83,7 @@ def get_type_title(portal_type):
     return config.TYPE_TITLES.get(portal_type, portal_type)
 
 
-def list_types(include_empty=True):
+def list_types(include_empty=True, query=None):
     """白名单内**且当前站点真实存在**的类型。
 
     清单从 portal_types 实测读取，不是手写死的——`Setup`(DX) / `BikaSetup`(AT)、
@@ -101,6 +101,9 @@ def list_types(include_empty=True):
         count = storage.count_for_type(portal_type)
         if not include_empty and not count:
             continue
+        if query and not _matches(query, portal_type,
+                                  get_type_title(portal_type)):
+            continue
         items.append({
             "portal_type": portal_type,
             "title": get_type_title(portal_type),
@@ -111,7 +114,7 @@ def list_types(include_empty=True):
     return items
 
 
-def list_type_groups():
+def list_type_groups(query=None):
     """按 config.TYPE_GROUPS 分组后的类型清单，供配置页左栏使用
 
     ★ 分组里那个列表的 key 叫 ``types`` 不叫 ``items``。TAL 的路径表达式
@@ -120,7 +123,8 @@ def list_type_groups():
     ``TypeError: tuple indices must be integers``。实测踩过。
     同理不要用 keys / values / get / copy / update / pop 当 key。
     """
-    by_id = dict([(item["portal_type"], item) for item in list_types()])
+    by_id = dict([(item["portal_type"], item)
+                  for item in list_types(query=query)])
     groups = []
     used = set()
     for title, type_ids in config.TYPE_GROUPS:
@@ -137,6 +141,31 @@ def list_type_groups():
         leftovers.sort(key=lambda i: i["portal_type"])
         groups.append({"title": u"其它", "types": leftovers})
     return groups
+
+
+def _matches(query, *values):
+    """关键字匹配：大小写不敏感，任一字段命中即可
+
+    过滤放在服务端、走 GET 参数，不引 JS——这个配置页其余部分也都是
+    整页 POST / GET，保持一致。
+    """
+    if not query:
+        return True
+    try:
+        needle = query.strip().lower()
+    except Exception:
+        return True
+    if not needle:
+        return True
+    for value in values:
+        if value is None:
+            continue
+        try:
+            if needle in u"%s" % value.lower():
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def list_reference_targets():

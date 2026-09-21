@@ -513,12 +513,18 @@ schema 是启动时构建的。**一条脏配置绝不允许让站点起不来�
 
 **不会自动生效的**——SENAITE 把最关键的几个界面全部重写过，它们**不读 schema**：
 
-| 界面 | 渲染依据 |
-|---|---|
-| 样品新建页 `ar_add2` | 字段清单写在代码里 |
-| 样品 / 工作表顶部 `header_table` viewlet | 按配置好的字段列表渲染 |
-| 全部列表页（`senaite.app.listing`） | 列来自 `self.columns` 字典，与 schema 无关 |
-| 工作表结果录入页 `manage_results` 页头 | 手写模板 |
+> **2026-09-21 更正**：本节原先写「样品新建页 `ar_add2` 字段清单写在代码里、
+> 不读 schema」——**查源码后确认这是错的**。`add2.py:290` 的注释原文是
+> "Return the AR schema fields (including extendend fields)"，它**读 AR 的
+> schema，而且明确包含 extender 字段**。arextension 那 14 个字段能出现在样品
+> 新建页上，靠的就是这条。
+
+| 界面 | 渲染依据 | v1 能否自动生效 |
+|---|---|---|
+| 样品新建页 `ar_add2` | **读 AR schema，含 extender 字段** | **能**。前提是 widget 的 `visible` 字典里有 `"add"` 键，否则 `isVisible(..., mode="add", default='invisible')` 判它不可见。senaite 自己写的是 `{"add": "edit"}` |
+| 样品 / 工作表顶部 `header_table` | 同样按 widget 的 `visible["header_table"]` | 大概率能，实际效果待站点验证 |
+| 全部列表页（`senaite.app.listing`） | 列来自 `self.columns` 字典，与 schema 无关 | **不能**，二期需要通用挂载点 |
+| 工作表结果录入页 `manage_results` 页头 | 手写模板 | **不能** |
 
 `INNOCARE.arextension` 除了字段定义还必须带一个 `patches.py`，正是因为光加字段，
 样品新建页上根本不出现。

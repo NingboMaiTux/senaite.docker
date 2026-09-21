@@ -10,7 +10,10 @@
 <tal:page define="tab view/tab;
                   info view/selected_info;
                   languages view/language_slugs;
-                  base view/base_url;">
+                  base view/base_url;
+                  q view/search_query;
+                  fq view/field_query;
+                  suffix view/link_suffix;">
 
 <style type="text/css">
 /* SENAITE 实测配色：#293333 深色条 / #428AAF 主色 / #f8f9fa 浅底。
@@ -104,13 +107,34 @@
   <div class="row">
 
     <div class="col-md-3">
+      <form method="get" class="mb-2" tal:attributes="action base">
+        <input type="hidden" name="tab" value="objects" />
+        <input type="hidden" name="portal_type"
+               tal:attributes="value info/portal_type | nothing" />
+        <label class="small text-muted mb-1" for="mdf_q"
+               i18n:translate="">Search objects</label>
+        <div class="input-group input-group-sm">
+          <input type="text" id="mdf_q" name="q" class="form-control"
+                 placeholder="业务名 或 portal_type"
+                 tal:attributes="value q" />
+          <div class="input-group-append">
+            <button type="submit" class="btn btn-outline-secondary"
+                    i18n:translate="">Go</button>
+            <a class="btn btn-outline-secondary" tal:condition="q"
+               tal:attributes="href string:${base}?tab=objects"
+               i18n:translate="">Clear</a>
+          </div>
+        </div>
+      </form>
       <div class="border rounded" style="background:#fcfdfd;">
+        <div class="p-3 small text-muted" tal:condition="not:view/type_groups"
+             i18n:translate="">No object matches this keyword.</div>
         <tal:groups repeat="group view/type_groups">
           <div class="px-3 pt-2 pb-1 small font-weight-bold text-muted"
                tal:content="group/title">group</div>
           <tal:items repeat="item group/types">
             <a class="mdf-type"
-               tal:attributes="href string:${base}?tab=objects&amp;portal_type=${item/portal_type};
+               tal:attributes="href string:${base}?tab=objects&amp;portal_type=${item/portal_type}${suffix};
                                class python:'mdf-type mdf-type-on' if info and item['portal_type'] == info['portal_type'] else 'mdf-type'">
               <span class="d-flex align-items-center">
                 <span class="flex-grow-1" tal:content="item/title">title</span>
@@ -135,6 +159,28 @@
               tal:content="info/mechanism">AT</span>
         <span class="small text-muted ml-2" tal:content="info/mechanism_note">note</span>
       </div>
+
+      <form method="get" class="mb-2" tal:attributes="action base">
+        <input type="hidden" name="tab" value="objects" />
+        <input type="hidden" name="portal_type"
+               tal:attributes="value info/portal_type" />
+        <input type="hidden" name="q" tal:attributes="value q" />
+        <div class="input-group input-group-sm" style="max-width:420px;">
+          <div class="input-group-prepend">
+            <span class="input-group-text" i18n:translate="">Filter fields</span>
+          </div>
+          <input type="text" name="fq" class="form-control"
+                 placeholder="字段名 / 标签"
+                 tal:attributes="value fq" />
+          <div class="input-group-append">
+            <button type="submit" class="btn btn-outline-secondary"
+                    i18n:translate="">Go</button>
+            <a class="btn btn-outline-secondary" tal:condition="fq"
+               tal:attributes="href string:${base}?tab=objects&amp;portal_type=${info/portal_type}${suffix}"
+               i18n:translate="">Clear</a>
+          </div>
+        </div>
+      </form>
 
       <tal:sections define="sections view/field_sections">
 
