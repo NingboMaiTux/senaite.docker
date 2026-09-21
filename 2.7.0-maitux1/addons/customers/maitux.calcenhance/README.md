@@ -2,13 +2,48 @@
 
 为 SENAITE LIMS 的计算公式（Calculation）模块增加三种新的 Interim Field 控件类型，支持 HPLC 含量测定、装量差异、杂质含量等复杂计算场景。
 
-**版本：** 1.14.0
+**版本：** 1.15.0
 **兼容：** SENAITE 2.x（实测 2.7.0 / Plone 5.2 / Python 2.7）
 
 > **关于 `ISSUES.md`**：本文多处写着「详见 `ISSUES.md` ISSUE-0xx」，但**该文件
 > 不在本仓库里**（2026-09-03 核实，git 全历史也没有提交记录）。那些
 > `ISSUE-0xx` 编号仍可作为问题标识使用，但**不要指望在本包目录下找到对应文档**。
 > 若有人手上留着这份台账，值得补进仓库。
+
+---
+
+## 1.15.0 更新概要（2026-09-21）
+
+需求来源：`Docs/maitux.calcenhance-V16引擎能力-第二批-任务指令.md`（去重族）。
+承接 1.14.0 那五项，同一条「有关物质」配置线。
+
+### 函数表规模
+
+| | 条目 | = 常量 | + 函数 |
+| -- | ---- | ---- | ---- |
+| CalculatedList `_SAFE` | **97** | 3 | **94** |
+| 标量 `safe_globals` | **32** | 3 | **29** |
+
+较 v1.14.0：CalculatedList 88 -> 97（新增 9 个）。标量表 31 -> 32
+（只多了 `LOOKUP2`，与 `LOOKUP` 一样两张表都进）。
+
+### 新增函数（9 个）
+
+| 函数 | 用途 |
+| ---- | ---- |
+| `DISTINCT_SEQlist(键1[, 键2…])` | **去重序号**：每个键组合首次出现的那行给序号，重复行留空 |
+| `GROUP_REPORT_TOPlist(报告值列, 键1[, 键2…])` | 每组**最高档**的报告值，只放在该组首行（与序号同行）|
+| `DISTINCT_RSD(值列, 去重键)` | 先按键去重、再算 RSD% |
+| `DISTINCT_RANGE(值列, 去重键)` | 同上：极差 |
+| `DISTINCT_MAX / _MIN / _AVG(值列, 去重键)` | 同上：最大 / 最小 / 平均 |
+| `DISTINCT_COUNT(值列, 去重键)` | 同上：去重后参与统计的个数（审计列）|
+| `LOOKUP2(源AS, 取值字段, 键1字段, 键1值, 键2字段, 键2值[, 默认])` | `LOOKUP` 的**双键**版 |
+
+详见下文「[`DISTINCT_SEQlist` / `GROUP_REPORT_TOPlist` —— 去重序号与单杂报告值](#distinct_seqlist--group_report_toplist--去重序号与单杂报告值)」、
+「[`DISTINCT_<OP>` —— 先去重再统计](#distinct_op--先去重再统计)」、
+「[`LOOKUP2` —— 双键跨 AS 取值](#lookup2--双键跨-as-取值)」。
+
+不需要重建镜像（customers 层 bind-mount，`docker restart` 即可生效）。
 
 ---
 
@@ -957,6 +992,10 @@ bin/instance restart
 | `XAGG_NTH2(…)`                 | 取该行所在组的第 n 份**原值**        | 见「XAGG_*2」一节 |
 | `XAGG_AVG2/RSD2/MAX2/MIN2/COUNT2(…)` | 跨 AS 按**组合键**聚合         | 见「XAGG_*2」一节 |
 | `INDEX_BY_GROUP(值,键,匹配,分组)` | 组内按键索引（每行查自己那一组）   | `INDEX_BY_GROUP([g_rt],[imp_name],[imp_main_name_ref],[g_sample_id])` |
+| `DISTINCT_SEQlist(k1[,k2…])`   | 去重序号，重复行留空                 | `DISTINCT_SEQlist([imp_name],[imp_pct_group])` |
+| `GROUP_REPORT_TOPlist(v,k1[,k2…])` | 每组最高档报告值，只在首行       | `GROUP_REPORT_TOPlist([imp_report],[imp_name],[imp_pct_group])` |
+| `DISTINCT_RSD/RANGE/MAX/MIN/AVG/COUNT(v,k)` | 先去重再统计（标量）    | `DISTINCT_RSD([imp_total],[g_sample_id])` |
+| `LOOKUP2(源,取值,键1,值1,键2,值2[,默认])` | 双键跨 AS 取值              | `LOOKUP2("imp_rec_weigh","imp_weigh","imp_name",[imp_name],"imp_spike_level",[imp_spike_level])` |
 | `ROUND(x,n)`                    | 四舍五入，返回**数值**               | `ROUND([A], 3)`                         |
 | `ROUND_EVEN(x,n)`               | 四舍六入五留双（GB/T 8170），**数值** | `ROUND_EVEN([A], 3)`                    |
 | `ROUND_UP(x,n)`                 | 远离零只进不舍，**数值**             | `ROUND_UP([A], 1)`                      |
@@ -1111,7 +1150,7 @@ grouping column.
 
 引擎按**函数名**决定走哪条路（`_ARRAY_FN_RE`）：`GROUP_*` / `*_ROWS` /
 `RESULT_STATUS` / `TIME_ELAPSED_HOURS` / `COALESCE` / `SHIFT` / `BASELINE_BYlist` /
-`XAGG_*` / `APPEND` / `INDEX_BY_GROUP`
+`XAGG_*` / `APPEND` / `INDEX_BY_GROUP` / `DISTINCT_*`
 走**数组路径** —— 把**整列**替换进公式，**只 eval 一次**。于是
 
 ```
@@ -1906,7 +1945,7 @@ imp_cf_gated = BAND([imp_cf_lookup], [imp_cf_gate_low], [imp_cf_gate_high], 1.0)
 
 ```
 GROUP_*  |  *_ROWS  |  RESULT_STATUS  |  TIME_ELAPSED_HOURS  |  COALESCE  |  SHIFT
-BASELINE_BYlist  |  XAGG_*  |  APPEND  |  INDEX_BY_GROUP
+BASELINE_BYlist  |  XAGG_*  |  APPEND  |  INDEX_BY_GROUP  |  DISTINCT_*
 ```
 
 | 路径 | 触发条件 | `[标量字段]` 被替换成 |
@@ -2120,6 +2159,168 @@ imp_report = RESULT_STATUS([imp_pct], [imp_loq], [imp_lod])
 ```
 
 > **自动读取原理**：当省略 loq/lod 参数时，引擎通过 `self.getAnalysisService()` 读取 AS 的 `LLOQ`（Lower Limit of Quantification）和 `LLOD`（Lower Detection Limit）值。这意味着每个 AS 可以在其 Limits 标签页统一维护阈值，所有引用该 AS 的 Calculation 无需冗余定义 `tst_loq`/`tst_lod` 字段。
+
+---
+
+## DISTINCT_SEQlist / GROUP_REPORT_TOPlist —— 去重序号与单杂报告值
+
+v1.15.0 新增。两个函数写在一起，因为它们**必须在同样的行上有值**。
+
+### 这一列是用来「数」的，不是用来排版的
+
+「有关物质」的报告里同一个杂质占 6 行（6 针）。序号列去重之后：
+
+```
+序号   物质名称   报告值 …
+ 1     杂质A      0.12
+       杂质A      0.15
+       杂质A      0.11
+ 2     未知1      ND
+       未知1      ＜0.05%
+       未知1      0.06
+ 3     未知2      0.21
+       …
+```
+
+**最大的那个序号（3）就是本次要外报的杂质个数**，实验人员靠它核对报告完整性
+（2026-09-21 的原话：「序号是去"重"的结果……要不然实验人员根本不知道有多少个是
+需要外报的」）。把每行都填上它所属组的编号技术上更省事，但那恰好把这个信息抹掉
+了 —— 所以重复行留空是**需求**，不是排版偏好。
+
+### `DISTINCT_SEQlist(键1[, 键2…])`
+
+```
+imp_seq = DISTINCT_SEQlist([imp_pct_group])                  # AS-10 单键
+imp_seq = DISTINCT_SEQlist([imp_name], [imp_pct_group])      # AS-12 双键
+```
+
+| 行 | 返回 |
+| ---- | ---- |
+| 该键组合**首次出现** | 序号，1 起、按首次出现顺序 |
+| 重复出现 | **空字符串**，**不是 `---`** |
+
+> ★ 重复行是空字符串而**不是 `---`**：本包里 `---` 的含义是「算不出来 / 出错了」，
+> 拿它表示「这行故意不显示」会让人以为坏了。
+
+- **双键**是给 AS-12 用的：两个同名的未知杂质只能靠「杂质分组」分开，单键会把它们
+  并成一行、少数一个。
+- **键值为空的行也算一种身份**，照样参与编号。指定杂质那几行的「杂质分组」就是空的
+  （裁决 §5-D1），跳过它就会少数一个要外报的杂质。
+- 中文键走 `_norm_key` 归一（`str`/`unicode` 边界）——不归一会把同一个杂质拆成两组，
+  序号因此多数一个，**而且不报错**。
+
+### `GROUP_REPORT_TOPlist(报告值列, 键1[, 键2…])`
+
+每组取**最高档**的报告值，只放在该组首行，其余行空。
+
+报告值列是字符串混数字，档次从高到低：
+
+```
+数字   >   ＜<报告限>%   >   ND
+```
+
+| 组内情况 | 取 |
+| ---- | ---- |
+| 有任意数字 | 其中**最大的那个数字** |
+| 没有数字、有 `＜x%` | `＜x%`（同档多个时取里面那个数大的）|
+| 都是 `ND` | `ND`（原样，`N.D.` 不会被规整成 `ND`）|
+| 一个有效值都没有（全空 / 全 `---` / 全是认不出来的文本）| `---` —— 这是真的算不出来 |
+
+**`GROUP_MAXlist` 做不了这件事**：它用 `_num_or_none` 过滤非数字，整组都是
+`＜0.05%` 时它返回占位符，而正确答案是 `＜0.05%`。
+
+值**原样返回**。★ 注意一个类型细节：**本 AS 内**的混合列到引擎这里已经是**文本**了
+（calculatedlist 的收集器对「并非整列都能转数」的 list 字段整列转字符串，跟
+`_collect_cross_referenceable_data` 逐格定类型不同），所以这一列可能是
+`"0.15"` 而不是 `0.15`。显示一样，但**不要在它外面套计算**，要修约请在源列上做。
+
+### 两列必须同行
+
+`DISTINCT_SEQlist` 与 `GROUP_REPORT_TOPlist` 共用同一份「首次出现」判定
+（`_distinct_first_rows`）。各写一个 seen 循环迟早会在其中一方长出特例的那天分叉，
+而分叉的表现是「序号在这行、值在那行」—— 没人会把它当成报错看。
+
+### 都不能写成一行
+
+两个都是数组路径函数，返回整列，**必须单独占一个字段**。内联进别的表达式
+（`[x] * DISTINCT_SEQlist(...)`）会把整条公式推上数组路径，那里它是 list 乘 list，
+`TypeError` 把整列刷成 `---`，只在日志留一行 —— 与 `BASELINE_BYlist` 同一个坑。
+
+---
+
+## DISTINCT_<OP> —— 先去重再统计
+
+v1.15.0 新增，同一族的另一头，**返回标量**。
+
+```
+DISTINCT_RSD(值列, 去重键)      DISTINCT_RANGE(值列, 去重键)
+DISTINCT_MAX(值列, 去重键)      DISTINCT_MIN(值列, 去重键)
+DISTINCT_AVG(值列, 去重键)      DISTINCT_COUNT(值列, 去重键)
+```
+
+### 为什么不能直接用 GROUP_*
+
+「总杂」是 `GROUP_SUMlist([imp_num], [g_sample_id])` 广播出来的 ——
+**同一份样品的每一行都重复着同一个总杂值**。于是：
+
+- **极差没问题**：max/min 不受重复影响；
+- **RSD 是错的**：6 个样品的值各按它的杂质行数重复计入，n 虚高、离散度被稀释，
+  算出一个比真实值小的 RSD，**而且从结果上看不出来**。
+
+```
+imp_total_rsd   = DISTINCT_RSD([imp_total], [g_sample_id])
+imp_total_range = DISTINCT_RANGE([imp_total], [g_sample_id])
+imp_total_n     = DISTINCT_COUNT([imp_total], [g_sample_id])
+```
+
+### 边界
+
+- 非数值的格跳过，与 `GROUP_*` 家族的缺失值口径一致；
+- 一个有效值都没有 → `---`；`DISTINCT_RSD` 不足 2 个值也是 `---`（0.0 会读成
+  「完美重现」，是最误导的那个答案）；
+- **同一个去重键下的行如果并不共享同一个值**，取首行并 **warn** 一条：那通常意味着
+  去重键选错了，而选错的后果是「挑了其中一个」——一个看着完全合理的数；
+- `DISTINCT_COUNT` 是 RSD / 极差的审计列。没有它，「去重键选错、只剩一个值」与
+  「本来就只做了一份」在报告上长得一模一样（两者的 RSD 都是 `---`）。
+
+**标量函数**：放在 CalculatedList 字段里会得到**单元素数组**（与 `GROUP_AVG` 这类
+整列标量版同理）；要一个真标量就放 Calculated 字段。
+
+---
+
+## LOOKUP2 —— 双键跨 AS 取值
+
+v1.15.0 新增。`LOOKUP` 只能按一个键匹配；AS-18「加入杂质称样量」要按
+**物质名称 + 加标水平**去 `imp_rec_weigh` 取 —— 同一个杂质在源表里有好几个加标
+水平各一行，**单键取回来的是其中第一行**，一个看着完全合理的错数。
+
+```
+LOOKUP2(源AS, 取值字段, 键1字段, 键1值, 键2字段, 键2值[, 默认])
+
+imp_rec_spec_weigh = LOOKUP2("imp_rec_weigh", "imp_weigh",
+                             "imp_name", [imp_name],
+                             "imp_spike_level", [imp_spike_level])
+```
+
+语义与 `LOOKUP` 一致（源 AS 解析、「还没录入」的判定、元素级/标量两种调用形式、
+默认值），只是**两个键都要命中**。两处刻意不同：
+
+| | `LOOKUP` | `LOOKUP2` |
+| ---- | ---- | ---- |
+| 省略键 = 取那唯一一行 | 支持（32 处配置这么写）| **不支持** —— 用两个键就是为了消歧义 |
+| 命中多行 | 取第一个 | 取第一行 **+ warn 一条** |
+
+- 键值可以是列（逐行查）、也可以是一个值（广播到每行）；两列键值**行数不同**时
+  拒绝配对并报错，不截断到短的那个。
+- **取值字段是标量**时广播到每一行（整张表共用一个值，比如稀释体积）；但广播不等于
+  不用匹配，键对不上照样报错。
+- 中文键两边都过 `_safe_text` 再比 —— `str` 与 `unicode` 在 Python 2 里直接比
+  不报错、只是永远不相等。
+
+> ★ **依赖传播也认识它了**：`_LOOKUP_SRC_RE` 原来写的是 `LOOKUP\s*\(`，
+> 匹配不到 `LOOKUP2(`。只靠 LOOKUP2 引用别的 AS 的公式会被当成「没有跨 AS 依赖」，
+> 于是**算过一次就再也不刷新**，源数据改了屏幕上还是旧值 —— 没有 `---`、没有日志，
+> 正是 v1.5.0 为 LOOKUP 修掉的那个静默失败。现在两个名字都认。
 
 ---
 
