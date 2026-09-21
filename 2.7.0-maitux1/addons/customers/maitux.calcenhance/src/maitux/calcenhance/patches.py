@@ -5389,6 +5389,253 @@ def _evaluate_calculatedlist_interims(self, only=None):
 
         return [baseline.get(key, _PLACEHOLDER) for key in row_keys]
 
+    # ---- 去重族: DISTINCT_* / GROUP_REPORT_TOPlist -----------------------
+    #
+    # 一个杂质在报告里占 6 行（6 针），而实验人员要的是能
+    # **数得出来有几个杂质需要外报** —— 序号列去重之后，最大的
+    # 那个序号就是这个数（2026-09-21 的原话）。把值铺满每一行技术
+    # 上更省事，但那恰好抹掉了这一列存在的理由。重复行留空是需求，
+    # 不是排版偏好。
+    #
+    # 序号（DISTINCT_SEQlist）与单杂报告值（GROUP_REPORT_TOPlist）共用
+    # 同一份「首次出现」判定：两列必须在**同样的行**上有值，各写一个
+    # seen 循环迟早会在其中一方长出特例的那天分叉，而分叉的表现是
+    # “序号在这行、值在那行”，没人会当成报错看。
+    #
+    # DISTINCT_<OP> 是同一族的另一头：总杂那一列是 GROUP_SUMlist 广播
+    # 出来的，同一份样品的每一行都重复着同一个值。直接对它求 RSD，
+    # 6 个样品的值会各按它的杂质行数重复计入，离散度被稀释 ——
+    # 算出一个比真实值小的 RSD，而且从结果上看不出来。
+
+    def _distinct_first_rows(key_arrays, count=None):
+        """(row_keys, first_seen): 每行的键元组 + 每个键首次出现的行号.
+
+        `count` 强制行数；省略时取最长的那一列。标量键广播到全长，
+        短一截的列补 None（经 _norm_key 变成空串）。一个键也不给时每行的
+        键都是空元组，也就是「整列算一组」—— 与 GROUP_*list 不传键时一致。
+
+        [PY2-UNICODE] 键一律过 _norm_key：杂质名大量是中文，而同一个
+        名字可能一半以 str、一半以 unicode 到达（前者来自公式里的字面量）。
+        不归一就会把一个杂质拆成两组，序号因此多数一个 —— 不报错。
+        """
+        arrays = list(key_arrays)
+        if count is None:
+            count = 0
+            for arr in arrays:
+                if isinstance(arr, (list, tuple)):
+                    count = max(count, len(arr))
+        columns = []
+        for arr in arrays:
+            if not isinstance(arr, (list, tuple)):
+                columns.append([arr] * count)
+                continue
+            column = list(arr)
+            if len(column) < count:
+                column = column + [None] * (count - len(column))
+            columns.append(column[:count])
+        row_keys = [tuple(_norm_key(column[index]) for column in columns)
+                    for index in range(count)]
+        first_seen = {}
+        for index, key in enumerate(row_keys):
+            if key not in first_seen:
+                first_seen[key] = index
+        return row_keys, first_seen
+
+    def _distinct_seqlist(*key_arrays):
+        """1, 2, 3 … on each key's FIRST row; an empty string on the repeats.
+
+            DISTINCT_SEQlist([imp_pct_group])
+            DISTINCT_SEQlist([imp_name], [imp_pct_group])
+
+        这一列存在的理由是「数得出来有几个」：同一个杂质占 6 针 6 行，
+        而**本列最大的那个序号 = 本次要外报的杂质个数**，实验人员靠它核对
+        报告完整性。把每行都填上它所属组的编号（技术上更简单）恰好把这个
+        信息抹掉，所以重复行是空的。
+
+        空字符串 u"" 而不是 '---'：本包里 '---' 的含义是「算不出来 /
+        出错了」，拿它表示「这行故意不显示」会让人以为坏了。
+
+        键值为空的行也是一种身份，照样参与编号，不跳过、也不并进别的组。
+        空本身可能就是一个真实的分组（指定杂质那几行的杂质分组就是空的，
+        裁决 §5-D1），把它跳过就会少数一个要外报的杂质。
+
+        数组路径函数，返回的是整列，**必须单独占一个字段**。内联进别的
+        表达式（`[x] * DISTINCT_SEQlist(...)`）会把整条公式推上数组路径，那里
+        它是 list 乘 list，TypeError 把整列刷成 '---'，只在日志留一行 ——
+        与 BASELINE_BYlist 同一个坑。
+        """
+        if not key_arrays:
+            # 不给键就没有「去重」可言；整列算一组会得到孤零零的一个 1，
+            # 那看着像算出来了。宁可说不知道。
+            return [_PLACEHOLDER]
+        row_keys, first_seen = _distinct_first_rows(key_arrays)
+        if not row_keys:
+            return [_PLACEHOLDER]
+        order = {}
+        for key in row_keys:
+            if key not in order:
+                order[key] = len(order) + 1
+        return [order[key] if first_seen[key] == index else u""
+                for index, key in enumerate(row_keys)]
+
+    def _report_rank(value):
+        """(档次, 档内大小) of one report cell -- bigger wins.
+
+            3  数字            档内比大小
+            2  「＜x%」限下标记  档内比标记里的那个数（一般全组相同）
+            1  ND / N.D.       档内不分高低，取首次出现的那个写法
+            0  没数据（空 / '---' / 认不出来的文本）
+
+        档次来自实验人员的「不在同一象限，取大值」（Q4a）。认不出来的
+        文本（比如 'N/A'）不给它分档：排在 ND 下面等于替实验室定义了一个
+        没人认同的档，所以当成「没数据」，整组都是它时出 '---'。
+        """
+        number = _num_or_none(value)
+        if number is not None:
+            return (3, number)
+        text = _safe_text(value).strip()
+        if not text or text == _PLACEHOLDER:
+            return (0, 0.0)
+        if text[:1] in _BELOW_LIMIT_PREFIXES:
+            import re as _rr_re
+            found = _rr_re.search(r"[-+]?\d*\.?\d+", text)
+            if found:
+                try:
+                    return (2, float(found.group(0)))
+                except ValueError:
+                    return (2, 0.0)
+            return (2, 0.0)
+        if _is_zero_marker(text):
+            return (1, 0.0)
+        return (0, 0.0)
+
+    def _group_report_toplist(values, *key_arrays):
+        """每组最高档的报告值，**只放在该组首行**，其余行空。
+
+            GROUP_REPORT_TOPlist([imp_report], [imp_name], [imp_pct_group])
+
+        报告值那一列是字符串混数字（数字 / 「＜0.05%」/ 'ND'），所以
+        「最大」得先分档再比：有数字取最大的数字；没数字但有「＜x%」取
+        它；全是 ND 就是 ND（实验人员 Q4a：「不在同一象限，取大值」）。
+        分档见 _report_rank。
+
+        **GROUP_MAXlist 做不了这件事**：它用 _num_or_none 过滤非数字，整组
+        都是「＜0.05%」时它返回占位符，而正确答案是「＜0.05%」。
+
+        值**原样返回**：数字回数字、标记回它在源表里的字面，所以这是一列
+        混合数组（引擎本来就允许）。不要在它外面套计算，要修约请在源列上做。
+
+        **有值的行与 DISTINCT_SEQlist 完全一致** —— 两者走同一份
+        _distinct_first_rows。序号有值的行就是报告值有值的行，这是配置侧
+        能把两列并排着看的前提。
+
+        整组一个有效值都没有（全空 / 全 '---' / 全是认不出来的文本）时，
+        首行出 '---'：那是真的算不出来，不是「故意不显示」。
+
+        数组路径函数，与 DISTINCT_SEQlist 一样**必须单独占一个字段**。
+        """
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        values = list(values)
+        row_keys, first_seen = _distinct_first_rows(key_arrays, len(values))
+        best = {}
+        for index, key in enumerate(row_keys):
+            rank = _report_rank(values[index])
+            if rank[0] == 0:
+                continue
+            current = best.get(key)
+            if current is None or rank > current[0]:
+                best[key] = (rank, values[index])
+        out = []
+        for index, key in enumerate(row_keys):
+            if first_seen[key] != index:
+                out.append(u"")
+                continue
+            chosen = best.get(key)
+            out.append(_PLACEHOLDER if chosen is None else chosen[1])
+        return out
+
+    def _distinct_values(fn_label, values, key_array):
+        """每个键只留一个数值，按首次出现顺序。
+
+        同一个键的各行应该是同一个值（它们本来就是广播出来的）。
+        真不一样时取首行并 warn 一条：那说明去重键选错了，而选错了的后果
+        是“挑了其中一个”—— 一个看着完全合理的数，不说就没人会发现。
+
+        非数值的格跳过，与 GROUP_* 家族的缺失值口径一致。
+        """
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        values = list(values)
+        row_keys, first_seen = _distinct_first_rows((key_array,), len(values))
+        picked = {}
+        order = []
+        disagreed = []
+        for index, key in enumerate(row_keys):
+            number = _num_or_none(values[index])
+            if number is None:
+                continue
+            if key not in picked:
+                picked[key] = number
+                order.append(key)
+            elif picked[key] != number and key not in disagreed:
+                disagreed.append(key)
+        if disagreed:
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: 去重键 %s 下的行并不共享同一个"
+                u"值，已取首行 —— 这通常意味着去重键选错了，统计值会"
+                u"看着合理却不对。"
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   u", ".join(u"/".join(part for part in key) or u"(空)"
+                              for key in disagreed)))
+        return [picked[key] for key in order]
+
+    def _distinct_agg(fn_label, values, key_array, agg):
+        """先按键去重，再统计。标量返回。
+
+        总杂那一列是 `GROUP_SUMlist([imp_num], [g_sample_id])` 广播出来的 ——
+        同一份样品的每一行都重复着同一个总杂值。极差不受重复影响（max/min
+        照旧），**RSD 受**：6 个样品的值各按它的杂质行数重复计入，n 虚高、
+        离散度被稀释，算出一个比真实值小的 RSD，而且从结果上看不出来。
+
+        标量函数：放在 CalculatedList 字段里会得到**单元素数组**（与
+        GROUP_AVG 这类整列标量版同理）；要一个真标量就放 Calculated 字段。
+        """
+        nums = _distinct_values(fn_label, values, key_array)
+        if not nums:
+            return _PLACEHOLDER
+        return agg(nums)
+
+    def _distinct_rsd(values, key_array):
+        """去重后的 RSD%。不足 2 个值时为 '---'（见 _agg_rsd）。"""
+        return _distinct_agg("DISTINCT_RSD", values, key_array, _agg_rsd)
+
+    def _distinct_range(values, key_array):
+        """去重后的极差（max - min）。"""
+        return _distinct_agg("DISTINCT_RANGE", values, key_array,
+                             lambda ns: max(ns) - min(ns))
+
+    def _distinct_max(values, key_array):
+        """去重后的最大值。"""
+        return _distinct_agg("DISTINCT_MAX", values, key_array, max)
+
+    def _distinct_min(values, key_array):
+        """去重后的最小值。"""
+        return _distinct_agg("DISTINCT_MIN", values, key_array, min)
+
+    def _distinct_avg(values, key_array):
+        """去重后的平均值。"""
+        return _distinct_agg("DISTINCT_AVG", values, key_array,
+                             lambda ns: sum(ns) / len(ns))
+
+    def _distinct_count(values, key_array):
+        """去重后参与统计的个数 —— RSD / 极差 的审计列。
+
+        没有它时，「去重键选错、只剩一个值」与「本来就只做了一份」在
+        报告上长得一模一样（两者的 RSD 都是 '---'）。
+        """
+        return _distinct_agg("DISTINCT_COUNT", values, key_array, len)
+
     # ---- cross-AS aggregation (XAGG_*) ----------------------------------
     #
     # Needs doc: Docs/Cal增加/maitux.calcenhance-跨AS聚合-需求与方案.md.
@@ -7045,6 +7292,18 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "log10": __import__("math").log10,
         "exp": __import__("math").exp,
         "LOOKUP": _LOOKUP,
+        # 去重族 —— see the "去重族" block just before the XAGG_* one.
+        # DISTINCT_SEQlist 与 GROUP_REPORT_TOPlist 必须在同样的行上有值，
+        # 它们共用 _distinct_first_rows。DISTINCT_<OP> 是标量，先去重再统计
+        # —— 直接对广播列求 RSD 会把离散度稀释，而且看不出来。
+        "DISTINCT_SEQlist": _distinct_seqlist,
+        "GROUP_REPORT_TOPlist": _group_report_toplist,
+        "DISTINCT_RSD": _distinct_rsd,
+        "DISTINCT_RANGE": _distinct_range,
+        "DISTINCT_MAX": _distinct_max,
+        "DISTINCT_MIN": _distinct_min,
+        "DISTINCT_AVG": _distinct_avg,
+        "DISTINCT_COUNT": _distinct_count,
         "GROUP_AVG": _group_avg,
         "GROUP_SUM": _group_sum,
         "GROUP_MAX": _group_max,
@@ -7334,7 +7593,8 @@ def _evaluate_calculatedlist_interims(self, only=None):
         # degrade to the per-element path.
         _ARRAY_FN_RE = re.compile(
             r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS|COALESCE|SHIFT'
-            r'|BASELINE_BYlist|XAGG_\w+|APPEND|INDEX_BY_GROUP)\s*\(')
+            r'|BASELINE_BYlist|XAGG_\w+|APPEND|INDEX_BY_GROUP'
+            r'|DISTINCT_\w+)\s*\(')
         if _ARRAY_FN_RE.search(formula):
             expr = formula
             if isinstance(expr, str):

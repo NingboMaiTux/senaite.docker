@@ -571,8 +571,12 @@ def test_v16_registration(p, r):
                  "XAGG_COUNT2"):
         r.check("%s rides the XAGG_\\w+ entry" % name,
                 bool(array_fn_re.search(u"%s(a,b,[c],d)" % name)), True)
+    # Named in the alternation -- NOT necessarily last in it.  Same trap
+    # the APPEND assertion fell into: "|INDEX_BY_GROUP)" went red the day
+    # DISTINCT_\w+ was appended after it (v1.15.0), which says nothing
+    # about INDEX_BY_GROUP.
     r.check("INDEX_BY_GROUP is named in the dispatch regex in source",
-            u"|INDEX_BY_GROUP)" in src, True)
+            u"|INDEX_BY_GROUP" in src, True)
 
     # The pre-existing alternation does NOT cover INDEX_BY_GROUP: without
     # the dedicated entry it would fall to the per-element path.

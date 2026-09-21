@@ -300,7 +300,10 @@ def test_count_values_rows(p, r):
 #                     XAGG_NTH2 / XAGG_AVG2 / _RSD2 / _MAX2 / _MIN2 /
 #                     _COUNT2 / INDEX_BY_GROUP -- array table only, the
 #                     dual-key branch; 裁决 §7 ②③④⑤)
-EXPECTED_SAFE_ENTRIES = 88
+#              -> 96 (去重族: DISTINCT_SEQlist / GROUP_REPORT_TOPlist /
+#                     DISTINCT_RSD / _RANGE / _MAX / _MIN / _AVG / _COUNT
+#                     -- array table only)
+EXPECTED_SAFE_ENTRIES = 96
 EXPECTED_SCALAR_ENTRIES = 31
 
 
