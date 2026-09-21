@@ -650,7 +650,9 @@ REQUIRED = [
     # 基础
     "action", "portal_type", "name", "type", "fieldset", "order",
     # 前端显示
-    "show_edit", "show_view",
+    # show_view 只在 AT 对象上渲染（DX 侧 dxschema 不读它），但模板里
+    # 那个 tal:condition 为假时还有个同名隐藏域，所以字面量照样在。
+    "show_edit", "show_view", "show_list", "list_default",
     # 数据约束
     "required", "readonly", "multi",
     # 类型专属
@@ -663,9 +665,11 @@ REQUIRED = [
     #
     #     states                  没有任何代码读
     #     regex / regex_msg_*     没有任何代码读
-    #     show_list / list_default 列表视图的列来自跟 schema 无关的 dict
     #     min / max               只有 dxfields 读，AT 不读（样品就是 AT）
     #     precision               只有 atfields 读，DX 不读
+    #
+    #   show_list / list_default 曾经也在这个名单里，2026-09-21 由
+    #   browser/listing.py 实现后放回上面的清单。
     #
     #   storage / view / validation / 导入导出都还支持这些键。真做出来了
     #   把界面放回来时，记得同时加回这份 REQUIRED 和下面的多语言模式清单。
@@ -903,6 +907,150 @@ for needle in ["view.prefill('name')", "view.prefill_check('required')",
                "view/reopen_panel"]:
     check(u"模板接上了 %s" % needle, needle in tpl)
 check(u"模板里不再写死 name 的 pattern", 'pattern="[a-z]' not in tpl)
+
+
+print()
+print("=" * 66)
+print(u"13. 列表列（IListingViewAdapter）".encode("utf-8"))
+print("=" * 66)
+print(u"    —— 这一段是 2026-09-21 补实现的，之前 show_list 存了没人读".encode("utf-8"))
+print()
+
+# 列表视图的列来自视图类里写死的 self.columns，跟 schema 无关，所以造字段
+# 那条路管不到。新增的 browser/listing.py 用官方 IListingViewAdapter 往里插。
+#
+# 这一节要盯住三件事：
+#   ① 门控：没配置列的列表（绝大多数）必须一列都不动。订阅者注册给了
+#      **所有**列表，门控破了就是全站每张表都被塞东西。
+#   ② toggle：list_default 要映射成列定义里的 toggle，不是「加不加这一列」。
+#   ③ 固定选项列要显示**标签**不是存储值——列表里一片 low/mid/high 没人看得懂。
+
+import collections as _coll                                          # noqa: E402
+from zope.interface import implementer as _impl                      # noqa: E402
+from senaite.app.listing.interfaces import IListingView              # noqa: E402
+from maitux.dynamicfields.browser import listing as mdf_listing      # noqa: E402
+
+
+@_impl(IListingView)
+class FakeListing(object):
+    """够 add_column() 用的最小列表视图（它会校验 IListingView）"""
+
+    def __init__(self, portal_type=None):
+        self.contentFilter = {} if portal_type is None else {
+            "portal_type": portal_type}
+        self.columns = _coll.OrderedDict([("Title", {"title": "Title"})])
+        self.review_states = [
+            {"id": "default", "title": "All", "columns": ["Title"]},
+            {"id": "active", "title": "Active", "columns": ["Title"]},
+        ]
+        self.request = SaveReq()
+
+
+class FakeBrain(object):
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+# --- 造两个配置：一个上列表，一个不上 ---
+rec_col = storage.defaults("Batch", "ListedField", config.TYPE_CHOICE)
+rec_col["labels"] = {"en": u"Grade", "zh_CN": u"等级"}     # 等级
+rec_col["options"] = [
+    {"key": "low", "labels": {"en": u"Low", "zh_CN": u"低"}},   # 低
+    {"key": "high", "labels": {"en": u"High", "zh_CN": u"高"}},  # 高
+]
+rec_col["show_list"] = True
+rec_col["list_default"] = True
+rec_col["metadata"] = True
+rec_col["order"] = 1
+storage.save_record(rec_col)
+
+rec_hidden = storage.defaults("Batch", "NotListed", config.TYPE_TEXT)
+rec_hidden["labels"] = {"en": u"Hidden"}
+rec_hidden["show_list"] = False
+storage.save_record(rec_hidden)
+
+rec_toggle = storage.defaults("Batch", "OffByDefault", config.TYPE_TEXT)
+rec_toggle["labels"] = {"en": u"Off by default"}
+rec_toggle["show_list"] = True
+rec_toggle["list_default"] = False
+rec_toggle["metadata"] = True
+rec_toggle["order"] = 2
+storage.save_record(rec_toggle)
+
+# --- ① 门控：没配置的类型一列都不许动 ---
+untouched = FakeListing("AnalysisProfile")
+before_cols = list(untouched.columns.keys())
+mdf_listing.DynamicFieldsListingAdapter(untouched, None).before_render()
+check(u"★ 没配置列的类型：一列都没动（订阅者注册给所有列表，门控破了全站遭殃）",
+      list(untouched.columns.keys()) == before_cols,
+      u"%s" % (list(untouched.columns.keys()),))
+
+no_filter = FakeListing(None)
+mdf_listing.DynamicFieldsListingAdapter(no_filter, None).before_render()
+check(u"contentFilter 里没有 portal_type 时也不动",
+      list(no_filter.columns.keys()) == ["Title"])
+
+# --- ② 配置了的类型：列插进去，顺序、标题、toggle 都要对 ---
+listed = FakeListing("Batch")
+adapter = mdf_listing.DynamicFieldsListingAdapter(listed, None)
+adapter.before_render()
+cols = list(listed.columns.keys())
+check(u"两个 show_list 的字段都插进来了，没上列表的没进来",
+      "ListedField" in cols and "OffByDefault" in cols
+      and "NotListed" not in cols, u"%s" % (cols,))
+check(u"列标题用的是标签不是字段名",
+      listed.columns["ListedField"]["title"] in (u"Grade", u"等级"),
+      u"%r" % (listed.columns["ListedField"]["title"],))
+check(u"★ list_default 映射成 toggle（不是「加不加这一列」）",
+      listed.columns["ListedField"]["toggle"] is True
+      and listed.columns["OffByDefault"]["toggle"] is False)
+check(u"不声明 index —— 没建索引的字段点表头会静默无反应",
+      "index" not in listed.columns["ListedField"])
+check(u"每个 review state 的 columns 里都加上了",
+      all("ListedField" in s["columns"] for s in listed.review_states),
+      u"%s" % ([s["columns"] for s in listed.review_states],))
+
+# 列表可能带 portal_type 列表而不是单个字符串
+multi = FakeListing(["Batch", "AnalysisProfile"])
+mdf_listing.DynamicFieldsListingAdapter(multi, None).before_render()
+check(u"portal_type 是列表时也认",
+      "ListedField" in multi.columns)
+
+# --- ③ 每一行的取值与呈现 ---
+brain = FakeBrain(ListedField="low", OffByDefault=b"\xe6\xb5\x8b\xe8\xaf\x95")
+item = adapter.folder_item(brain, {}, 0)
+check(u"★ 固定选项显示标签，不是存储值 low",
+      item["ListedField"] in (u"Low", u"低"), u"%r" % (item["ListedField"],))
+check(u"brain 上的 utf-8 bytes 不炸（Py2 老坑）",
+      item["OffByDefault"] == u"测试", u"%r" % (item["OffByDefault"],))
+
+brain_bad = FakeBrain(ListedField="removed_key", OffByDefault=None)
+item_bad = adapter.folder_item(brain_bad, {}, 0)
+check(u"配置里已删的旧选项 key 原样显示，不显示空白",
+      item_bad["ListedField"] == u"removed_key")
+check(u"值为 None 时给空串，不是 'None'",
+      item_bad["OffByDefault"] == u"")
+
+check(u"布尔渲染成勾号",
+      adapter._render({"type": config.TYPE_BOOL}, FakeBrain()) == u""
+      and adapter._render(
+          {"type": config.TYPE_BOOL, "name": "x"},
+          FakeBrain(x=True)) == u"✓")
+check(u"多值用逗号连起来",
+      adapter._render({"type": config.TYPE_TEXT, "name": "x"},
+                      FakeBrain(x=["a", "b"])) == u"a, b")
+
+# 没配置列的列表上 folder_item 必须原样返回，不能白跑一圈
+passthrough = mdf_listing.DynamicFieldsListingAdapter(
+    FakeListing("AnalysisProfile"), None)
+same = {"keep": 1}
+check(u"没配置列时 folder_item 原样返回",
+      passthrough.folder_item(FakeBrain(), same, 0) is same)
+
+# 清掉这一节造的记录，免得影响后面（目前没有后续节，但别给以后挖坑）
+for _r in (rec_col, rec_hidden, rec_toggle):
+    storage.delete_record(_r["id"])
 
 
 print()

@@ -534,7 +534,13 @@ body.mdf-js.mdf-open { overflow:hidden; }
                 Show the field on the object's edit form.
               </div>
             </div>
-            <div class="mdf-f">
+            <!-- 「查看页」只对 Archetypes 生效：atfields 的 _visibility()
+                 读 show_view，dxschema 那边只处理 show_edit 和 readonly。
+                 与其在 Dexterity 类型上摆一个按了没反应的开关，不如整行
+                 不出现 —— 实施人员不需要知道 AT / DX 是什么，只是在那些
+                 对象上看不到这一项。DX 侧做出来之后把 tal:condition 去掉。 -->
+            <div class="mdf-f"
+                 tal:condition="python:info['mechanism'] == 'AT'">
               <div class="mdf-n" i18n:translate="">View page</div>
               <div>
                 <input type="checkbox" id="mdf_view" name="show_view" value="1"
@@ -544,11 +550,35 @@ body.mdf-js.mdf-open { overflow:hidden; }
                 Show the field on the object's view page.
               </div>
             </div>
-            <!-- 这里原来还有「列表列」和「列表默认显示」两个勾选框。两个
-                 都没实现：列表视图的列来自一份跟 schema 无关的 dict，本包
-                 的配置根本到不了那儿。勾了不报错，列也不会出现。
-                 跟 show_report 一个处理法——界面上不给，_read_common 里
-                 钉死 False。 -->
+            <!-- DX 上这一行不渲染，没勾的复选框不会提交，记录里就会存成
+                 False —— 可 DX 的字段在查看页上**确实是显示的**，存 False
+                 等于记了一笔假账。补个隐藏域把它钉成 True，和实际行为对上。 -->
+            <input type="hidden" name="show_view" value="1"
+                   tal:condition="python:info['mechanism'] != 'AT'" />
+            <!-- 「列表列」不走 schema：列表视图的列来自视图类里写死的
+                 self.columns，所以由 browser/listing.py 的
+                 IListingViewAdapter 往里插。2026-09-21 曾因没实现而撤下，
+                 现在补上了。 -->
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Listing column</div>
+              <div>
+                <input type="checkbox" id="mdf_list" name="show_list" value="1"
+                       tal:attributes="checked python:view.prefill_check('show_list')" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Needs the metadata column under Search below as well.
+              </div>
+            </div>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">On by default</div>
+              <div>
+                <input type="checkbox" id="mdf_listdef" name="list_default" value="1"
+                       tal:attributes="checked python:view.prefill_check('list_default')" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                The column comes up without the user switching it on.
+              </div>
+            </div>
             <div class="alert alert-warning py-2 mt-2 mb-0 small" i18n:translate="">
                 These two switches reach the standard edit and view forms,
                 the sample add form (it does read the AR schema) and the
