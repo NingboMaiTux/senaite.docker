@@ -31,11 +31,32 @@ sys.path.insert(0, "/opt/addons/common/maitux.dynamicfields/src")
 FAILED = []
 
 
+def _u(value):
+    """任何东西 -> unicode。
+
+    这个 helper 自己也踩过 Py2 的坑：格式串是 bytes、name 是 unicode、
+    detail 是 utf-8 bytes，三者混进一个 % 里就会隐式 ASCII 解码然后炸。
+    跟被测代码里那个 bug 同源。
+    """
+    if value is None:
+        return u""
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except Exception:
+            return value.decode("utf-8", "ignore")
+    try:
+        return u"%s" % value
+    except Exception:
+        return u"<unprintable>"
+
+
 def check(name, condition, detail=""):
-    status = "PASS" if condition else "FAIL"
-    print("[%s] %s %s" % (status, name, detail))
+    status = u"PASS" if condition else u"FAIL"
+    line = u"[%s] %s %s" % (status, _u(name), _u(detail))
+    print(line.encode("utf-8"))
     if not condition:
-        FAILED.append(name)
+        FAILED.append(_u(name))
 
 
 # --------------------------------------------------------------------------
@@ -107,22 +128,25 @@ check("合法记录通过校验", not problems, problems and str(problems[:1]) o
 
 bad = storage.defaults("Client", "title", config.TYPE_TEXT)
 bad["labels"] = {"en": u"X"}
-check("保留名被拒绝",
-      any(u"保留名" in p for p in validation.validate_record(bad, skip_uniqueness=True)))
+# 消息已改成 Message，其值就是 msgid（英文 default 在 .po 里翻成中文）
+check(u"保留名被拒绝",
+      any(u"v_reserved" in u"%s" % p
+          for p in validation.validate_record(bad, skip_uniqueness=True)))
 
 bad2 = storage.defaults("Client", "grade", config.TYPE_CHOICE)
 bad2["labels"] = {"en": u"X"}
 bad2["options"] = [{"key": u"甲级", "labels": {"zh-cn": u"甲级"}}]
 problems2 = validation.validate_record(bad2, skip_uniqueness=True)
-check("Choice 的中文 key 被拒绝（设计红线）",
-      any(u"ASCII" in p for p in problems2))
+check(u"Choice 的中文 key 被拒绝（设计红线）",
+      any(u"v_option_ascii" in u"%s" % p for p in problems2))
 
 bad3 = storage.defaults("Client", "x_list", config.TYPE_TEXT)
 bad3["labels"] = {"en": u"X"}
 bad3["show_list"] = True
 bad3["metadata"] = False
-check("勾了列表列但没勾 metadata 被拒绝",
-      any(u"metadata" in p for p in validation.validate_record(bad3, skip_uniqueness=True)))
+check(u"勾了列表列但没勾 metadata 被拒绝",
+      any(u"v_needs_metadata" in u"%s" % p
+          for p in validation.validate_record(bad3, skip_uniqueness=True)))
 
 rev_before = storage.get_revision()
 storage.save_record(rec)
@@ -364,6 +388,82 @@ except Exception as exc:
 # 空关键字不能把所有东西过滤掉
 check(u"空关键字放行全部", mdf_intro._matches(u"", u"anything"))
 check(u"None 关键字放行全部", mdf_intro._matches(None, u"anything"))
+
+
+print()
+print("=" * 66)
+print(u"8. 中英切换：界面文案不能写死成中文")
+print("=" * 66)
+
+import io     # noqa: E402
+import os     # noqa: E402
+import re     # noqa: E402
+
+# --- 类型名按语言走 ---
+for pt, zh, en in (("Client", u"\u5ba2\u6237", u"Client"),
+                   ("Worksheet", u"\u5de5\u4f5c\u8868", u"Worksheet"),
+                   ("AnalysisRequest", u"\u6837\u54c1 / \u68c0\u9a8c\u7533\u8bf7",
+                    u"Sample / Analysis Request")):
+    got_zh = mdf_intro.get_type_title(pt, u"zh-cn")
+    got_en = mdf_intro.get_type_title(pt, u"en")
+    check(u"%s 中文名" % pt, got_zh == zh, got_zh.encode("utf-8"))
+    check(u"%s 英文名" % pt, got_en == en, got_en.encode("utf-8"))
+    check(u"%s 中英确实不同" % pt, got_zh != got_en)
+
+# 不在表里的类型回落 portal_type 本身，不能变成 None / 空
+check(u"未知类型回落 portal_type",
+      mdf_intro.get_type_title("NoSuchType", u"en") == "NoSuchType")
+
+# --- 显示位置徽章按语言走 ---
+from maitux.dynamicfields.browser.view import POSITION_SLOTS, _is_en  # noqa: E402
+check(u"显示位置徽章是 (key, 中, 英) 三元组",
+      all(len(t) == 3 for t in POSITION_SLOTS), repr(POSITION_SLOTS[0]))
+check(u"_is_en 判定正确",
+      _is_en(u"en") and not _is_en(u"zh-cn") and not _is_en(u"zh"))
+
+# --- .po 里必须有译文 ---
+import gettext  # noqa: E402
+MO = ("/opt/addons/common/maitux.dynamicfields/src/maitux/dynamicfields/"
+      "locales/zh_CN/LC_MESSAGES/maitux.dynamicfields.mo")
+if os.path.exists(MO):
+    cat = gettext.GNUTranslations(open(MO, "rb"))
+    for mid in ("Dynamic Fields", "Search objects", "v_need_type",
+                "field_saved", "mech_at", "deprecated", "idx_yes",
+                "delete_confirm", "shadow_warning"):
+        got = cat.ugettext(mid)
+        check(u"zh_CN 译文存在: %s" % mid, got != mid, got.encode("utf-8"))
+else:
+    check(u"找得到编译好的 zh_CN .mo", False, MO)
+
+# --- lint：源码里不许再出现写死的中文界面文案 ---
+# 白名单：这几处是刻意保留的中文字面量
+ALLOWED = set([u"\u7f16", u"\u67e5", u"\u5217", u"\u62a5",   # 徽章单字，与 E/V/L/R 配对
+               u"\u4e2d\u6587",                                # 语言选项自己的名字
+               u"\u5176\u5b83"])                               # 分组兜底名（另有英文分支）
+CN_RE = re.compile(u"[\u4e00-\u9fff]")
+SRC_DIR = "/opt/addons/common/maitux.dynamicfields/src/maitux/dynamicfields"
+offenders = []
+for root, _dirs, files in os.walk(SRC_DIR):
+    for name in files:
+        if not name.endswith(".py"):
+            continue
+        # config.py 里的中文是 TYPE_TITLES / TYPE_GROUPS 的**双语对照表**
+        # （每项都是 (中文, 英文) 元组，由 get_type_title 按语言取），
+        # 不是写死的界面文案，跳过。
+        if name == "config.py":
+            continue
+        path = os.path.join(root, name)
+        text = io.open(path, encoding="utf-8").read()
+        # 去掉 docstring 和注释——那些是给人看的，不是界面文案
+        text = re.sub(u'"""[\\s\\S]*?"""', u"", text)
+        text = u"\n".join([l for l in text.split(u"\n")
+                           if not l.strip().startswith(u"#")])
+        for lit in re.findall(u'u"([^"]*)"', text):
+            if CN_RE.search(lit) and lit not in ALLOWED:
+                offenders.append(u"%s: %s" % (name, lit[:40]))
+check(u"源码里没有写死的中文界面文案（%d 处白名单除外）" % len(ALLOWED),
+      not offenders,
+      u"; ".join(offenders[:4]).encode("utf-8") if offenders else u"")
 
 print()
 print("=" * 66)

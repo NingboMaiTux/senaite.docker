@@ -7,6 +7,7 @@
 ★ 回滚前必须先在配置页上逐个关闭索引开关，否则目录里会留下无人维护的死索引
 （见需求文档 §8.4）。
 """
+from maitux.dynamicfields import _
 from maitux.dynamicfields import config
 
 try:
@@ -71,19 +72,27 @@ def ensure_index(record):
         has_index = name in _index_names(catalog)
         if want_index and not has_index:
             if _add_index(catalog, name, index_type_for(record)):
-                messages.append(u"%s：已创建索引 %s" % (catalog_id, name))
+                messages.append(_(u"index_created", default=u"${catalog}: index ${name} created",
+                              mapping={"catalog": catalog_id,
+                                       "name": name}))
         elif not want_index and has_index:
             if _del_index(catalog, name):
-                messages.append(u"%s：已移除索引 %s" % (catalog_id, name))
+                messages.append(_(u"index_removed", default=u"${catalog}: index ${name} removed",
+                              mapping={"catalog": catalog_id,
+                                       "name": name}))
 
         want_column = bool(record.get("metadata"))
         has_column = name in _column_names(catalog)
         if want_column and not has_column:
             if _add_column(catalog, name):
-                messages.append(u"%s：已创建 metadata 列 %s" % (catalog_id, name))
+                messages.append(_(u"column_created", default=u"${catalog}: metadata column ${name} created",
+                              mapping={"catalog": catalog_id,
+                                       "name": name}))
         elif not want_column and has_column:
             if _del_column(catalog, name):
-                messages.append(u"%s：已移除 metadata 列 %s" % (catalog_id, name))
+                messages.append(_(u"column_removed", default=u"${catalog}: metadata column ${name} removed",
+                              mapping={"catalog": catalog_id,
+                                       "name": name}))
 
     return messages
 
@@ -108,12 +117,16 @@ def reindex(record):
         catalog_id = getattr(catalog, "getId", lambda: "?")()
         try:
             catalog.reindexIndex(name, None)
-            messages.append(u"%s：索引 %s 已重建" % (catalog_id, name))
+            messages.append(_(u"index_rebuilt", default=u"${catalog}: index ${name} rebuilt",
+                              mapping={"catalog": catalog_id,
+                                       "name": name}))
         except Exception:
             logger.exception(
                 "maitux.dynamicfields: failed to reindex %s in %s",
                 name, catalog_id)
-            messages.append(u"%s：索引 %s 重建失败，详见日志" % (catalog_id, name))
+            messages.append(_(u"index_rebuild_failed", default=u"${catalog}: rebuilding index ${name} failed, see the log",
+                              mapping={"catalog": catalog_id,
+                                       "name": name}))
     return messages
 
 

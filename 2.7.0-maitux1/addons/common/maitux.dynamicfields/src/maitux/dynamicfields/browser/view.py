@@ -16,6 +16,7 @@ import json
 from Products.Five.browser import BrowserView
 from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
 
+from maitux.dynamicfields import _
 from maitux.dynamicfields import assignable
 from maitux.dynamicfields import atextender
 from maitux.dynamicfields import config
@@ -61,11 +62,15 @@ def safe_unicode(value):
         return u""
 
 
+#: 显示位置徽章。单字，按语言取——每请求渲染，不是缓存的 schema
+#: 单引号常量——拼 JS 字符串时要把它从文案里剔掉
+QUOTE_CHAR = chr(39)
+
 POSITION_SLOTS = (
-    ("show_edit", u"编"),
-    ("show_view", u"查"),
-    ("show_list", u"列"),
-    ("show_report", u"报"),
+    ("show_edit", u"编", u"E"),
+    ("show_view", u"查", u"V"),
+    ("show_list", u"列", u"L"),
+    ("show_report", u"报", u"R"),
 )
 
 
@@ -105,7 +110,9 @@ class DynamicFieldsView(BrowserView):
             handler(form)
         except Exception as exc:
             logger.exception("maitux.dynamicfields: action %s failed", action)
-            self.errors.append(u"操作失败：%s" % exc)
+            self.errors.append(_(
+                u"action_failed", default=u"Action failed: ${error}",
+                mapping={"error": u"%s" % exc}))
         finally:
             # 配置一变，两边的 schema 缓存都清掉，不等下一次 rev 比较
             dxschema.invalidate()
@@ -139,8 +146,11 @@ class DynamicFieldsView(BrowserView):
             return
 
         storage.save_record(record)
-        self.messages.append(
-            u"字段 %s 已保存，立即生效（无需重启容器）" % record.get("name"))
+        self.messages.append(_(
+            u"field_saved",
+            default=u"Field ${name} saved; effective immediately, no restart "
+                    u"needed",
+            mapping={"name": record.get("name")}))
 
         for message in indexing.ensure_index(record):
             self.messages.append(message)
@@ -149,20 +159,24 @@ class DynamicFieldsView(BrowserView):
         field_id = form.get("field_id") or ""
         record = storage.get_record(field_id)
         if record is None:
-            self.errors.append(u"要删除的字段不存在")
+            self.errors.append(_(
+                u"delete_missing",
+                default=u"The field to delete does not exist"))
             return
         # 先摘索引再删定义：顺序反了就会在目录里留下无人维护的死索引
         for message in indexing.drop_index(record):
             self.messages.append(message)
         storage.delete_record(field_id)
-        self.messages.append(
-            u"字段 %s 已删除。对象上已写入的值保留但不再显示。"
-            % record.get("name"))
+        self.messages.append(_(
+            u"field_deleted",
+            default=u"Field ${name} deleted. Values already stored on the "
+                    u"objects are kept but no longer shown.",
+            mapping={"name": record.get("name")}))
 
     def action_reindex_field(self, form):
         record = storage.get_record(form.get("field_id") or "")
         if record is None:
-            self.errors.append(u"字段不存在")
+            self.errors.append(_(u"field_missing", default=u"Field not found"))
             return
         for message in indexing.reindex(record):
             self.messages.append(message)
@@ -180,24 +194,31 @@ class DynamicFieldsView(BrowserView):
         if isinstance(payload, bytes):
             payload = payload.decode("utf-8", "ignore")
         if not payload.strip():
-            self.errors.append(u"没有可导入的内容")
+            self.errors.append(_(u"import_empty", default=u"Nothing to import"))
             return
         mode = form.get("mode") or "merge"
         added, updated, skipped, errors = storage.import_json(payload, mode)
-        self.messages.append(
-            u"导入完成：新增 %s 条，覆盖 %s 条，跳过 %s 条"
-            % (added, updated, skipped))
+        self.messages.append(_(
+            u"import_done",
+            default=u"Import finished: ${added} added, ${updated} replaced, "
+                    u"${skipped} skipped",
+            mapping={"added": added, "updated": updated,
+                     "skipped": skipped}))
         self.errors.extend(errors)
 
     def action_drop_broken(self, form):
         field_id = form.get("field_id") or ""
         record = storage.delete_record(field_id)
         if record is None:
-            self.errors.append(u"该配置不存在")
+            self.errors.append(_(
+                u"record_missing",
+                default=u"That configuration record does not exist"))
         else:
-            self.messages.append(
-                u"已删除失效配置 %s.%s"
-                % (record.get("portal_type"), record.get("name")))
+            self.messages.append(_(
+                u"broken_dropped",
+                default=u"Broken configuration ${type}.${name} deleted",
+                mapping={"type": record.get("portal_type"),
+                         "name": record.get("name")}))
 
     # ------------------------------------------------------------------
 
@@ -320,7 +341,8 @@ class DynamicFieldsView(BrowserView):
             or i18n.get_default_language()
 
     def type_groups(self):
-        return introspect.list_type_groups(query=self.search_query())
+        return introspect.list_type_groups(query=self.search_query(),
+                                           language=self.current_language())
 
     def search_query(self):
         """左栏「搜索对象」的关键字"""
@@ -367,14 +389,17 @@ class DynamicFieldsView(BrowserView):
         replacement = config.DEPRECATED_TYPES.get(portal_type)
         return {
             "portal_type": portal_type,
-            "title": introspect.get_type_title(portal_type),
+            "title": introspect.get_type_title(portal_type,
+                                               self.current_language()),
             "mechanism": mechanism,
             "deprecated": bool(replacement),
             "replaced_by": replacement or u"",
             "mechanism_note": (
-                u"Archetypes · 经 schemaextender 扩展"
+                _(u"mech_at",
+                  default=u"Archetypes - extended via schemaextender")
                 if mechanism == introspect.MECH_AT
-                else u"Dexterity · 经 behavior 扩展"),
+                else _(u"mech_dx",
+                       default=u"Dexterity - extended via behavior")),
             "states": introspect.get_workflow_states(portal_type),
         }
 
@@ -416,10 +441,13 @@ class DynamicFieldsView(BrowserView):
                                     fallback=record.get("name") or u""),
             "label_en": (record.get("labels") or {}).get("en", u""),
             "positions": [
-                {"key": key, "text": text, "on": bool(record.get(key))}
-                for key, text in POSITION_SLOTS],
+                {"key": key,
+                 "text": (en if _is_en(language) else zh),
+                 "on": bool(record.get(key))}
+                for key, zh, en in POSITION_SLOTS],
             "indexed": status["indexed"],
-            "index_label": u"已建" if status["indexed"] else u"—",
+            "index_label": (_(u"idx_yes", default=u"yes")
+                            if status["indexed"] else u"—"),
             "required": bool(record.get("required")),
             "creator": record.get("creator") or u"",
             "created": (record.get("created") or u"")[:10],
@@ -439,7 +467,8 @@ class DynamicFieldsView(BrowserView):
             mechanism = introspect.get_mechanism(portal_type)
             result.append({
                 "portal_type": portal_type,
-                "title": introspect.get_type_title(portal_type),
+                "title": introspect.get_type_title(
+                    portal_type, self.current_language()),
                 "mechanism": mechanism or u"?",
                 "broken": mechanism is None,
                 "count": len(groups[portal_type]),
@@ -484,7 +513,11 @@ class DynamicFieldsView(BrowserView):
                     "id": record.get("id"),
                     "name": record.get("name"),
                     "portal_type": portal_type,
-                    "reason": u"对象类型 %s 在当前站点不存在" % portal_type,
+                    "reason": _(
+                        u"broken_reason",
+                        default=u"Object type ${type} does not exist on "
+                                u"this site",
+                        mapping={"type": portal_type}),
                 })
         return broken
 
@@ -507,13 +540,50 @@ class DynamicFieldsView(BrowserView):
             return None
         active = assignable.is_assignable_active(instance)
         if active is False:
-            return (u"%s 上有别的 add-on 注册了更具体的 IBehaviorAssignable，"
-                    u"本包的动态字段在该类型上不会生效。" % portal_type)
+            return _(
+                u"shadow_warning",
+                default=u"Another add-on registered a more specific "
+                        u"IBehaviorAssignable for ${type}; dynamic fields "
+                        u"will not take effect on it.",
+                mapping={"type": portal_type})
         return None
 
     # ------------------------------------------------------------------
     # 表单选项
     # ------------------------------------------------------------------
+
+    def deprecated_warning(self):
+        """已废弃类型的告警文案（模板用）"""
+        info = self.selected_info()
+        if not info or not info.get("deprecated"):
+            return u""
+        return _(
+            u"deprecated_detail",
+            default=u"${type} has been replaced by ${new} (an AT to DX "
+                    u"migration leftover); both are still registered on this "
+                    u"site. Fields added here will not appear on the one that "
+                    u"is actually in use.",
+            mapping={"type": info["portal_type"], "new": info["replaced_by"]})
+
+    def delete_confirm_text(self):
+        """删除确认框的文案。
+
+        要塞进 JS 的字符串字面量里，所以把单引号和换行都换掉，
+        否则生成的 onsubmit 会是坏的 JS。
+        """
+        text = self.translate(_(
+            u"delete_confirm",
+            default=u"The field will no longer be shown. Values already "
+                    u"stored on the objects are kept. Delete it?"))
+        return text.replace(QUOTE_CHAR, u" ").replace(u"\n", u" ")
+
+    def translate(self, message):
+        """把 Message 翻成当前请求语言的 unicode"""
+        try:
+            from zope.i18n import translate as ztranslate
+            return safe_unicode(ztranslate(message, context=self.request))
+        except Exception:
+            return safe_unicode(message)
 
     def field_types(self):
         language = self.current_language()
@@ -530,7 +600,8 @@ class DynamicFieldsView(BrowserView):
         """
         return [{"id": item["portal_type"],
                  "title": u"%s (%s)" % (item["title"], item["portal_type"])}
-                for item in introspect.list_reference_targets()]
+                for item in introspect.list_reference_targets(
+                    self.current_language())]
 
     def types_with_options(self):
         return list(config.TYPES_WITH_OPTIONS)
@@ -581,7 +652,12 @@ def _slug(language):
     return (language or u"").replace(u"-", u"_").replace(u".", u"_")
 
 
+def _is_en(language):
+    return not (u"%s" % (language or u"")).lower().startswith(u"zh")
+
+
 def _lang_label(language):
+    """语言自己的名字，不翻译——中文那一栏永远叫「中文」"""
     return {
         u"zh-cn": u"中文",
         u"zh": u"中文",

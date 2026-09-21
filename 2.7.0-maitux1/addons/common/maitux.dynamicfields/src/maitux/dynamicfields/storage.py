@@ -38,6 +38,7 @@ from datetime import datetime
 from persistent.mapping import PersistentMapping
 from zope.annotation.interfaces import IAnnotations
 
+from maitux.dynamicfields import _
 from maitux.dynamicfields import config
 
 try:
@@ -269,15 +270,18 @@ def import_json(text, mode="merge", portal=None):
     try:
         payload = json.loads(text)
     except Exception as exc:
-        return 0, 0, 0, [u"JSON 解析失败：%s" % exc]
+        return 0, 0, 0, [_(u"import_parse_failed", default=u"JSON parse failed: ${error}",
+                           mapping={"error": u"%s" % exc})]
 
     incoming = payload.get("fields") if isinstance(payload, dict) else payload
     if not isinstance(incoming, list):
-        return 0, 0, 0, [u"JSON 结构不对：缺少 fields 列表"]
+        return 0, 0, 0, [_(u"import_bad_structure",
+                           default=u"Bad JSON structure: no fields list")]
 
     store = _container(portal)
     if store is None:
-        return 0, 0, 0, [u"取不到 portal，无法导入"]
+        return 0, 0, 0, [_(u"import_no_portal",
+                           default=u"No portal available, cannot import")]
 
     if mode == "replace":
         store["fields"] = PersistentMapping()

@@ -104,6 +104,20 @@ AT widget label、模板 `i18n:translate` 全都不用改。
 
 > 配置页**自身**的界面文案仍走常规 `.po`/`.mo`（`locales/`），跟上面两回事。
 
+### 界面文案的规矩
+
+**源码里一律写英文 msgid + 英文 default，中文只在 `.po` 里。** 这样切到英文
+站点就是英文，切回中文就是中文。三类例外，都是刻意的：
+
+| 例外 | 为什么 |
+|---|---|
+| `config.TYPE_TITLES` / `TYPE_GROUPS` | 双语对照表，每项是 `(中文, 英文)` 元组，`get_type_title(pt, language)` 按语言取。它们是**每请求**调的视图路径，按当前语言取值安全 |
+| `POSITION_SLOTS` 的 `编/查/列/报` | 单字徽章，与 `E/V/L/R` 配对，同样按语言取 |
+| 语言下拉里的「中文」 | 语言自己的名字不该被翻译 |
+
+`smoke_test.py` 第 8 节有个 **lint**：扫全部 `.py`，除上面三类白名单外，
+出现任何中文字符串字面量就报错。防止以后又退化回写死中文。
+
 ---
 
 ## 5. 设计红线
@@ -152,10 +166,11 @@ docker run --rm \
   <镜像> /opt/addons/common/maitux.dynamicfields/tools/smoke_test.py
 ```
 
-覆盖 85 项：存储与校验、动态 schema 生成、**同一 schema 在不同语言请求下给出
+覆盖 107 项：存储与校验、动态 schema 生成、**同一 schema 在不同语言请求下给出
 不同标签**、behavior 属性转发、**九种字段类型在 AT 和 DX 两条路上都能构造**
 （含标签必须是延迟求值的 Message、AT 侧必须带 `add` 键、多值形态）、
-**视图层吃 bytes 中文不崩**、脏配置容错。
+**视图层吃 bytes 中文不崩**、脏配置容错、
+**中英切换**（类型名按语言走、.po 里译文齐全、源码里不许再写死中文界面文案的 lint）。
 
 > 最后一项是踩过坑补的：Py2 下 Zope 的 request 给回来的表单值常常是 utf-8
 > **bytes** 而不是 unicode，对它调 `.encode("utf-8")` 会先用 ASCII 隐式解码，

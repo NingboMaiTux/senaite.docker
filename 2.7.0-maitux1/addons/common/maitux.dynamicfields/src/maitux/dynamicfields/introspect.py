@@ -79,11 +79,30 @@ def type_exists(portal_type):
 # 类型清单
 # --------------------------------------------------------------------------
 
-def get_type_title(portal_type):
-    return config.TYPE_TITLES.get(portal_type, portal_type)
+def get_type_title(portal_type, language=None):
+    """业务名。按当前语言取。
+
+    不用 Message：本函数是**每请求**调的视图路径，按当前语言取值安全——
+    跟 schema 字段不一样，那个是跨请求缓存的，烤进语言会串。
+    """
+    pair = config.TYPE_TITLES.get(portal_type)
+    if not pair:
+        return portal_type
+    zh, en = pair
+    return en if _is_english(language) else zh
 
 
-def list_types(include_empty=True, query=None):
+def _is_english(language):
+    if language is None:
+        try:
+            from maitux.dynamicfields import i18n as _i18n
+            language = _i18n.get_default_language()
+        except Exception:
+            return False
+    return not (u"%s" % language).lower().startswith(u"zh")
+
+
+def list_types(include_empty=True, query=None, language=None):
     """白名单内**且当前站点真实存在**的类型。
 
     清单从 portal_types 实测读取，不是手写死的——`Setup`(DX) / `BikaSetup`(AT)、
@@ -102,12 +121,12 @@ def list_types(include_empty=True, query=None):
         if not include_empty and not count:
             continue
         if query and not _matches(query, portal_type,
-                                  get_type_title(portal_type)):
+                                  get_type_title(portal_type, language)):
             continue
         replacement = config.DEPRECATED_TYPES.get(portal_type)
         items.append({
             "portal_type": portal_type,
-            "title": get_type_title(portal_type),
+            "title": get_type_title(portal_type, language),
             "mechanism": mechanism,
             "count": count,
             "primary": portal_type in config.PRIMARY_TYPES,
@@ -117,7 +136,7 @@ def list_types(include_empty=True, query=None):
     return items
 
 
-def list_type_groups(query=None):
+def list_type_groups(query=None, language=None):
     """按 config.TYPE_GROUPS 分组后的类型清单，供配置页左栏使用
 
     ★ 分组里那个列表的 key 叫 ``types`` 不叫 ``items``。TAL 的路径表达式
@@ -127,10 +146,13 @@ def list_type_groups(query=None):
     同理不要用 keys / values / get / copy / update / pop 当 key。
     """
     by_id = dict([(item["portal_type"], item)
-                  for item in list_types(query=query)])
+                  for item in list_types(query=query,
+                                         language=language)])
     groups = []
     used = set()
-    for title, type_ids in config.TYPE_GROUPS:
+    english = _is_english(language)
+    for titles, type_ids in config.TYPE_GROUPS:
+        title = titles[1] if english else titles[0]
         items = []
         for portal_type in type_ids:
             item = by_id.get(portal_type)
@@ -142,7 +164,8 @@ def list_type_groups(query=None):
     leftovers = [item for key, item in by_id.items() if key not in used]
     if leftovers:
         leftovers.sort(key=lambda i: i["portal_type"])
-        groups.append({"title": u"其它", "types": leftovers})
+        groups.append({"title": u"Other" if english else u"其它",
+                       "types": leftovers})
     return groups
 
 
@@ -184,7 +207,7 @@ def _text(value):
         return u""
 
 
-def list_reference_targets():
+def list_reference_targets(language=None):
     """对象引用字段能指向哪些类型——**读全部 portal_type，不用白名单**
 
     白名单 ALLOWED_TYPES 管的是「哪些类型能被加字段」，跟「引用能指向谁」是
@@ -217,7 +240,7 @@ def list_reference_targets():
             continue
         items.append({
             "portal_type": type_id,
-            "title": config.TYPE_TITLES.get(type_id, type_id),
+            "title": get_type_title(type_id, language),
             "known": type_id in config.ALLOWED_TYPES,
         })
     items.sort(key=lambda i: (not i["known"], i["portal_type"]))

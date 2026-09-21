@@ -63,10 +63,6 @@
 <div class="mdf-wrap">
 
   <h1 class="documentFirstHeading" i18n:translate="">Dynamic Fields</h1>
-  <p class="text-muted small" i18n:translate="">
-    Add custom fields to SENAITE objects. Native fields and fields provided by
-    other add-ons are read only.
-  </p>
 
   <!-- 状态消息 -->
   <div class="alert alert-info py-2" tal:condition="view/messages">
@@ -115,7 +111,8 @@
                i18n:translate="">Search objects</label>
         <div class="input-group input-group-sm">
           <input type="text" id="mdf_q" name="q" class="form-control"
-                 placeholder="业务名 或 portal_type"
+                 placeholder="Business name or portal_type"
+                 i18n:attributes="placeholder"
                  tal:attributes="value q" />
           <div class="input-group-append">
             <button type="submit" class="btn btn-outline-secondary"
@@ -165,7 +162,7 @@
 
       <div class="alert alert-danger py-2 small" tal:condition="info/deprecated">
         <strong i18n:translate="">This object type is deprecated.</strong>
-        <span tal:content="python:u'%s 已被 %s 取代（AT→DX 迁移遗留），两个类型在站点上都还注册着。给它加的字段不会出现在实际使用的那个类型上。确认你要的不是 %s 再继续。' % (info['portal_type'], info['replaced_by'], info['replaced_by'])">x</span>
+        <span tal:content="view/deprecated_warning">x</span>
       </div>
 
       <form method="get" class="mb-2" tal:attributes="action base">
@@ -178,7 +175,8 @@
             <span class="input-group-text" i18n:translate="">Filter fields</span>
           </div>
           <input type="text" name="fq" class="form-control"
-                 placeholder="字段名 / 标签"
+                 placeholder="Field name or label"
+                 i18n:attributes="placeholder"
                  tal:attributes="value fq" />
           <div class="input-group-append">
             <button type="submit" class="btn btn-outline-secondary"
@@ -237,7 +235,7 @@
               </form>
               <form method="post" class="d-inline"
                     tal:attributes="action base"
-                    onsubmit="return confirm('删除后该字段不再显示；对象上已写入的值会保留。确定删除？');">
+                    tal:attributes="onsubmit string:return confirm('${view/delete_confirm_text}');">
                 <input type="hidden" name="action" value="delete_field" />
                 <input type="hidden" name="tab" value="objects" />
                 <input type="hidden" name="portal_type"
@@ -396,12 +394,14 @@
               <label class="custom-control-label small" for="mdf_listdef"
                      i18n:translate="">Visible by default in listings</label>
             </div>
-            <div class="alert alert-warning py-2 mt-2 mb-0 small">
-              这些开关只对 SENAITE 的<strong>标准编辑 / 查看表单</strong>与列表页生效。
-              样品新建页 <span class="mdf-code">ar_add2</span>、样品与工作表顶部的
-              header_table、工作表结果录入页都是手写模板，<strong>不读 schema</strong>，
-              v1 无法自动把字段放进去。
-            </div>
+            <div class="alert alert-warning py-2 mt-2 mb-0 small" i18n:translate="">
+                These switches apply to the standard edit and view forms,
+                to the sample add form (it does read the AR schema) and to
+                the header table. They do NOT reach the listing views,
+                whose columns come from a dict unrelated to the schema,
+                nor the worksheet results entry header, which is a hand
+                written template.
+              </div>
           </fieldset>
 
           <fieldset class="border rounded p-2 mb-3">
@@ -418,11 +418,13 @@
                                        placeholder string:${lang/label}" />
               </div>
             </div>
-            <div class="alert alert-danger py-2 mb-0 small">
-              <strong>存储值必须是 ASCII key，中文只能当显示标签。</strong>
-              一旦把中文存进对象，这份数据就永远翻译不了，索引、导出、统计也全部
-              锁死在中文上——事后再改需要迁数据。
-            </div>
+            <div class="alert alert-danger py-2 mb-0 small" i18n:translate="">
+                The stored value must be an ASCII key; localized text
+                belongs in the labels. Once localized text is stored on
+                the objects it can never be translated, and indexes,
+                exports and statistics are locked to that one language.
+                Changing it later means migrating data.
+              </div>
           </fieldset>
 
           <fieldset class="border rounded p-2 mb-3">

@@ -191,3 +191,165 @@ msgstr "清除"
 
 msgid "No object matches this keyword."
 msgstr "没有匹配该关键字的对象。"
+
+msgid "action_failed"
+msgstr "操作失败：${error}"
+
+msgid "broken_dropped"
+msgstr "已删除失效配置 ${type}.${name}"
+
+msgid "broken_reason"
+msgstr "对象类型 ${type} 在当前站点不存在"
+
+msgid "column_created"
+msgstr "${catalog}：已创建 metadata 列 ${name}"
+
+msgid "column_removed"
+msgstr "${catalog}：已移除 metadata 列 ${name}"
+
+msgid "delete_confirm"
+msgstr "删除后该字段不再显示；对象上已写入的值会保留。确定删除？"
+
+msgid "delete_missing"
+msgstr "要删除的字段不存在"
+
+msgid "deprecated_detail"
+msgstr "${type} 已被 ${new} 取代（AT→DX 迁移遗留），两个类型在站点上都还注册着。给它加的字段不会出现在实际使用的那个类型上。"
+
+msgid "field_deleted"
+msgstr "字段 ${name} 已删除。对象上已写入的值保留但不再显示。"
+
+msgid "field_missing"
+msgstr "字段不存在"
+
+msgid "field_saved"
+msgstr "字段 ${name} 已保存，立即生效（无需重启容器）"
+
+msgid "idx_yes"
+msgstr "已建"
+
+msgid "import_bad_structure"
+msgstr "JSON 结构不对：缺少 fields 列表"
+
+msgid "import_done"
+msgstr "导入完成：新增 ${added} 条，覆盖 ${updated} 条，跳过 ${skipped} 条"
+
+msgid "import_empty"
+msgstr "没有可导入的内容"
+
+msgid "import_no_portal"
+msgstr "取不到 portal，无法导入"
+
+msgid "import_parse_failed"
+msgstr "JSON 解析失败：${error}"
+
+msgid "index_created"
+msgstr "${catalog}：已创建索引 ${name}"
+
+msgid "index_rebuild_failed"
+msgstr "${catalog}：索引 ${name} 重建失败，详见日志"
+
+msgid "index_rebuilt"
+msgstr "${catalog}：索引 ${name} 已重建"
+
+msgid "index_removed"
+msgstr "${catalog}：已移除索引 ${name}"
+
+msgid "mech_at"
+msgstr "Archetypes · 经 schemaextender 扩展"
+
+msgid "mech_dx"
+msgstr "Dexterity · 经 behavior 扩展"
+
+msgid "record_missing"
+msgstr "该配置不存在"
+
+msgid "shadow_warning"
+msgstr "${type} 上有别的 add-on 注册了更具体的 IBehaviorAssignable，本包的动态字段在该类型上不会生效。"
+
+msgid "v_bad_field_type"
+msgstr "字段类型不合法：${type}"
+
+msgid "v_bad_name"
+msgstr "字段名只能是 ASCII 字母开头、由字母/数字/下划线组成，长度 2-50：${name}"
+
+msgid "v_bad_regex"
+msgstr "校验正则不合法：${error}"
+
+msgid "v_dup_foreign"
+msgstr "${type} 上已经存在同名字段（原生或其它 add-on 提供），换一个名字"
+
+msgid "v_dup_own"
+msgstr "该对象上已经有一个叫 ${name} 的自定义字段"
+
+msgid "v_min_max"
+msgstr "最小值不能大于最大值"
+
+msgid "v_min_max_num"
+msgstr "最小值 / 最大值必须是数字"
+
+msgid "v_need_label"
+msgstr "至少要填一种语言的标签"
+
+msgid "v_need_name"
+msgstr "必须填字段名"
+
+msgid "v_need_option"
+msgstr "固定选项类型必须至少配一个选项"
+
+msgid "v_need_type"
+msgstr "必须指定目标对象"
+
+msgid "v_needs_metadata"
+msgstr "要在列表页显示，必须同时勾选「创建 metadata 列」——没有它列表页取不到值"
+
+msgid "v_option_ascii"
+msgstr "选项存储值必须是 ASCII（字母数字、下划线、连字符）：${key} —— 中文只能填在标签里"
+
+msgid "v_option_dup"
+msgstr "选项存储值重复：${key}"
+
+msgid "v_option_key_empty"
+msgstr "选项的存储值不能为空"
+
+msgid "v_option_label"
+msgstr "选项 ${key} 至少要填一种语言的标签"
+
+msgid "v_quota_total"
+msgstr "全站最多 ${max} 个自定义字段，已达上限"
+
+msgid "v_quota_type"
+msgstr "单个对象最多 ${max} 个自定义字段，已达上限"
+
+msgid "v_ref_types"
+msgstr "对象引用类型必须指定允许的对象类型"
+
+msgid "v_regex_msg"
+msgstr "填了校验正则就必须填校验失败提示"
+
+msgid "v_reserved"
+msgstr "${name} 是保留名，不能用作字段名"
+
+msgid "v_type_excluded"
+msgstr "对象类型 ${type} 已被明确排除，不能加字段"
+
+msgid "v_type_unsupported"
+msgstr "对象类型 ${type} 不在支持清单内"
+
+msgid "Business name or portal_type"
+msgstr "业务名 或 portal_type"
+
+msgid "Field name or label"
+msgstr "字段名 / 标签"
+
+msgid "The stored value must be an ASCII key; localized text belongs in the labels. Once localized text is stored on the objects it can never be translated, and indexes, exports and statistics are locked to that one language. Changing it later means migrating data."
+msgstr "存储值必须是 ASCII key，本地化文案只能填在标签里。一旦把本地化文案存进对象，这份数据就永远翻译不了，索引、导出、统计也全部锁死在那一种语言上——事后再改需要迁数据。"
+
+msgid "These switches apply to the standard edit and view forms, to the sample add form (it does read the AR schema) and to the header table. They do NOT reach the listing views, whose columns come from a dict unrelated to the schema, nor the worksheet results entry header, which is a hand written template."
+msgstr "这些开关对标准编辑页、查看页、样品新建页（它确实读 AR schema）和 header_table 都生效。但列表页（列来自与 schema 无关的字典）和工作表结果录入页页头（手写模板）覆盖不到。"
+
+msgid "This object type is deprecated."
+msgstr "该对象类型已废弃。"
+
+msgid "deprecated"
+msgstr "已废弃"

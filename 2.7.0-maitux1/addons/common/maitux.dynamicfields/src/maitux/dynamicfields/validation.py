@@ -6,6 +6,7 @@
 """
 import re
 
+from maitux.dynamicfields import _
 from maitux.dynamicfields import config
 from maitux.dynamicfields import storage
 
@@ -24,28 +25,35 @@ def validate_record(record, portal=None, existing_id=None,
 
     portal_type = record.get("portal_type")
     if not portal_type:
-        problems.append(u"必须指定目标对象")
+        problems.append(_(u"v_need_type", default=u"Pick a target object type"))
     elif portal_type in config.EXCLUDED_TYPES:
-        problems.append(u"对象类型 %s 已被明确排除，不能加字段" % portal_type)
+        problems.append(_(u"v_type_excluded", default=u"Object type ${type} is explicitly excluded",
+                        mapping={"type": portal_type}))
     elif portal_type not in config.ALLOWED_TYPES:
-        problems.append(u"对象类型 %s 不在支持清单内" % portal_type)
+        problems.append(_(u"v_type_unsupported", default=u"Object type ${type} is not in the supported list",
+                        mapping={"type": portal_type}))
 
     name = record.get("name") or ""
     if not name:
-        problems.append(u"必须填字段名")
+        problems.append(_(u"v_need_name", default=u"Field name is required"))
     elif not _NAME_RE.match(name):
-        problems.append(
-            u"字段名只能是 ASCII 小写字母开头、由小写字母/数字/下划线组成，"
-            u"长度 2-50：%s" % name)
+        problems.append(_(
+            u"v_bad_name",
+            default=u"Field name must start with an ASCII letter and contain "
+                    u"only letters, digits and underscores, 2-50 chars: "
+                    u"${name}",
+            mapping={"name": name}))
     elif name in config.RESERVED_NAMES:
-        problems.append(u"%s 是保留名，不能用作字段名" % name)
+        problems.append(_(u"v_reserved", default=u"${name} is a reserved name",
+                        mapping={"name": name}))
 
     field_type = record.get("type")
     if field_type not in config.FIELD_TYPE_IDS:
-        problems.append(u"字段类型不合法：%s" % field_type)
+        problems.append(_(u"v_bad_field_type", default=u"Invalid field type: ${type}",
+                        mapping={"type": field_type}))
 
     if not _has_any_label(record):
-        problems.append(u"至少要填一种语言的标签")
+        problems.append(_(u"v_need_label", default=u"Fill in a label in at least one language"))
 
     problems.extend(_validate_type_specific(record, field_type))
 
@@ -75,30 +83,35 @@ def _validate_type_specific(record, field_type):
     if field_type in config.TYPES_WITH_OPTIONS:
         options = record.get("options") or []
         if not options:
-            problems.append(u"固定选项类型必须至少配一个选项")
+            problems.append(_(u"v_need_option", default=u"A choice field needs at least one option"))
         seen = set()
         for option in options:
             key = (option or {}).get("key") or ""
             if not key:
-                problems.append(u"选项的存储值不能为空")
+                problems.append(_(u"v_option_key_empty", default=u"Option key must not be empty"))
                 continue
             if not _OPTION_RE.match(key):
                 # 设计红线：一旦把中文存进对象，这份数据永远翻译不了，
                 # 索引、导出、统计也全部锁死在中文上
-                problems.append(
-                    u"选项存储值必须是 ASCII（字母数字、下划线、连字符）："
-                    u"%s —— 中文只能填在标签里" % key)
+                problems.append(_(
+                    u"v_option_ascii",
+                    default=u"Option keys must be ASCII (letters, digits, "
+                            u"underscore, hyphen): ${key} - localized text "
+                            u"belongs in the labels",
+                    mapping={"key": key}))
                 continue
             if key in seen:
-                problems.append(u"选项存储值重复：%s" % key)
+                problems.append(_(u"v_option_dup", default=u"Duplicate option key: ${key}",
+                        mapping={"key": key}))
             seen.add(key)
             if not _option_has_label(option):
-                problems.append(u"选项 %s 至少要填一种语言的标签" % key)
+                problems.append(_(u"v_option_label", default=u"Option ${key} needs a label in at least one language",
+                        mapping={"key": key}))
 
     if field_type == config.TYPE_REFERENCE:
         allowed = record.get("allowed_types") or []
         if not allowed:
-            problems.append(u"对象引用类型必须指定允许的对象类型")
+            problems.append(_(u"v_ref_types", default=u"A reference field needs allowed object types"))
 
     if field_type in config.TYPES_NUMERIC:
         minimum = record.get("min")
@@ -106,23 +119,26 @@ def _validate_type_specific(record, field_type):
         if minimum is not None and maximum is not None:
             try:
                 if float(minimum) > float(maximum):
-                    problems.append(u"最小值不能大于最大值")
+                    problems.append(_(u"v_min_max", default=u"Minimum must not be greater than maximum"))
             except (TypeError, ValueError):
-                problems.append(u"最小值 / 最大值必须是数字")
+                problems.append(_(u"v_min_max_num", default=u"Minimum and maximum must be numbers"))
 
     regex = record.get("regex")
     if regex:
         try:
             re.compile(regex)
         except Exception as exc:
-            problems.append(u"校验正则不合法：%s" % exc)
+            problems.append(_(u"v_bad_regex", default=u"Invalid validation regex: ${error}",
+                        mapping={"error": u"%s" % exc}))
         if not _regex_msg_ok(record):
-            problems.append(u"填了校验正则就必须填校验失败提示")
+            problems.append(_(u"v_regex_msg", default=u"A validation regex requires a failure message"))
 
     if record.get("show_list") and not record.get("metadata"):
-        problems.append(
-            u"要在列表页显示，必须同时勾选「创建 metadata 列」"
-            u"——没有它列表页取不到值")
+        problems.append(_(
+            u"v_needs_metadata",
+            default=u"Showing a field as a listing column also requires the "
+                    u"metadata column - without it the listing cannot read "
+                    u"the value"))
 
     return problems
 
@@ -149,7 +165,8 @@ def _validate_uniqueness(portal_type, name, portal, existing_id):
 
     for record in storage.get_records_for_type(portal_type, portal):
         if record.get("name") == name and record.get("id") != existing_id:
-            problems.append(u"该对象上已经有一个叫 %s 的自定义字段" % name)
+            problems.append(_(u"v_dup_own", default=u"This object already has a custom field named ${name}",
+                        mapping={"name": name}))
             break
 
     # 原生字段 / 其它 add-on 的字段
@@ -159,9 +176,11 @@ def _validate_uniqueness(portal_type, name, portal, existing_id):
     except Exception:
         foreign = set()
     if name in foreign:
-        problems.append(
-            u"%s 上已经存在同名字段（原生或其它 add-on 提供），换一个名字"
-            % portal_type)
+        problems.append(_(
+            u"v_dup_foreign",
+            default=u"${type} already has a field with this name (native or "
+                    u"from another add-on); pick a different one",
+            mapping={"type": portal_type}))
 
     return problems
 
@@ -169,10 +188,13 @@ def _validate_uniqueness(portal_type, name, portal, existing_id):
 def _validate_quota(portal_type, portal):
     problems = []
     if storage.count_for_type(portal_type, portal) >= config.MAX_FIELDS_PER_TYPE:
-        problems.append(
-            u"单个对象最多 %s 个自定义字段，已达上限"
-            % config.MAX_FIELDS_PER_TYPE)
+        problems.append(_(
+            u"v_quota_type",
+            default=u"At most ${max} custom fields per object; limit reached",
+            mapping={"max": config.MAX_FIELDS_PER_TYPE}))
     if storage.count_all(portal) >= config.MAX_FIELDS_TOTAL:
-        problems.append(
-            u"全站最多 %s 个自定义字段，已达上限" % config.MAX_FIELDS_TOTAL)
+        problems.append(_(
+            u"v_quota_total",
+            default=u"At most ${max} custom fields site wide; limit reached",
+            mapping={"max": config.MAX_FIELDS_TOTAL}))
     return problems
