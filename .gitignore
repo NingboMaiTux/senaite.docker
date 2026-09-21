@@ -19,6 +19,18 @@
 !2.7.0-maitux1/senaite.impress.mo
 !latest/senaite.impress.mo
 
+# 例外：addons/common 下的 .mo 也要跟踪。
+#
+# 上面那条「容器重编译会写脏工作区」的理由只对 addons/customers 成立——
+# 只有那个目录是 bind mount。common 是故意不挂载的（挂载会被外部污染），
+# 代码编译进镜像，容器里没有任何东西会写回它，所以根本没有噪音问题。
+#
+# 而不跟踪的代价是实打实的：干净 clone 出来没有 .mo，docker build 照样
+# 成功、容器照样起来、日志一行错都不报，页面静默地全变英文。这个坑
+# 2026-09-21 踩到过。
+!2.7.0-maitux1/addons/common/**/*.mo
+!latest/addons/common/**/*.mo
+
 # Python 编译产物
 *.pyc
 *.pyo
