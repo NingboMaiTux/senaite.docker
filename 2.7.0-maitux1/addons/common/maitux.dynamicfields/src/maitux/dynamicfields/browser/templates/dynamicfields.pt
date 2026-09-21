@@ -373,7 +373,7 @@
                单独一段里——实施人员在这儿才找得到。 -->
           <div class="form-row">
             <div class="form-group col-md-5"
-                 data-mdf-types="text textarea int decimal bool choice">
+                 data-mdf-types="text textarea int decimal bool">
               <label class="small" for="mdf_default"
                      i18n:translate="">Pre-fill it with</label>
               <input type="text" id="mdf_default" name="default"
@@ -392,11 +392,6 @@
                      data-mdf-types="bool" i18n:translate="">
                 Type 1 to have the box ticked by default. Leave it empty
                 and the box starts unticked.
-              </small>
-              <small class="form-text text-muted"
-                     data-mdf-types="choice" i18n:translate="">
-                Which option is picked by default. Type one of the storage
-                keys from the Options list above, not the label.
               </small>
             </div>
             <div class="col-md-7">
@@ -501,7 +496,32 @@
           <fieldset class="border rounded p-2 mb-3" data-mdf-types="choice">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
                     i18n:translate="">Options</legend>
-            <div class="form-row" tal:repeat="n python:range(5)">
+            <div class="form-row mb-1">
+              <div class="col-md-1 small text-muted text-center"
+                   i18n:translate="">Default</div>
+              <div class="col-md-3 small text-muted"
+                   i18n:translate="">Stored value</div>
+              <div class="col-md-4 small text-muted" tal:repeat="lang languages">
+                <span i18n:translate="">Label</span> ·
+                <span tal:content="lang/label">zh</span>
+              </div>
+            </div>
+            <div class="form-row align-items-center mb-1">
+              <div class="col-md-1 text-center">
+                <input type="radio" name="default_option" value=""
+                       id="mdf_defopt_none" checked="checked" />
+              </div>
+              <div class="col-md-11">
+                <label class="small text-muted mb-0" for="mdf_defopt_none"
+                       i18n:translate="">No default - the user picks every time</label>
+              </div>
+            </div>
+            <div class="form-row align-items-center"
+                 tal:repeat="n python:range(5)">
+              <div class="col-md-1 text-center">
+                <input type="radio" name="default_option"
+                       tal:attributes="value n; id string:mdf_defopt_${n}" />
+              </div>
               <div class="form-group col-md-3 mb-1">
                 <input type="text" name="option_key" placeholder="key (ASCII)"
                        class="form-control form-control-sm" />

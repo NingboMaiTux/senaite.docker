@@ -268,7 +268,12 @@ class DynamicFieldsView(BrowserView):
                           else False)}
 
         if field_type in config.TYPES_WITH_OPTIONS:
-            data["options"] = self._read_options(form)
+            options = self._read_options(form)
+            data["options"] = options
+            # 固定选项的默认值不是手打的，是在选项列表里用单选钮指定的。
+            # 单选钮的 value 是**行号**——key 是同一行现场输入的，静态控件
+            # 拿不到它，所以提交行号再映射回 key。
+            data["default"] = self._read_default_option(form, options)
         if field_type == config.TYPE_REFERENCE:
             data["allowed_types"] = self._read_list(form, "allowed_types")
             data["include_inactive"] = self._flag(form, "include_inactive")
@@ -282,6 +287,32 @@ class DynamicFieldsView(BrowserView):
             data["regex_msg"] = self._read_lang_map(
                 form, "regex_msg", self.languages())
         return data
+
+    def _read_default_option(self, form, options):
+        """固定选项的默认值：把单选钮提交的行号映射回那一行的 key
+
+        行号对不上（比如那一行的 key 没填）就当没设默认值——不能让它把
+        一个不存在的 key 写进记录。
+        """
+        raw = safe_unicode(form.get("default_option")).strip()
+        if not raw:
+            return u""
+        try:
+            index = int(raw)
+        except (TypeError, ValueError):
+            return u""
+        # _read_options 会跳过 key 为空的行，所以行号不能直接当下标用，
+        # 要按原始提交顺序重新数一遍
+        keys = [safe_unicode(k).strip()
+                for k in self._as_list(form.get("option_key"))]
+        if index < 0 or index >= len(keys):
+            return u""
+        key = keys[index]
+        if not key:
+            return u""
+        if key not in [o.get("key") for o in options]:
+            return u""
+        return key
 
     def _read_options(self, form):
         keys = self._as_list(form.get("option_key"))

@@ -117,7 +117,8 @@ AT widget label、模板 `i18n:translate` 全都不用改。
 | 数值范围（min/max） | `int` `decimal` |
 | 小数位 | `decimal` |
 | 文本约束（最大长度、正则、失败提示） | `text` `textarea` |
-| 默认值 | `text` `textarea` `int` `decimal` `bool` `choice` |
+| 默认值（输入框） | `text` `textarea` `int` `decimal` `bool` |
+| 默认值（在选项列表里点单选钮） | `choice` |
 | 必填 / 只读 / 可编辑状态 / 检索 | 全部，恒显示 |
 
 `date` / `datetime` 没有任何专属配置——没有选项、没有范围、没有文本约束，
@@ -192,7 +193,7 @@ docker run --rm \
   <镜像> /opt/addons/common/maitux.dynamicfields/tools/smoke_test.py
 ```
 
-覆盖 130 项：存储与校验、动态 schema 生成、**同一 schema 在不同语言请求下给出
+覆盖 132 项：存储与校验、动态 schema 生成、**同一 schema 在不同语言请求下给出
 不同标签**、behavior 属性转发、**九种字段类型在 AT 和 DX 两条路上都能构造**
 （含标签必须是延迟求值的 Message、AT 侧必须带 `add` 键、多值形态）、
 **视图层吃 bytes 中文不崩**、脏配置容错、

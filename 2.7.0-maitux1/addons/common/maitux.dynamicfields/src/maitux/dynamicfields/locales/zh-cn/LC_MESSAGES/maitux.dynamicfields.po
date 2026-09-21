@@ -527,3 +527,15 @@ msgstr "可以选多个"
 
 msgid "Tick nothing and it can be changed at any time - that is the normal case, and what you want unless someone asked for otherwise. Only tick stages when the value has to be frozen once the sample moves on, so that nobody edits it after the fact."
 msgstr "一个都不勾 = 任何时候都能改，这是常态，没人特别要求的话就该这样。只有当这个值在样品流转到下一步之后就该定死、不许事后再改时，才去勾阶段。"
+
+msgid "Default"
+msgstr "默认"
+
+msgid "Stored value"
+msgstr "存储值"
+
+msgid "No default - the user picks every time"
+msgstr "不设默认值——每次由用户自己选"
+
+msgid "v_default_not_option"
+msgstr "默认值 ${value} 不是选项里的任何一个存储值"

@@ -129,6 +129,18 @@ def _validate_type_specific(record, field_type):
                 problems.append(_(u"v_option_label", default=u"Option ${key} needs a label in at least one language",
                         mapping={"key": key}))
 
+        # 默认值必须是上面某个选项的 key。界面上是单选钮选不错，
+        # 但导入 JSON、脚本写入这些路径绕过界面，得在这儿挡一次。
+        default = record.get("default")
+        if default:
+            keys = [(o or {}).get("key") for o in options]
+            if default not in keys:
+                problems.append(_(
+                    u"v_default_not_option",
+                    default=u"The default value ${value} is not one of the "
+                            u"option keys",
+                    mapping={"value": default}))
+
     if field_type == config.TYPE_REFERENCE:
         allowed = record.get("allowed_types") or []
         if not allowed:

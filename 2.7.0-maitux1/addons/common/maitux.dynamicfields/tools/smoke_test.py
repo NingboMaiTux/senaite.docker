@@ -580,6 +580,49 @@ except Exception as exc:
     check(u"validate_record 吃 bytes 中文不抛异常（原 bug 死在这）",
           False, repr(exc))
 
+# --- 固定选项的默认值：界面上是在选项列表里点单选钮，提交的是**行号** ---
+form2 = SaveReq()
+form2["portal_type"] = "AnalysisRequest"
+form2["name"] = "grade"
+form2["type"] = config.TYPE_CHOICE
+form2["label_en"] = "Grade"
+form2["option_key"] = ["low", "mid", "high"]
+form2["option_label_en"] = ["Low", "Mid", "High"]
+form2["default_option"] = "1"          # 第 2 行 = mid
+
+v2 = mdf_view.DynamicFieldsView(None, form2)
+spec2 = v2._read_type_specific(form2, config.TYPE_CHOICE)
+check(u"行号 1 映射回第二个选项的 key",
+      spec2.get("default") == u"mid", repr(spec2.get("default")))
+
+form2["default_option"] = ""
+check(u"不选单选钮 = 没有默认值",
+      v2._read_type_specific(form2, config.TYPE_CHOICE).get("default") == u"",
+      repr(v2._read_type_specific(form2, config.TYPE_CHOICE).get("default")))
+
+form2["default_option"] = "9"          # 越界
+check(u"行号越界当没设，不写脏 key",
+      v2._read_type_specific(form2, config.TYPE_CHOICE).get("default") == u"")
+
+form2["default_option"] = "2"
+form2["option_key"] = ["low", "mid", ""]   # 第 3 行 key 是空的
+check(u"指向空 key 的行当没设",
+      v2._read_type_specific(form2, config.TYPE_CHOICE).get("default") == u"")
+
+# 绕过界面（导入 JSON / 脚本）塞一个不存在的 key，校验要挡住
+rec_bad = storage.defaults("AnalysisRequest", "grade2", config.TYPE_CHOICE)
+rec_bad["labels"] = {"en": u"Grade"}
+rec_bad["options"] = [{"key": "low", "labels": {"en": u"Low"}}]
+rec_bad["default"] = u"nonexistent"
+check(u"默认值不是任何选项的 key 时被拒绝",
+      any(u"v_default_not_option" in u"%s" % p
+          for p in validation.validate_record(rec_bad, skip_uniqueness=True)))
+
+rec_ok = dict(rec_bad)
+rec_ok["default"] = u"low"
+check(u"默认值是合法 key 时通过",
+      not validation.validate_record(rec_ok, skip_uniqueness=True))
+
 # 就算有人绕过边界直接塞 bytes 进记录，校验也不能炸（兜底那层）
 raw = storage.defaults("Client", "rawbytes", config.TYPE_TEXT)
 raw["labels"] = {"zh-cn": b(u"\u76f4\u63a5\u585e\u8fdb\u6765\u7684")}
@@ -611,7 +654,7 @@ REQUIRED = [
     # 数据约束
     "required", "readonly", "multi",
     # 类型专属
-    "option_key", "allowed_types", "include_inactive",
+    "option_key", "default_option", "allowed_types", "include_inactive",
     "min", "max", "precision", "maxlen", "regex", "default",
     # 工作流与检索
     "states", "index", "metadata",
