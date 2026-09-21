@@ -2208,6 +2208,49 @@ def _stringify_result(result):
     return str(result)
 
 
+# Markers that genuinely contribute zero to a total: a result below the limit
+# of quantification is known to be near zero.  Anything else non-numeric is an
+# UNKNOWN contribution, not a zero one, and must not be silently summed as 0.
+#
+# The EXACT-MATCH half.  RESULT_STATUS's below-report-limit label carries the
+# report limit inside it ('＜0.05%'), so it changes with the AS and cannot be
+# listed here -- see _is_zero_marker for the prefix rule that covers it.
+_ZERO_MARKERS = frozenset([
+    u"", u"N.D.", u"ND", u"N.D", u"<LOQ", u"< LOQ", u"<LOD", u"< LOD",
+])
+
+# Full-width ＜ as well as ASCII '<': the analysts write the full-width one,
+# and RESULT_STATUS now emits it.
+_BELOW_LIMIT_PREFIXES = (u"<", u"\uff1c")
+
+
+def _is_zero_marker(value):
+    """True when `value` is a below-limit marker, i.e. contributes 0.
+
+    Two rules, because one table cannot cover both shapes:
+
+    - the fixed labels in _ZERO_MARKERS (empty / ND / N.D. / <LOQ / <LOD);
+    - anything STARTING with '<' or '＜'.  RESULT_STATUS renders the middle
+      band as '＜0.05%', and that number follows the AS's own report limit --
+      a literal table would need one entry per AS and would stop matching the
+      day somebody changed a limit.  The silence is the whole failure mode: an
+      unmatched marker falls through to '---' in RESULT_NUM, and 总杂 (the sum
+      of the report values) then reads '---' for every row, with nothing in
+      the log (2026-09-21).
+
+    A bare '<' with nothing after it still reads as below-limit.
+
+    Module level, not nested in the calculatedlist engine, for the reason
+    _num_or_none is: a closure cannot be imported, and this predicate is the
+    single point where a wording change on one column silently zeroes -- or
+    silently blanks -- another.
+    """
+    text = _safe_text(value).strip()
+    if text[:1] in _BELOW_LIMIT_PREFIXES:
+        return True
+    return text.upper() in _ZERO_MARKERS
+
+
 def _num_or_none(v):
     """Coerce to float, or None when the cell is missing / not numeric.
 
@@ -5701,19 +5744,522 @@ def _evaluate_calculatedlist_interims(self, only=None):
         return _xagg_ofsum("XAGG_COUNT_OFSUM", value_kw, group_kw, key_kw,
                             whitelist_kw, source_kws, len, True)
 
+    # ---- cross-AS aggregation: 双字段组合键 / 按值筛行 / 取第 n 份 ------
+    #
+    # 「有关物质」V16 的中间精密度统计表 (AS-25) needs three things the
+    # single-key family above cannot express (裁决 §7 ②③④):
+    #
+    #   ④ the row key is 「物质名称 + 杂质分组」, because two unnamed
+    #     impurities can carry the same name and are only told apart by
+    #     their group.  Every op needs the pair, not just the row-space
+    #     builder: rows keyed on a pair but MATCHED on one field merge two
+    #     different impurities into one number, and the number looks fine.
+    #   ③ the row space is 指定杂质 (all of them) plus the non-specified
+    #     impurities whose report value reaches 0.05% on ANY injection.
+    #   ② each of those rows then shows the six individual report values
+    #     per operator, ordered by sample id -- an aggregate cannot say
+    #     what the third injection read.
+    #
+    # Mixed keys are the norm here, not an edge case: 指定杂质 come from
+    # 「杂质对照品称量」(imp_std_weigh), a table that HAS no 杂质分组 column
+    # at all, so those rows carry an EMPTY second segment (裁决 §5-D1).
+    # Empty is a key value like any other: it matches other empties and
+    # nothing else.  It must never behave as a wildcard, or every specified
+    # impurity would quietly match every group.
+
+    def _xagg_as_column(value):
+        """`value` as a list, whatever _collect_cross_referenceable_data gave."""
+        if isinstance(value, list):
+            return list(value)
+        return [value]
+
+    def _xagg_collect_columns(fn_label, source_kws, required_kws,
+                              optional_kws=()):
+        """Several fields at once, collected SIDE BY SIDE and row-aligned.
+
+        Returns {keyword: [value, ...]} -- every column the same length,
+        sources concatenated in argument order -- or _XAGG_FAIL.
+
+        _xagg_collect above collects ONE field at a time and its callers zip
+        the results, which is right only while every field is present on
+        every source.  A field that exists on one source and not on another
+        (杂质分组 on the chromatography AS but not on 杂质对照品称量) makes
+        those flat lists different lengths, and zipping them then pairs a
+        value with ANOTHER source's key -- a plausible wrong number.  So
+        this pads per source instead:
+
+        - a `required_kws` field missing from a source that EXISTS is the
+          configuration mistake _xagg_collect already fails on (the field
+          was never flagged cross_referenceable) -- fail, warn, name it;
+        - an `optional_kws` field missing from a source that exists is
+          expected: that source's rows get u"" in that column, plus one
+          WARN line.  Empty is a real key segment, not a wildcard;
+        - two columns of DIFFERENT length within one source cannot be
+          paired by position at all -- fail and warn, the way _xagg_op
+          refuses a mismatched zip.
+
+        One deliberate difference from _xagg_collect: when NO source exists
+        in this sample yet, this returns EMPTY columns rather than
+        _XAGG_FAIL.  The dual-key callers build a row space out of several
+        source groups, and "that operator has not run yet" must leave the
+        other group's rows on the table instead of blanking all of it.  A
+        row with no data behind it still ends up '---', so nothing is
+        invented -- see _xagg_keys_where2.
+        """
+        sources = _xagg_resolve_sources(fn_label, source_kws)
+        wanted = []
+        for kw in list(required_kws) + list(optional_kws):
+            if kw and kw not in wanted:
+                wanted.append(kw)
+        optional = [kw for kw in optional_kws if kw and kw not in required_kws]
+        out = {}
+        for kw in wanted:
+            out[kw] = []
+        not_flagged = []
+        defaulted = []
+        for src_kw in sources:
+            if src_kw not in _xagg_existing_services:
+                continue
+            src_data = sibling_data.get(src_kw) or {}
+            cols = {}
+            incomplete = False
+            for kw in required_kws:
+                if kw not in src_data:
+                    if (src_kw, kw) not in not_flagged:
+                        not_flagged.append((src_kw, kw))
+                    incomplete = True
+                    continue
+                cols[kw] = _xagg_as_column(src_data[kw])
+            if incomplete:
+                continue
+            lengths = set(len(c) for c in cols.values())
+            if len(lengths) > 1:
+                _xagg_warn(
+                    u"maitux.calcenhance: %s on %s: fields %s on %s hold "
+                    u"different row counts (%s) -- the columns are not "
+                    u"aligned, refusing to guess which row belongs to "
+                    u"which."
+                    % (fn_label, _safe_text(getattr(self, "id", "?")),
+                       u", ".join(_safe_text(k) for k in sorted(cols)),
+                       _safe_text(src_kw),
+                       u", ".join(unicode(n) for n in sorted(lengths))))
+                return _XAGG_FAIL
+            count = lengths.pop() if lengths else 0
+            for kw in optional:
+                if kw in src_data:
+                    col = _xagg_as_column(src_data[kw])
+                    if len(col) != count:
+                        _xagg_warn(
+                            u"maitux.calcenhance: %s on %s: field '%s' on "
+                            u"%s holds %d row(s) against %d in the key "
+                            u"column -- not aligned, refusing to pair them."
+                            % (fn_label,
+                               _safe_text(getattr(self, "id", "?")),
+                               _safe_text(kw), _safe_text(src_kw),
+                               len(col), count))
+                        return _XAGG_FAIL
+                    cols[kw] = col
+                else:
+                    if (src_kw, kw) not in defaulted:
+                        defaulted.append((src_kw, kw))
+                    cols[kw] = [u""] * count
+            for kw in wanted:
+                out[kw].extend(cols[kw])
+        if not_flagged:
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: %s -- fix the interim field "
+                u"config, this is not a missing-data problem."
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   u"; ".join(u"field '%s' is not flagged "
+                              u"cross_referenceable on %s"
+                              % (_safe_text(kw), _safe_text(src))
+                              for src, kw in not_flagged)))
+            return _XAGG_FAIL
+        if defaulted:
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: %s -- those rows get an "
+                u"EMPTY second key segment, which matches only other empty "
+                u"ones.  Intended for 指定杂质 (裁决 §5-D1); if the column "
+                u"does exist there, it is the cross_referenceable flag "
+                u"that is missing."
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   u"; ".join(u"field '%s' does not exist on %s"
+                              % (_safe_text(kw), _safe_text(src))
+                              for src, kw in defaulted)))
+        return out
+
+    def _xagg_dual_collect(fn_label, source_kws, value_kws, key1_kw, key2_kw):
+        """_xagg_collect_columns plus the "键字段2 may be absent" rule.
+
+        Returns (columns, key2_column) or _XAGG_FAIL.  An EMPTY 键字段2
+        argument means "this table has no second segment at all": every row
+        gets u"", which is exactly what a single-key call would do, so the
+        dual-key functions cover the single-key case without a second
+        family of names.
+        """
+        required = [key1_kw]
+        for kw in value_kws:
+            if kw and kw not in required:
+                required.append(kw)
+        optional = (key2_kw,) if key2_kw else ()
+        cols = _xagg_collect_columns(fn_label, source_kws, required, optional)
+        if cols is _XAGG_FAIL:
+            return _XAGG_FAIL
+        count = len(cols[key1_kw])
+        if key2_kw and key2_kw in cols:
+            key2_col = cols[key2_kw]
+        else:
+            key2_col = [u""] * count
+        return cols, key2_col
+
+    def _xagg_pairs(key1_col, key2_col):
+        """The normalised (key1, key2) pair of every row."""
+        return [(_norm_key(a), _norm_key(b))
+                for a, b in zip(key1_col, key2_col)]
+
+    def _xagg_row_pairs(row_keys1, row_keys2):
+        """THIS analysis's own row space as normalised (key1, key2) pairs.
+
+        Either side may arrive as a single value -- a scalar interim, or a
+        literal written into the formula -- and is then broadcast to the
+        other's length.  A genuinely shorter column is padded with u""
+        rather than truncated: a row that exists on the report has to come
+        back with SOMETHING, and an empty key matches nothing, so it reads
+        '---' instead of borrowing the next row's number.
+        """
+        a = list(row_keys1) if isinstance(row_keys1, (list, tuple)) \
+            else [row_keys1]
+        b = list(row_keys2) if isinstance(row_keys2, (list, tuple)) \
+            else [row_keys2]
+        count = max(len(a), len(b))
+        if len(a) == 1:
+            a = a * count
+        if len(b) == 1:
+            b = b * count
+        a = a + [u""] * (count - len(a))
+        b = b + [u""] * (count - len(b))
+        return _xagg_pairs(a, b)
+
+    def _xagg_part(fn_label, part):
+        """Validate the 取第几段 argument; None when it is not 1 or 2."""
+        given = part
+        if isinstance(part, (list, tuple)):
+            part = part[0] if part else None
+            given = part
+        try:
+            part = int(part)
+        except (TypeError, ValueError):
+            part = None
+        if part not in (1, 2):
+            # `given`, not `part`: by now part is None, and a WARN line that
+            # says "got None" tells the reader nothing about what they wrote.
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: 取第几段 must be 1 or 2, got "
+                u"%s -- returning '---'."
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   _safe_text(given)))
+            return None
+        return part
+
+    def _xagg_keys2(key1_kw, key2_kw, part, *source_kws):
+        """Distinct 「键1 + 键2」 combinations across the source AS.
+
+            XAGG_KEYS2(键字段1, 键字段2, 取第几段, 源AS1 [, 源AS2 ...])
+
+        取第几段 is 1 or 2 and says WHICH half to return, because one
+        interim field holds one column.  Call it twice, once per segment:
+        the combinations are deduplicated once, in first-seen order, and
+        both calls walk that same list, so the two columns line up row for
+        row by construction.
+
+            imp_ip_name  = XAGG_KEYS2("imp_name", "imp_pct_group", 1,
+                                      "imp_std_weigh")
+            imp_ip_group = XAGG_KEYS2("imp_name", "imp_pct_group", 2,
+                                      "imp_std_weigh")
+
+        键字段2 may be "" (or simply not exist on a given source): those
+        rows carry an empty second segment, which matches only other empty
+        ones -- see _xagg_collect_columns.
+
+        Like XAGG_KEYS this takes only literal arguments, so it lands on the
+        engine's "no array deps" path and its RESULT is the whole column.
+        """
+        part = _xagg_part("XAGG_KEYS2", part)
+        if part is None:
+            return [_PLACEHOLDER]
+        collected = _xagg_dual_collect("XAGG_KEYS2", list(source_kws), (),
+                                       key1_kw, key2_kw)
+        if collected is _XAGG_FAIL:
+            return [_PLACEHOLDER]
+        cols, key2_col = collected
+        seen = []
+        for pair in _xagg_pairs(cols[key1_kw], key2_col):
+            if pair not in seen:
+                seen.append(pair)
+        if not seen:
+            return [_PLACEHOLDER]
+        return [pair[part - 1] for pair in seen]
+
+    def _xagg_keys_where2(key1_kw, key2_kw, part, all_sources,
+                          filter_kw, threshold, filtered_sources):
+        """Row space from TWO groups of source AS, one of them filtered by value.
+
+            XAGG_KEYS_WHERE2(键字段1, 键字段2, 取第几段,
+                             全取的源AS列表, 筛选字段, 阈值,
+                             按值筛的源AS列表)
+
+            imp_ip_name = XAGG_KEYS_WHERE2(
+                "imp_name", "imp_pct_group", 1,
+                ["imp_std_weigh"],
+                "imp_report", 0.05, ["imp_chrom", "imp_ip_spiked"])
+
+        TWO source lists rather than one list plus a flag, because the two
+        groups are asked DIFFERENT questions and the answer must not depend
+        on whether a column happens to exist: 指定杂质 are on the table
+        because a reference standard was weighed for them, full stop;
+        everything else is on it only if it was actually seen at or above
+        the threshold.  Reading "no 筛选字段 column here" as "then take all
+        of this source's rows" would turn one forgotten
+        cross_referenceable flag into a complete-looking table with every
+        impurity on it (R9).
+
+        A row qualifies when ANY SINGLE row of the filtered sources reaches
+        阈值 -- not the mean, not the sum (裁决 Q6b: 12 针里任一针的报告值
+        ≥0.05% 就统).  A non-numeric report value ('＜0.05%', 'ND') is
+        below the limit by construction, so it never qualifies a row: it is
+        skipped, neither counted as 0 nor treated as an error.
+
+        阈值 is an argument, not a constant -- 0.05 is this method's
+        number, not the engine's.
+
+        Output order: the unfiltered group first, in argument order, then
+        the qualifying rows of the filtered group in first-seen order, so
+        指定杂质 head the table.  Both groups feed ONE deduplication, so an
+        impurity that is both specified and above the threshold gets one
+        row, not two.  Both lists may be written as a bare string when
+        there is only one source.
+        """
+        part = _xagg_part("XAGG_KEYS_WHERE2", part)
+        if part is None:
+            return [_PLACEHOLDER]
+        limit = _num_or_none(threshold)
+        if limit is None:
+            _xagg_warn(
+                u"maitux.calcenhance: XAGG_KEYS_WHERE2 on %s: 阈值 '%s' is "
+                u"not a number -- returning '---' rather than guessing a "
+                u"cut-off."
+                % (_safe_text(getattr(self, "id", "?")),
+                   _safe_text(threshold)))
+            return [_PLACEHOLDER]
+
+        def _as_sources(value):
+            if isinstance(value, (list, tuple)):
+                return [s for s in value if s]
+            return [value] if value else []
+
+        seen = []
+        always = _as_sources(all_sources)
+        if always:
+            collected = _xagg_dual_collect("XAGG_KEYS_WHERE2", always, (),
+                                           key1_kw, key2_kw)
+            if collected is _XAGG_FAIL:
+                return [_PLACEHOLDER]
+            cols, key2_col = collected
+            for pair in _xagg_pairs(cols[key1_kw], key2_col):
+                if pair not in seen:
+                    seen.append(pair)
+
+        filtered = _as_sources(filtered_sources)
+        if filtered:
+            collected = _xagg_dual_collect(
+                "XAGG_KEYS_WHERE2", filtered, (filter_kw,), key1_kw, key2_kw)
+            if collected is _XAGG_FAIL:
+                return [_PLACEHOLDER]
+            cols, key2_col = collected
+            values = cols.get(filter_kw, [])
+            for pair, value in zip(_xagg_pairs(cols[key1_kw], key2_col),
+                                   values):
+                number = _num_or_none(value)
+                if number is None or number < limit:
+                    continue
+                if pair not in seen:
+                    seen.append(pair)
+
+        if not seen:
+            return [_PLACEHOLDER]
+        return [pair[part - 1] for pair in seen]
+
+    def _xagg_op2(fn_label, value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                  source_kws, agg, empty):
+        """Shared body for XAGG_AVG2 / _RSD2 / _MAX2 / _MIN2 / _COUNT2.
+
+            XAGG_<OP>2(值字段, 键字段1, 键字段2,
+                       本行键值1, 本行键值2, 源AS1 [, 源AS2 ...])
+
+        Exactly _xagg_op's two-step shape -- aggregate the concatenated
+        source rows with _group_apply, THEN look the result up by this
+        row's own key -- with a PAIR as the key on both sides.  Reusing
+        _group_apply keeps the missing-value contract identical to
+        GROUP_*list's rather than inventing a second one that could drift:
+        non-numeric cells are skipped and the aggregate is computed from
+        the survivors.
+
+        The two failures _xagg_op keeps apart stay apart here: a row whose
+        PAIR never appears among the source rows gets '---' for every op
+        including COUNT, while a pair that does appear with nothing numeric
+        behind it gets whatever _group_apply's `empty` says (COUNT -> 0,
+        the rest -> '---').
+        """
+        rows = _xagg_row_pairs(row_keys1, row_keys2)
+        collected = _xagg_dual_collect(fn_label, list(source_kws),
+                                       (value_kw,), key1_kw, key2_kw)
+        if collected is _XAGG_FAIL:
+            return [_PLACEHOLDER] * len(rows)
+        cols, key2_col = collected
+        src_values = cols.get(value_kw, [])
+        src_pairs = _xagg_pairs(cols[key1_kw], key2_col)
+        grouped = _group_apply(src_values,
+                               ([p[0] for p in src_pairs],
+                                [p[1] for p in src_pairs]),
+                               agg, empty=empty)
+        by_key = {}
+        for pair, value in zip(src_pairs, grouped):
+            by_key[pair] = value
+        return [by_key.get(pair, _PLACEHOLDER) for pair in rows]
+
+    def _xagg_avg2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                   *source_kws):
+        return _xagg_op2("XAGG_AVG2", value_kw, key1_kw, key2_kw, row_keys1,
+                          row_keys2, source_kws,
+                          lambda ns: sum(ns) / len(ns), _PLACEHOLDER)
+
+    def _xagg_rsd2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                   *source_kws):
+        return _xagg_op2("XAGG_RSD2", value_kw, key1_kw, key2_kw, row_keys1,
+                          row_keys2, source_kws, _agg_rsd, _PLACEHOLDER)
+
+    def _xagg_max2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                   *source_kws):
+        return _xagg_op2("XAGG_MAX2", value_kw, key1_kw, key2_kw, row_keys1,
+                          row_keys2, source_kws, max, _PLACEHOLDER)
+
+    def _xagg_min2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                   *source_kws):
+        return _xagg_op2("XAGG_MIN2", value_kw, key1_kw, key2_kw, row_keys1,
+                          row_keys2, source_kws, min, _PLACEHOLDER)
+
+    def _xagg_count2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                     *source_kws):
+        # empty=0 for the same reason as XAGG_COUNT: a pair that DOES appear
+        # among the source rows but with nothing numeric behind it has a
+        # definite count -- zero.  Only a pair absent altogether falls
+        # through to _xagg_op2's own '---'.
+        return _xagg_op2("XAGG_COUNT2", value_kw, key1_kw, key2_kw, row_keys1,
+                          row_keys2, source_kws, len, 0)
+
+    def _xagg_sort_key(value):
+        """Ascending order over a column that may hold numbers or text.
+
+        Numbers first, in numeric order, then text in unicode order.  Sample
+        ids are usually numeric-ish strings ("1", "2", "10"), and sorting
+        those as text puts 10 between 1 and 2; Python 2 would compare a
+        float against a unicode string without complaining at all, in an
+        order nobody can predict, so the type tag is explicit.
+        """
+        number = _num_or_none(value)
+        if number is not None:
+            return (0, number, u"")
+        return (1, 0.0, _norm_key(value))
+
+    def _xagg_nth2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                   sort_kw, nth, *source_kws):
+        """The n-th value of each row's own key group, ordered by 排序字段.
+
+            XAGG_NTH2(值字段, 键字段1, 键字段2, 本行键值1, 本行键值2,
+                      排序字段, 第几份, 源AS1 [, 源AS2 ...])
+
+            imp_ip_p1_v3 = XAGG_NTH2("imp_report", "imp_name",
+                                     "imp_pct_group", [imp_ip_name],
+                                     [imp_ip_group], "g_sample_id", 3,
+                                     "imp_chrom")
+
+        The first five arguments are XAGG_AVG2's, so the twelve individual
+        columns and the statistics beside them read the same rows.  第几份
+        is 1-based, and the order is 排序字段 ascending -- 样品编号 for
+        AS-25, because the two operators' 份号 do not correspond to each
+        other and each side is simply sorted on its own (裁决 T1).  Rows
+        that tie on 排序字段 keep the order they were collected in.
+
+        Values come back AS STORED, which makes this a MIXED column:
+        _collect_cross_referenceable_data turns a floatable cell into a
+        float and leaves everything else alone, so a group reads
+        [0.11, '＜0.05%', 'ND'].  That is deliberate -- '＜0.05%' and 'ND'
+        are results, not failures, and coercing them to numbers would erase
+        the distinction the report is making.  Mixed columns are legal here
+        (the engine's own array branch says so); what does NOT work is
+        computing on one, so put ROUND / FORMAT on the source AS rather
+        than on top of this.
+
+        A group with fewer than n rows yields '---' for that row alone.
+        Not 0, and above all not the (n-1)-th value shifted up: a blank
+        cell says "this operator has five injections", a shifted one says
+        the sixth read the same as the fifth.
+
+        Several sources in one call are merged and then sorted together,
+        which is only meaningful when 排序字段 is comparable across them;
+        AS-25 passes ONE source per column for that reason.
+        """
+        rows = _xagg_row_pairs(row_keys1, row_keys2)
+        if isinstance(nth, (list, tuple)):
+            nth = nth[0] if nth else None
+        try:
+            index = int(nth)
+        except (TypeError, ValueError):
+            index = 0
+        if index < 1:
+            _xagg_warn(
+                u"maitux.calcenhance: XAGG_NTH2 on %s: 第几份 must be 1 or "
+                u"more, got %s -- returning '---'."
+                % (_safe_text(getattr(self, "id", "?")), _safe_text(nth)))
+            return [_PLACEHOLDER] * len(rows)
+        collected = _xagg_dual_collect("XAGG_NTH2", list(source_kws),
+                                       (value_kw, sort_kw), key1_kw, key2_kw)
+        if collected is _XAGG_FAIL:
+            return [_PLACEHOLDER] * len(rows)
+        cols, key2_col = collected
+        src_values = cols.get(value_kw, [])
+        src_sort = cols.get(sort_kw, [])
+        groups = {}
+        for position, pair in enumerate(_xagg_pairs(cols[key1_kw], key2_col)):
+            groups.setdefault(pair, []).append(position)
+        out = []
+        for pair in rows:
+            members = groups.get(pair)
+            if not members:
+                out.append(_PLACEHOLDER)
+                continue
+            members = sorted(
+                members,
+                key=lambda position: (_xagg_sort_key(src_sort[position]),
+                                      position))
+            if len(members) < index:
+                out.append(_PLACEHOLDER)
+                continue
+            value = src_values[members[index - 1]]
+            out.append(_PLACEHOLDER if value is None or value == u""
+                       else value)
+        return out
+
     # ---- rounding / formatting helpers -------------------------------
     #
     # Hoisted to module level (see _dec_quantize / _round_* / _format_digits
     # near _num_or_none) so the scalar engine's safe_globals can reference
     # them too, not just this array engine's _SAFE.
 
-    # Markers that genuinely contribute zero to a total: a result below the
-    # limit of quantification is known to be near zero.  Anything else
-    # non-numeric is an UNKNOWN contribution, not a zero one, and must not
-    # be silently summed as 0.
-    _ZERO_MARKERS = frozenset([
-        u"", u"N.D.", u"ND", u"N.D", u"<LOQ", u"< LOQ", u"<LOD", u"< LOD",
-    ])
+    # _ZERO_MARKERS / _is_zero_marker are module level (see their own
+    # comments there): a nested predicate is unreachable from the test
+    # harness, and this one decides whether 总杂 adds a row or blanks the
+    # whole column.
 
     def _result_num(value, name=None, main_name=None):
         """The numeric contribution of ONE row.  Scalar, per-element.
@@ -5740,7 +6286,7 @@ def _evaluate_calculatedlist_interims(self, only=None):
         n = _num_or_none(value)
         if n is not None:
             return n
-        if _norm_key(value).strip().upper() in _ZERO_MARKERS:
+        if _is_zero_marker(value):
             return 0
         return _PLACEHOLDER
 
@@ -5989,9 +6535,39 @@ def _evaluate_calculatedlist_interims(self, only=None):
                 results.append(chosen)
         return results
 
+    def _fmt_limit(value):
+        """The report limit as it reads inside the '＜0.05%' label.
+
+        %g rather than str(): 0.05 prints as 0.05, and a limit that arrives
+        as 0.050000000000000003 does not put its own float error on the
+        report.  Trailing zeros go for the same reason -- '＜0.050%' would
+        claim a precision the limit does not carry.
+        """
+        try:
+            return u"%g" % float(value)
+        except (TypeError, ValueError):
+            return _safe_text(value)
+
     def _result_status(values, loq=None, lod=None):
-        """Element-wise LOQ/LOD status: >=LOQ→numeric, >=LOD→'<LOQ', <LOD→'N.D.'
+        """Element-wise LOQ/LOD status: >=LOQ→numeric, >=LOD→'＜<loq>%', <LOD→'ND'
         When loq/lod omitted (or None), auto-read from AS Limits tab.
+
+        The two labels are the analysts' own report wording (裁决 G2,
+        2026-09-21), not a format this engine is free to choose:
+
+            ≥ 报告限              the number, untouched
+            积分限 ≤ x < 报告限   '＜0.05%' -- FULL-WIDTH ＜, and the
+                                 number is the AS's own report limit, so
+                                 it follows `loq` instead of being frozen
+                                 into the text
+            < 积分限              'ND'
+
+        The percent sign is part of the label because this column reports a
+        percentage; an AS whose unit is not % should not use these labels.
+
+        Anything that reaches RESULT_NUM downstream has to keep folding to
+        zero, which is why _is_zero_marker matches on the '＜' prefix rather
+        than on a list of literals -- see its docstring.
         """
         # Auto-read from AS Limits if not explicitly provided
         if loq is None:
@@ -6033,9 +6609,9 @@ def _evaluate_calculatedlist_interims(self, only=None):
                 # is ROUND / ROUND_EVEN's job and display is FORMAT's.
                 results.append(fv)
             elif fv >= lod:
-                results.append(u"<LOQ")
+                results.append(u"\uff1c%s%%" % _fmt_limit(loq))
             else:
-                results.append(u"N.D.")
+                results.append(u"ND")
         return results
 
     def _index_by(target_arr, key_arr, match_val):
@@ -6086,6 +6662,100 @@ def _evaluate_calculatedlist_interims(self, only=None):
         except IndexError:
             # key array longer than the target array
             return _PLACEHOLDER
+
+    def _index_by_group(target_arr, key_arr, match_val, group_arr):
+        """INDEX_BY, but the lookup stays inside each row's OWN group.
+
+            INDEX_BY_GROUP(取值列, 键列, 要匹配的键, 分组列)
+
+            imp_main_rt = INDEX_BY_GROUP([g_rt], [imp_name],
+                                         [imp_main_name_ref], [g_sample_id])
+
+        For every row: among the rows sharing that row's 分组列 value, find
+        the one whose 键列 equals 要匹配的键 and return ITS 取值列.  One
+        value per row, so the main peak's retention time follows the
+        injection instead of being one number for the whole table -- which
+        is what an RRT computed per injection needs (裁决 G6).
+
+        An ARRAY-path function: it returns a whole column, and a per-element
+        view cannot see the other rows of its own group.  It must therefore
+        be the WHOLE formula of its own field.  Inlining it into an
+        expression -- `[g_rt] / INDEX_BY_GROUP(...)` -- puts the expression
+        on the array path, where that is a list divided by a list: TypeError,
+        and the entire column reads '---' with one line in the log.  Same
+        trap as BASELINE_BYlist; split it across two fields.
+
+        要匹配的键 may be a column (each row looks up its own value) or one
+        value broadcast to every row -- a scalar interim arrives already
+        padded to the row count, so both shapes get here as a list and
+        behave the same.
+
+        No match inside a row's group -> '---' for that row.  Deliberately
+        NOT a fall back to the whole table and NOT the group's first row:
+        both return a number that looks perfectly reasonable and belongs to
+        a different injection.  More than one match -> the first, with one
+        WARN line naming the group, the way LOOKUP reports its own
+        ambiguity.
+        """
+        import sys as _ibg_sys
+
+        def _col(arr, count):
+            """`arr` as a column of exactly `count` cells."""
+            if not isinstance(arr, (list, tuple)):
+                return [arr] * count
+            arr = list(arr)
+            if len(arr) == 1:
+                return arr * count
+            if len(arr) < count:
+                return arr + [None] * (count - len(arr))
+            return arr[:count]
+
+        lengths = [len(a) for a in (target_arr, key_arr, group_arr)
+                   if isinstance(a, (list, tuple))]
+        if not lengths:
+            _ibg_sys.stderr.write(
+                "maitux:   INDEX_BY_GROUP: needs list fields -- write it as "
+                "INDEX_BY_GROUP([values], [keys], key, [group])\n")
+            return _PLACEHOLDER
+        count = max(lengths)
+        targets = _col(target_arr, count)
+        keys = _col(key_arr, count)
+        wants = _col(match_val, count)
+        groups = [_norm_key(g) for g in _col(group_arr, count)]
+
+        members = {}
+        for index in range(count):
+            members.setdefault(groups[index], []).append(index)
+
+        out = []
+        missing = []
+        ambiguous = []
+        for index in range(count):
+            want = _norm_key(wants[index])
+            hits = [j for j in members[groups[index]]
+                    if _norm_key(keys[j]) == want]
+            if not hits:
+                if (groups[index], want) not in missing:
+                    missing.append((groups[index], want))
+                out.append(_PLACEHOLDER)
+                continue
+            if len(hits) > 1 and (groups[index], want) not in ambiguous:
+                ambiguous.append((groups[index], want))
+            value = targets[hits[0]]
+            out.append(_PLACEHOLDER if value is None else value)
+        for group, want in missing:
+            _xagg_warn(
+                u"maitux.calcenhance: INDEX_BY_GROUP on %s: no row with "
+                u"key '%s' inside group '%s' -- that group's rows read "
+                u"'---'."
+                % (_safe_text(getattr(self, "id", "?")), want, group))
+        for group, want in ambiguous:
+            _xagg_warn(
+                u"maitux.calcenhance: INDEX_BY_GROUP on %s: key '%s' "
+                u"matches more than one row inside group '%s' -- using the "
+                u"first."
+                % (_safe_text(getattr(self, "id", "?")), want, group))
+        return out
 
     def _slope(y, x):
         """Linear regression slope by least squares."""
@@ -6422,6 +7092,20 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "XAGG_MAX_OFSUM": _xagg_max_ofsum,
         "XAGG_MIN_OFSUM": _xagg_min_ofsum,
         "XAGG_COUNT_OFSUM": _xagg_count_ofsum,
+        # Cross-AS aggregation, dual-key branch: the row key is a PAIR
+        # (物质名称 + 杂质分组), the row space can be filtered by value,
+        # and XAGG_NTH2 reads one individual injection instead of an
+        # aggregate -- see the "双字段组合键" block above _xagg_keys2 for
+        # why single-key matching silently merges two impurities.
+        # They ride S1's XAGG_\w+ entry in _ARRAY_FN_RE, so no regex change.
+        "XAGG_KEYS2": _xagg_keys2,
+        "XAGG_KEYS_WHERE2": _xagg_keys_where2,
+        "XAGG_NTH2": _xagg_nth2,
+        "XAGG_AVG2": _xagg_avg2,
+        "XAGG_RSD2": _xagg_rsd2,
+        "XAGG_MAX2": _xagg_max2,
+        "XAGG_MIN2": _xagg_min2,
+        "XAGG_COUNT2": _xagg_count2,
         "RESULT_STATUS": _result_status,
         "COALESCE": _coalesce,
         "SHIFT": _shift,
@@ -6433,6 +7117,10 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "ROUND_DOWN": _round_down,
         "FORMAT": _format_digits,
         "INDEX_BY": _index_by,
+        # Named in _ARRAY_FN_RE explicitly: it returns a whole column, and
+        # the name does not end in _ROWS, so nothing else would route it to
+        # the array path.
+        "INDEX_BY_GROUP": _index_by_group,
         "SLOPE": _slope,
         "INTERCEPT": _intercept,
         "RSQ": _rsq,
@@ -6485,8 +7173,11 @@ def _evaluate_calculatedlist_interims(self, only=None):
     # rewrite the scalar engine does (_INDEX_BY_RE).  Without it INDEX_BY
     # reached the per-element path and saw a single scalar per row, which can
     # never match, so the column came out entirely '---'.
+    # (?!_) so INDEX_BY_GROUP is not taken for an INDEX_BY call with a
+    # strange argument list: it has four arguments and stays on the array
+    # path, where the generic [kw] substitution already inlines its columns.
     _CL_INDEX_BY_RE = re.compile(
-        r'INDEX_BY\s*\(\s*\[([A-Za-z_]\w*)\]\s*,\s*\[([A-Za-z_]\w*)\]\s*,\s*([^)]+)\)')
+        r'INDEX_BY(?!_)\s*\(\s*\[([A-Za-z_]\w*)\]\s*,\s*\[([A-Za-z_]\w*)\]\s*,\s*([^)]+)\)')
 
     def _cl_replace_index_by(match):
         """Rewrite one INDEX_BY call with its array arguments inlined."""
@@ -6643,7 +7334,7 @@ def _evaluate_calculatedlist_interims(self, only=None):
         # degrade to the per-element path.
         _ARRAY_FN_RE = re.compile(
             r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS|COALESCE|SHIFT'
-            r'|BASELINE_BYlist|XAGG_\w+|APPEND)\s*\(')
+            r'|BASELINE_BYlist|XAGG_\w+|APPEND|INDEX_BY_GROUP)\s*\(')
         if _ARRAY_FN_RE.search(formula):
             expr = formula
             if isinstance(expr, str):

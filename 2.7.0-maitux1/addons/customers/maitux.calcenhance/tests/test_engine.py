@@ -296,7 +296,11 @@ def test_count_values_rows(p, r):
 #              -> 31 and leaving _SAFE at 79.  Recorded late: the count had
 #              been red ever since, which is how a shared counter fails --
 #              everybody reads it, nobody owns it.
-EXPECTED_SAFE_ENTRIES = 79
+#              -> 88 (V16 引擎能力: XAGG_KEYS2 / XAGG_KEYS_WHERE2 /
+#                     XAGG_NTH2 / XAGG_AVG2 / _RSD2 / _MAX2 / _MIN2 /
+#                     _COUNT2 / INDEX_BY_GROUP -- array table only, the
+#                     dual-key branch; 裁决 §7 ②③④⑤)
+EXPECTED_SAFE_ENTRIES = 88
 EXPECTED_SCALAR_ENTRIES = 31
 
 
@@ -1350,8 +1354,11 @@ def test_xagg_row_space_registration(p, r):
     src = open(p.__source_path__, "rb").read().decode("utf-8")
     r.check("XAGG_\\w+ named in the dispatch regex in source",
             u"|XAGG_\\w+" in src, True)
+    # Named in the alternation -- NOT necessarily last in it.  Asserting
+    # "|APPEND)" made this test fail the day another name was appended
+    # after it (INDEX_BY_GROUP, V16), which says nothing about APPEND.
     r.check("APPEND named in the dispatch regex in source",
-            u"|APPEND)" in src, True)
+            u"|APPEND" in src, True)
 
     array_fn_re = re.compile(
         r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS'
