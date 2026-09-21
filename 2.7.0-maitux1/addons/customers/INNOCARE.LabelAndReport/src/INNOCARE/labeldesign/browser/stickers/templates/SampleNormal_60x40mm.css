@@ -1,4 +1,5 @@
-/* 强制锁定容器并实现预览居中 */
+/* 60x40mm 样品标签（横版）。
+   内容随 .label 的根字号自适应：下面所有尺寸都用 em，改根字号即可整体缩放。 */
 .stickers {
   display: flex !important;
   flex-direction: column !important;
@@ -10,8 +11,8 @@
 
 .sticker {
   display: inline-block !important;
-  width: 40mm !important;
-  height: 30mm !important;
+  width: 60mm !important;
+  height: 40mm !important;
   margin: 2mm !important;
   padding: 0 !important;
   vertical-align: top !important;
@@ -20,16 +21,21 @@
 }
 
 .sticker .label {
-  width: 40mm !important;
-  height: 30mm !important;
+  /* 根字号（约 7.4pt）：全标签唯一缩放旋钮，其余尺寸均为 em */
+  font-size: 2.6mm !important;
+  line-height: 1.05 !important;
+  width: 60mm !important;
+  height: 40mm !important;
   border: 0.5pt solid #222 !important;
   border-radius: 1.5mm !important;
-  padding: 0.65mm 0.85mm !important;
+  padding: 0.33em 0.42em !important;
   display: block !important;
   box-sizing: border-box !important;
   background: #fff !important;
   overflow: hidden !important;
-  font-family: "SimHei", "Microsoft YaHei UI", "Microsoft JhengHei", "Microsoft YaHei", "PMingLiU", Arial, sans-serif !important;
+  /* 服务端渲染（容器内）用真实存在的简体 Noto，避免落到日文 JP 回退；
+     客户端预览仍会回落到 Windows 的 SimHei / 微软雅黑 */
+  font-family: "Noto Sans CJK SC", "Source Han Sans SC", "Noto Sans SC", "SimHei", "Microsoft YaHei UI", "Microsoft JhengHei", "Microsoft YaHei", "PMingLiU", Arial, sans-serif !important;
   color: #000 !important;
   text-rendering: geometricPrecision !important;
 }
@@ -37,32 +43,31 @@
 .sticker .label-top {
   display: table !important;
   margin: 0 auto !important;
-  min-height: 8.45mm !important;
+  min-height: 4.5em !important;
 }
 
 .sticker .label-content {
   width: 100% !important;
-  margin-top: 0.08mm !important;
+  margin-top: 0 !important;
 }
 
 .sticker .label-header {
   display: table-cell !important;
   vertical-align: middle !important;
-  padding-left: 0.5mm !important;
-  min-height: 7.8mm !important;
+  padding-left: 0.45em !important;
   text-align: center !important;
 }
 
 .sticker .label-separator {
   width: 100% !important;
   border-bottom: 1pt solid #000 !important;
-  margin-top: 0.15mm !important;
-  margin-bottom: 0.2mm !important;
+  margin-top: 0.1em !important;
+  margin-bottom: 0.15em !important;
 }
 
 .sticker .label-title {
   display: inline-block !important;
-  font-size: 7.7pt !important;
+  font-size: 1.45em !important;
   font-weight: 900 !important;
   color: #000 !important;
   background: transparent !important;
@@ -80,35 +85,38 @@
 }
 
 .sticker .label-table td {
-  font-size: 6.25pt !important;
-  padding: 0.12mm 0 !important;
-  vertical-align: top !important;
-  line-height: 1.02 !important;
+  /* 行高由内容与内边距自适应，避免固定行高在 PDF 中溢出 */
+  padding: 0.2em 0 !important;
+  vertical-align: middle !important;
+  line-height: 1.05 !important;
 }
 
 .sticker .lbl-label {
   color: #000 !important;
-  width: 10.1mm !important;
+  width: 5.6em !important;
+  font-size: 1.18em !important;
   font-weight: 900 !important;
   white-space: nowrap !important;
   letter-spacing: 0 !important;
 }
 
 .sticker .lbl-value {
-  font-weight: 900 !important;
+  /* 字段值字号最大，热敏打印下再叠加 Bold 会笔画粘连，这里降到 Regular；
+     需要强调时靠字号/行距，而不是靠加粗 */
+  font-weight: 500 !important;
   color: #000 !important;
   word-break: break-word !important;
-  font-size: 6.95pt !important;
+  font-size: 1.32em !important;
   letter-spacing: 0.02mm !important;
 }
 
 .sticker .qrcode {
   display: table-cell !important;
   vertical-align: middle !important;
-  width: 8.55mm !important;
-  height: 8.55mm !important;
+  width: 4.4em !important;
+  height: 4.4em !important;
   overflow: hidden !important;
-  border: 0.35pt solid #000 !important;
+  border: 0.3pt solid #000 !important;
   padding: 0 !important;
   background: #fff !important;
 }
@@ -120,17 +128,17 @@
   display: block !important;
 }
 
-/* 打印适配：锁定纸张尺寸为 40x30mm，避免浏览器/PDF 默认 A4 导致缩放 */
+/* 打印适配：锁定纸张尺寸为 60x40mm，避免浏览器/PDF 默认 A4 导致缩放 */
 @page {
-  size: 40mm 30mm;
+  size: 60mm 40mm;
   margin: 0;
 }
 
 @media print {
   html,
   body {
-    width: 40mm;
-    height: 30mm;
+    width: 60mm;
+    height: 40mm;
     margin: 0 !important;
     padding: 0 !important;
   }
