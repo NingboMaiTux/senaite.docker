@@ -108,7 +108,7 @@
         <tal:groups repeat="group view/type_groups">
           <div class="px-3 pt-2 pb-1 small font-weight-bold text-muted"
                tal:content="group/title">group</div>
-          <tal:items repeat="item group/items">
+          <tal:items repeat="item group/types">
             <a class="mdf-type"
                tal:attributes="href string:${base}?tab=objects&amp;portal_type=${item/portal_type};
                                class python:'mdf-type mdf-type-on' if info and item['portal_type'] == info['portal_type'] else 'mdf-type'">

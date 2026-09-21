@@ -112,7 +112,14 @@ def list_types(include_empty=True):
 
 
 def list_type_groups():
-    """按 config.TYPE_GROUPS 分组后的类型清单，供配置页左栏使用"""
+    """按 config.TYPE_GROUPS 分组后的类型清单，供配置页左栏使用
+
+    ★ 分组里那个列表的 key 叫 ``types`` 不叫 ``items``。TAL 的路径表达式
+    ``group/items`` 在字典上会解析成 **dict.items() 方法**并调用它，拿回来的是
+    (key, value) 元组列表，模板里再取 ``item['portal_type']`` 就报
+    ``TypeError: tuple indices must be integers``。实测踩过。
+    同理不要用 keys / values / get / copy / update / pop 当 key。
+    """
     by_id = dict([(item["portal_type"], item) for item in list_types()])
     groups = []
     used = set()
@@ -124,11 +131,11 @@ def list_type_groups():
                 items.append(item)
                 used.add(portal_type)
         if items:
-            groups.append({"title": title, "items": items})
+            groups.append({"title": title, "types": items})
     leftovers = [item for key, item in by_id.items() if key not in used]
     if leftovers:
         leftovers.sort(key=lambda i: i["portal_type"])
-        groups.append({"title": u"其它", "items": leftovers})
+        groups.append({"title": u"其它", "types": leftovers})
     return groups
 
 
