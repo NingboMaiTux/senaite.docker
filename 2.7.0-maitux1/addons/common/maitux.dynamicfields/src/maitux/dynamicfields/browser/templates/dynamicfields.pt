@@ -327,11 +327,18 @@ body.mdf-js.mdf-open { overflow:hidden; }
 
       <!-- ============ 添加字段：右侧抽屉（同页，不跳新页） ============ -->
       <div class="mdf-backdrop" id="mdf_backdrop"></div>
-      <div class="mdf-panel" id="mdf_panel">
+      <div class="mdf-panel" id="mdf_panel"
+           tal:attributes="data-mdf-reopen python:view.reopen_panel and '1' or '0'">
         <div class="mdf-panel-head">
           <button type="button" class="mdf-panel-x" id="mdf_close"
                   aria-label="Close">&#215;</button>
           <span i18n:translate="">Add field</span>
+        </div>
+        <!-- 保存失败时抽屉会自动重开，页面顶部那条报错就被挡在后面了，
+             所以这儿再放一份。只在重开的那一次显示。 -->
+        <div class="alert alert-danger py-2 m-3 mb-0"
+             tal:condition="view/reopen_panel">
+          <div tal:repeat="err view/errors" tal:content="err">error</div>
         </div>
         <form method="post" class="p-3" tal:attributes="action base">
           <input type="hidden" name="action" value="save_field" />
@@ -361,7 +368,9 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <div class="mdf-n" i18n:translate="">Field name</div>
             <div>
               <input type="text" name="name" class="form-control form-control-sm"
-                     pattern="[a-z][a-z0-9_]{1,49}" required="required" />
+                     required="required"
+                     tal:attributes="pattern view/name_pattern;
+                                     value python:view.prefill('name')" />
             </div>
             <div class="mdf-h" i18n:translate="">
               Starts with a letter. Cannot be changed later.
@@ -374,7 +383,9 @@ body.mdf-js.mdf-open { overflow:hidden; }
               <select id="mdf_fieldtype" name="type"
                       class="form-control form-control-sm">
                 <option tal:repeat="ft view/field_types"
-                        tal:attributes="value ft/id" tal:content="ft/title">type</option>
+                        tal:attributes="value ft/id;
+                                        selected python:view.prefill_selected('type', ft['id'])"
+                        tal:content="ft/title">type</option>
               </select>
             </div>
             <div class="mdf-h" i18n:translate="">
@@ -389,7 +400,9 @@ body.mdf-js.mdf-open { overflow:hidden; }
                 <select id="mdf_fieldset" name="fieldset"
                         class="form-control form-control-sm">
                   <option tal:repeat="fs view/fieldset_options"
-                          tal:attributes="value fs" tal:content="fs">default</option>
+                          tal:attributes="value fs;
+                                          selected python:view.prefill_selected('fieldset', fs)"
+                          tal:content="fs">default</option>
                 </select>
               </tal:ok>
               <tal:no condition="not:fs_ok">
@@ -411,8 +424,9 @@ body.mdf-js.mdf-open { overflow:hidden; }
           <div class="mdf-f">
             <div class="mdf-n" i18n:translate="">Order</div>
             <div>
-              <input type="text" id="mdf_order" name="order" value="0"
-                     class="form-control form-control-sm" style="width:90px;" />
+              <input type="text" id="mdf_order" name="order"
+                     class="form-control form-control-sm" style="width:90px;"
+                     tal:attributes="value python:view.prefill('order', '0')" />
             </div>
             <div class="mdf-h" i18n:translate="">
               Leave it at 0 unless you need a specific order. 0 means the
@@ -427,7 +441,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <div class="mdf-n" i18n:translate="">Default value</div>
             <div>
               <input type="text" id="mdf_default" name="default"
-                     class="form-control form-control-sm" />
+                     class="form-control form-control-sm"
+                     tal:attributes="value python:view.prefill('default')" />
             </div>
             <div class="mdf-h" i18n:translate="">
               Filled in automatically when a new object is created.
@@ -447,7 +462,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
           <div class="mdf-f">
             <div class="mdf-n" i18n:translate="">Required</div>
             <div>
-              <input type="checkbox" id="mdf_req" name="required" value="1" />
+              <input type="checkbox" id="mdf_req" name="required" value="1"
+                     tal:attributes="checked python:view.prefill_check('required')" />
             </div>
             <div class="mdf-h" i18n:translate="">
               Once on, existing records have to fill it in the next time
@@ -458,7 +474,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
           <div class="mdf-f">
             <div class="mdf-n" i18n:translate="">Read only</div>
             <div>
-              <input type="checkbox" id="mdf_ro" name="readonly" value="1" />
+              <input type="checkbox" id="mdf_ro" name="readonly" value="1"
+                     tal:attributes="checked python:view.prefill_check('readonly')" />
             </div>
             <div class="mdf-h" i18n:translate="">
               For values that come from an import, an instrument or a script.
@@ -468,7 +485,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
           <div class="mdf-f" data-mdf-types="choice reference">
             <div class="mdf-n" i18n:translate="">Multiple values</div>
             <div>
-              <input type="checkbox" id="mdf_multi" name="multi" value="1" />
+              <input type="checkbox" id="mdf_multi" name="multi" value="1"
+                     tal:attributes="checked python:view.prefill_check('multi')" />
             </div>
             <div class="mdf-h" i18n:translate="">
               More than one value may be picked.
@@ -487,7 +505,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
               </div>
               <div>
                 <input type="text" class="form-control form-control-sm"
-                       tal:attributes="name string:label_${lang/slug}" />
+                       tal:attributes="name string:label_${lang/slug};
+                                       value python:view.prefill('label_%s' % lang['slug'])" />
               </div>
               <div class="mdf-h" tal:condition="repeat/lang/start"
                    i18n:translate="">The name shown on the form and the view page.</div>
@@ -499,7 +518,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
               </div>
               <div>
                 <input type="text" class="form-control form-control-sm"
-                       tal:attributes="name string:desc_${lang/slug}" />
+                       tal:attributes="name string:desc_${lang/slug};
+                                       value python:view.prefill('desc_%s' % lang['slug'])" />
               </div>
               <div class="mdf-h" tal:condition="repeat/lang/start"
                    i18n:translate="">Optional. Shown as help text under the field.</div>
@@ -512,8 +532,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <div class="mdf-f">
               <div class="mdf-n" i18n:translate="">Edit form</div>
               <div>
-                <input type="checkbox" id="mdf_edit"
-                       name="show_edit" value="1" checked="checked" />
+                <input type="checkbox" id="mdf_edit" name="show_edit" value="1"
+                       tal:attributes="checked python:view.prefill_check('show_edit', True)" />
               </div>
               <div class="mdf-h" i18n:translate="">
                 Show the field on the object's edit form.
@@ -522,8 +542,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <div class="mdf-f">
               <div class="mdf-n" i18n:translate="">View page</div>
               <div>
-                <input type="checkbox" id="mdf_view"
-                       name="show_view" value="1" checked="checked" />
+                <input type="checkbox" id="mdf_view" name="show_view" value="1"
+                       tal:attributes="checked python:view.prefill_check('show_view', True)" />
               </div>
               <div class="mdf-h" i18n:translate="">
                 Show the field on the object's view page.
@@ -532,8 +552,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <div class="mdf-f">
               <div class="mdf-n" i18n:translate="">Listing column</div>
               <div>
-                <input type="checkbox" id="mdf_list"
-                       name="show_list" value="1" />
+                <input type="checkbox" id="mdf_list" name="show_list" value="1"
+                       tal:attributes="checked python:view.prefill_check('show_list')" />
               </div>
               <div class="mdf-h" i18n:translate="">
                 Needs the metadata column under Search below as well.
@@ -542,8 +562,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <div class="mdf-f">
               <div class="mdf-n" i18n:translate="">On by default</div>
               <div>
-                <input type="checkbox" id="mdf_listdef"
-                       name="list_default" value="1" />
+                <input type="checkbox" id="mdf_listdef" name="list_default" value="1"
+                       tal:attributes="checked python:view.prefill_check('list_default')" />
               </div>
               <div class="mdf-h" i18n:translate="">
                 The column comes up without the user switching it on.
@@ -587,16 +607,20 @@ body.mdf-js.mdf-open { overflow:hidden; }
               <div class="col-md-1 text-center">
                 <input type="radio" name="default_option"
                        tal:attributes="value n; id string:mdf_defopt_${n};
-                                       checked python:(n == 0) and 'checked' or None" />
+                                       checked python:view.prefill_radio(
+                                           'default_option', n, n == 0)" />
               </div>
               <div class="form-group col-md-3 mb-1">
                 <input type="text" name="option_key" placeholder="low"
-                       class="form-control form-control-sm" />
+                       class="form-control form-control-sm"
+                       tal:attributes="value python:view.prefill_row('option_key', n)" />
               </div>
               <div class="form-group col-md-4 mb-1" tal:repeat="lang languages">
                 <input type="text" class="form-control form-control-sm"
                        tal:attributes="name string:option_label_${lang/slug};
-                                       placeholder string:${lang/label}" />
+                                       placeholder string:${lang/label};
+                                       value python:view.prefill_row(
+                                           'option_label_%s' % lang['slug'], n)" />
               </div>
             </div>
             <div class="alert alert-warning py-2 mb-0 small" i18n:translate="">
@@ -618,7 +642,9 @@ body.mdf-js.mdf-open { overflow:hidden; }
                 <select name="allowed_types" multiple="multiple" size="5"
                         class="form-control form-control-sm">
                   <option tal:repeat="rt view/reference_type_options"
-                          tal:attributes="value rt/id" tal:content="rt/title">t</option>
+                          tal:attributes="value rt/id;
+                                          selected python:view.prefill_selected('allowed_types', rt['id'])"
+                          tal:content="rt/title">t</option>
                 </select>
               </div>
               <div class="mdf-h" style="padding-top:6px;" i18n:translate="">
@@ -629,8 +655,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <div class="mdf-f">
               <div class="mdf-n" i18n:translate="">Include inactive objects</div>
               <div>
-                <input type="checkbox" id="mdf_inact"
-                       name="include_inactive" value="1" />
+                <input type="checkbox" id="mdf_inact" name="include_inactive" value="1"
+                       tal:attributes="checked python:view.prefill_check('include_inactive')" />
               </div>
               <div class="mdf-h" i18n:translate="">
                 Traceability fields usually need this: the object that was
@@ -647,7 +673,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
               <div class="mdf-n" i18n:translate="">Min</div>
               <div>
                 <input type="text" name="min"
-                       class="form-control form-control-sm" style="width:110px;" />
+                       class="form-control form-control-sm" style="width:110px;"
+                       tal:attributes="value python:view.prefill('min')" />
               </div>
               <div class="mdf-h" i18n:translate="">Leave it empty for no limit.</div>
             </div>
@@ -655,15 +682,17 @@ body.mdf-js.mdf-open { overflow:hidden; }
               <div class="mdf-n" i18n:translate="">Max</div>
               <div>
                 <input type="text" name="max"
-                       class="form-control form-control-sm" style="width:110px;" />
+                       class="form-control form-control-sm" style="width:110px;"
+                       tal:attributes="value python:view.prefill('max')" />
               </div>
               <div class="mdf-h" i18n:translate="">Leave it empty for no limit.</div>
             </div>
             <div class="mdf-f" data-mdf-types="decimal">
               <div class="mdf-n" i18n:translate="">Decimals</div>
               <div>
-                <input type="text" name="precision" value="2"
-                       class="form-control form-control-sm" style="width:110px;" />
+                <input type="text" name="precision"
+                       class="form-control form-control-sm" style="width:110px;"
+                       tal:attributes="value python:view.prefill('precision', '2')" />
               </div>
               <div class="mdf-h" i18n:translate="">
                 How many decimal places to keep.
@@ -679,34 +708,20 @@ body.mdf-js.mdf-open { overflow:hidden; }
               <div class="mdf-n" i18n:translate="">Max length</div>
               <div>
                 <input type="text" name="maxlen"
-                       class="form-control form-control-sm" style="width:110px;" />
+                       class="form-control form-control-sm" style="width:110px;"
+                       tal:attributes="value python:view.prefill('maxlen')" />
               </div>
               <div class="mdf-h" i18n:translate="">Leave it empty for no limit.</div>
             </div>
-            <div class="mdf-f">
-              <div class="mdf-n" i18n:translate="">Validation regex</div>
-              <div>
-                <input type="text" name="regex"
-                       class="form-control form-control-sm" />
-              </div>
-              <div class="mdf-h" i18n:translate="">
-                Leave it empty and anything is accepted.
-              </div>
-            </div>
-            <div class="mdf-f" tal:repeat="lang languages">
-              <div class="mdf-n">
-                <span i18n:translate="">Message on failure</span> ·
-                <span tal:content="lang/label">zh</span>
-              </div>
-              <div>
-                <input type="text" class="form-control form-control-sm"
-                       tal:attributes="name string:regex_msg_${lang/slug}" />
-              </div>
-              <div class="mdf-h" tal:condition="repeat/lang/start"
-                   i18n:translate="">
-                If you fill in a regex you must also fill in a failure message.
-              </div>
-            </div>
+            <!-- 这里原来还有「校验正则」和「校验失败提示」（后者每种语言
+                 一个框）。2026-09-21 查出来两个都没实现：regex / regex_msg
+                 在 atfields.py、dxfields.py、dxschema.py 里出现次数都是 0，
+                 填了正则不会校验任何东西。跟工作流状态那段一个毛病，按同一
+                 条规矩拿掉——不生效的控件不留在页面上。
+
+                 storage 的键、view 的读取、validation 里「填了正则就得填提示」
+                 那条、以及导入导出都保留着，真做出来时把界面放回来即可。
+                 要实现的是把 regex 挂成 AT 的 validator / DX 的 constraint。 -->
           </fieldset>
 
           <!-- 这里原来有一段「数据约束」：勾几个工作流状态，声称字段只有在
@@ -729,7 +744,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <div class="mdf-f">
               <div class="mdf-n" i18n:translate="">Catalog index</div>
               <div>
-                <input type="checkbox" id="mdf_index" name="index" value="1" />
+                <input type="checkbox" id="mdf_index" name="index" value="1"
+                       tal:attributes="checked python:view.prefill_check('index')" />
               </div>
               <div class="mdf-h" i18n:translate="">
                 Without an index the field cannot be searched or filtered on.
@@ -738,7 +754,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <div class="mdf-f">
               <div class="mdf-n" i18n:translate="">Metadata column</div>
               <div>
-                <input type="checkbox" id="mdf_meta" name="metadata" value="1" />
+                <input type="checkbox" id="mdf_meta" name="metadata" value="1"
+                       tal:attributes="checked python:view.prefill_check('metadata')" />
               </div>
               <div class="mdf-h" i18n:translate="">
                 Needed before the field can be shown as a listing column.
@@ -778,8 +795,8 @@ body.mdf-js.mdf-open { overflow:hidden; }
           })();
 
           /* 右侧抽屉的开合。
-             保存失败时不自动重开：表单不回填，重开只会拿一张空表挡住页面
-             顶部那条红色报错。让它关着，用户看见错误再点一次。 */
+             保存失败时自动重开：表单已经回填（view.prefill*），抽屉里也另放
+             了一份报错，用户接着改就行，不用重头再填一遍。 */
           (function () {
             var opener = document.getElementById("mdf_open");
             var panel = document.getElementById("mdf_panel");
@@ -803,6 +820,7 @@ body.mdf-js.mdf-open { overflow:hidden; }
             document.addEventListener("keydown", function (ev) {
               if (ev.keyCode === 27) { show(false); }
             });
+            if (panel.getAttribute("data-mdf-reopen") === "1") { show(true); }
           })();
           </script>
           <span class="small text-muted ml-2" i18n:translate="">

@@ -655,12 +655,13 @@ REQUIRED = [
     "required", "readonly", "multi",
     # 类型专属
     "option_key", "default_option", "allowed_types", "include_inactive",
-    "min", "max", "precision", "maxlen", "regex", "default",
+    "min", "max", "precision", "maxlen", "default",
     # 检索
-    # 注意：这里没有 "states"。工作流状态限制那一段 2026-09-21 从界面上
-    # 拿掉了——存了但没有任何代码读它，是个按了没反应的开关。storage /
-    # view / 导入导出仍然支持这个键，真实现出来把界面放回来时，记得把
-    # "states" 加回这个清单。
+    # 注意：这里没有 "states"，也没有 "regex"。这两段 2026-09-21 从界面上
+    # 拿掉了——存了但没有任何代码读它们，是按了没反应的开关（在
+    # atfields / dxfields / dxschema 里出现次数都是 0）。storage / view /
+    # 导入导出仍然支持这些键，真实现出来把界面放回来时，记得把 "states"、
+    # "regex" 和多语言的 regex_msg_* 加回这两份清单。
     "index", "metadata",
     # 其它动作
     "field_id", "payload", "mode", "upload",
@@ -673,7 +674,7 @@ check(u"模板里 %d 个必需输入框一个不少" % len(REQUIRED),
 
 # 多语言输入框是按站点语言**动态拼**出来的（name string:label_${lang/slug}），
 # 源码里不会出现 name="label_zh_cn" 这种字面量，所以查的是那个拼接模式
-for prefix in ("label", "desc", "option_label", "regex_msg"):
+for prefix in ("label", "desc", "option_label"):
     pattern = u"name string:%s_${lang/slug}" % prefix
     check(u"多语言输入框模式 %s_*" % prefix, pattern in tpl, pattern)
 
@@ -789,6 +790,112 @@ for _pt in _pts:
     check(u"%s 能编译" % os.path.basename(_pt),
           not _errs,
           u" | ".join(_u(e) for e in _errs))
+
+
+print()
+print("=" * 66)
+print(u"12. 保存失败后的回填".encode("utf-8"))
+print("=" * 66)
+print(u"    —— 填了十几项、错一个字段名，整张表被清空重来是不能接受的".encode("utf-8"))
+print()
+
+# 回填全靠 view.failed_form 是否非空分岔。最容易错的是复选框：没勾的复选框
+# 根本不提交，所以「表单里没这个 key」必须理解成「用户取消了」，而不是退回
+# 默认值 —— 否则用户特意取掉的勾会自己回来。
+#
+# 顺带校一条 HTML pattern 和服务端正则必须同源：模板曾经写死成只允许小写，
+# 服务端却允许 CamelCase，浏览器先把 Grade 挡下来，「迁移 arextension 同名
+# 字段」根本做不到，而服务端测试全绿，查不出来。
+
+import re as _re2                                                    # noqa: E402
+
+v_fresh = mdf_view.DynamicFieldsView(None, SaveReq())
+
+html_pat = v_fresh.name_pattern
+check(u"HTML pattern 不带 ^ $（HTML 自带锚定）",
+      not html_pat.startswith("^") and not html_pat.endswith("$"), html_pat)
+for candidate, allowed in [("Grade", True), ("grade", True),
+                           ("Grade_2", True), ("2grade", False),
+                           ("gr ade", False)]:
+    by_html = bool(_re2.match("^%s$" % html_pat, candidate))
+    by_server = bool(_re2.match(config.FIELD_NAME_PATTERN, candidate))
+    check(u"字段名 %s：前后端判定一致，且都%s"
+          % (candidate, u"放行" if allowed else u"拦下"),
+          by_html == by_server == allowed,
+          u"html=%s server=%s" % (by_html, by_server))
+
+check(u"未失败时 prefill 给默认值（正常打开抽屉是张空表）",
+      v_fresh.prefill("name") == u"" and v_fresh.prefill("order", "0") == "0")
+check(u"未失败时 prefill_check 按默认",
+      v_fresh.prefill_check("show_edit", True) == "checked"
+      and v_fresh.prefill_check("required") is None)
+check(u"未失败时抽屉不重开", v_fresh.reopen_panel is False)
+
+bad = SaveReq()
+bad["action"] = "save_field"
+bad["portal_type"] = "AnalysisRequest"
+bad["name"] = "2bad"                      # 数字开头，一定过不了校验
+bad["type"] = config.TYPE_CHOICE
+bad["order"] = "7"
+bad["label_zh_cn"] = b(u"等级")                    # 等级
+bad["required"] = "1"
+bad["option_key"] = ["low", "mid", "high"]
+bad["option_label_zh_cn"] = [b(u"低"), b(u"中"), b(u"高")]
+bad["default_option"] = "2"
+# show_edit / show_view 故意不放 —— 模拟用户把默认勾上的两项取消掉
+
+v_bad = mdf_view.DynamicFieldsView(None, bad)
+v_bad.action_save_field(bad)
+
+check(u"字段名非法确实报了错", bool(v_bad.errors))
+check(u"失败后 failed_form 被留下", v_bad.failed_form is not None)
+check(u"失败后抽屉会重开", v_bad.reopen_panel is True)
+check(u"文本框回填", v_bad.prefill("name") == u"2bad")
+check(u"有默认值的文本框回填用户填的，不是默认",
+      v_bad.prefill("order", "0") == u"7")
+check(u"中文回填不炸且正确",
+      v_bad.prefill("label_zh_cn") == u"等级")
+check(u"勾上的复选框回填为勾上",
+      v_bad.prefill_check("required") == "checked")
+check(u"★ 用户取消掉的默认勾选项，回填后仍然是取消的",
+      v_bad.prefill_check("show_edit", True) is None)
+check(u"下拉框回填选中项",
+      v_bad.prefill_selected("type", config.TYPE_CHOICE) == "selected"
+      and v_bad.prefill_selected("type", config.TYPE_TEXT) is None)
+check(u"选项列表按行号回填",
+      [v_bad.prefill_row("option_key", i) for i in range(4)]
+      == [u"low", u"mid", u"high", u""])
+check(u"选项中文标签按行号回填",
+      v_bad.prefill_row("option_label_zh_cn", 2) == u"高")
+check(u"默认值单选钮回填到用户选的那行，不是第一行",
+      v_bad.prefill_radio("default_option", 2, False) == "checked"
+      and v_bad.prefill_radio("default_option", 0, True) is None)
+
+# 保存成功不该留下 failed_form，否则下次打开抽屉是上一次的内容
+good = SaveReq()
+good["action"] = "save_field"
+good["portal_type"] = "AnalysisRequest"
+good["name"] = "PrefillOK"
+good["type"] = config.TYPE_TEXT
+good["label_en"] = "Prefill OK"
+v_good = mdf_view.DynamicFieldsView(None, good)
+try:
+    v_good.action_save_field(good)
+except Exception:
+    # 建索引那步在没有真站点的 zopepy 里可能起不来，不影响这一条的结论：
+    # 校验过了就不该留回填。
+    pass
+check(u"合法输入不报错、也不留回填",
+      not v_good.errors and v_good.failed_form is None,
+      u"errors=%s" % (v_good.errors,))
+
+# 光有 view 方法、没接到模板上，等于没做
+for needle in ["view.prefill('name')", "view.prefill_check('required')",
+               "view.prefill_row('option_key', n)",
+               "view.prefill_selected('type'", "view/name_pattern",
+               "view/reopen_panel"]:
+    check(u"模板接上了 %s" % needle, needle in tpl)
+check(u"模板里不再写死 name 的 pattern", 'pattern="[a-z]' not in tpl)
 
 
 print()

@@ -84,6 +84,9 @@ class DynamicFieldsView(BrowserView):
         self.request = request
         self.messages = []
         self.errors = []
+        # 保存失败时把提交上来的表单留下，重渲染时回填。不留的话用户填了
+        # 十几项、错一个字段名，整张表全空——这是不能接受的。
+        self.failed_form = None
 
     def __call__(self):
         if self.request.method == "POST":
@@ -143,6 +146,7 @@ class DynamicFieldsView(BrowserView):
             record, existing_id=record.get("id") if existing else None)
         if problems:
             self.errors.extend(problems)
+            self.failed_form = form
             return
 
         storage.save_record(record)
@@ -352,6 +356,69 @@ class DynamicFieldsView(BrowserView):
         return [safe_unicode(v).strip()
                 for v in self._as_list(form.get(name))
                 if safe_unicode(v).strip()]
+
+    # ------------------------------------------------------------------
+    # 保存失败后的回填
+    #
+    # 只有 failed_form 非空（= 这次 POST 是保存字段且校验没过）时才回填；
+    # 正常打开「添加字段」抽屉拿到的是各项的默认值，跟以前一样是张空表。
+    # ------------------------------------------------------------------
+
+    @property
+    def name_pattern(self):
+        """给 <input pattern=""> 用的字段名正则。
+
+        从 config 取，不要在模板里另写一份：曾经模板写死成只允许小写，
+        服务端却允许 CamelCase，结果浏览器先把 `Grade` 挡下来，
+        「迁移 arextension 同名字段」这件事根本做不到。HTML 的 pattern
+        自带首尾锚定，所以把 ^ $ 去掉。
+        """
+        return config.FIELD_NAME_PATTERN.lstrip("^").rstrip("$")
+
+    @property
+    def reopen_panel(self):
+        """保存失败时抽屉要重新打开，否则用户看不到自己填的东西"""
+        return self.failed_form is not None
+
+    def prefill(self, name, default=u""):
+        if self.failed_form is None:
+            return default
+        value = self.failed_form.get(name)
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else u""
+        return safe_unicode(value)
+
+    def prefill_row(self, name, index, default=u""):
+        """一个 name 提交多行的（选项列表那五行），按行号取"""
+        if self.failed_form is None:
+            return default
+        values = self._as_list(self.failed_form.get(name))
+        if 0 <= index < len(values):
+            return safe_unicode(values[index])
+        return u""
+
+    def prefill_check(self, name, default=False):
+        """复选框。
+
+        没勾的复选框根本不会提交，所以「表单里没有这个 key」就是「没勾」——
+        回填时不能退回默认值，否则用户特意取消掉的勾会自己回来。
+        """
+        if self.failed_form is None:
+            return "checked" if default else None
+        return "checked" if self.failed_form.get(name) else None
+
+    def prefill_radio(self, name, value, default=False):
+        if self.failed_form is None:
+            return "checked" if default else None
+        submitted = safe_unicode(self.failed_form.get(name))
+        return "checked" if submitted == safe_unicode(value) else None
+
+    def prefill_selected(self, name, value, default=False):
+        if self.failed_form is None:
+            return "selected" if default else None
+        chosen = [safe_unicode(v)
+                  for v in self._as_list(self.failed_form.get(name))]
+        return "selected" if safe_unicode(value) in chosen else None
 
     @staticmethod
     def _as_list(value):
