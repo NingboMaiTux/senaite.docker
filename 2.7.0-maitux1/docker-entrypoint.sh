@@ -106,6 +106,10 @@ bash /tmp/gen-custom-addon.sh
 : "${PASSWORD:?PASSWORD is not set - copy .env.example to .env}"
 step "写入 buildout.cfg 的口令"
 python - <<'PYEOF'
+# -*- coding: utf-8 -*-
+# PEP 263：本块有中文注释，Py2 没有这行会直接
+#   SyntaxError: Non-ASCII character ... but no encoding declared
+# 而且是 entrypoint 阶段报错，容器起不来只能看日志猜。删了它等于把容器锁死。
 import io
 import os
 import sys
