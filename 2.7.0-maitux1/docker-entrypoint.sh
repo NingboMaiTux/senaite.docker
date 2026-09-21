@@ -89,6 +89,31 @@ sed 's/\r$//' /gen-custom-addon.sh > /tmp/gen-custom-addon.sh
 bash /tmp/gen-custom-addon.sh
 
 # ---------------------------------------------------------------------------
+# 编译 customers add-on 的翻译（.po -> .mo）
+#
+# 为什么在这儿而不是 Dockerfile：/opt/addons/customers 是 bind mount
+# （docker-compose.yml:106、145），运行时会把镜像里那份整个盖掉，构建时编它
+# 毫无意义。必须等挂载生效之后再编，结果会写回宿主机工作区——这正是
+# .gitignore 里说的「容器里重编译会写回来」，本来就是既定行为。
+# common 不用在这儿编：它是 COPY 进镜像的，Dockerfile 里已经编好固化了。
+#
+# 不编的后果是静默的：本环境没开 zope.i18n 的自动编译
+# （zope_i18n_compile_mo_files 到处都没设），干净 clone 出来 build，容器
+# 照起、日志一行错都不报，所有客户 add-on 的中文标签全变英文。
+#
+# 只编缺的和过期的，常态下几毫秒。失败不拦启动：翻译编不出来顶多显示英文，
+# 不该把容器拖死。
+if [ -f /compile-locales.py ]; then
+  step "编译 customers add-on 的翻译"
+  python /compile-locales.py /opt/addons/customers || \
+    echo "[entrypoint] 翻译编译有失败，界面可能显示英文，不影响启动" >&2
+else
+  # 旧镜像里没有这个脚本（本仓库 2026-09-21 才加）。缺了不算错，只是那些
+  # .mo 得靠工作区里已有的，或者各包自己的 tools/compile_mo.py。
+  step "跳过翻译编译：镜像里没有 /compile-locales.py"
+fi
+
+# ---------------------------------------------------------------------------
 # 把 buildout.cfg 里的口令占位符换成环境变量里的真实值。
 #
 # 为什么在这里做：buildout.cfg 是打进镜像的、不是挂载进来的，所以口令不能写死在
