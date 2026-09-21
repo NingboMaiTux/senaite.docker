@@ -1,0 +1,257 @@
+# -*- coding: utf-8 -*-
+"""常量：目标类型白名单、字段类型、保留名、上限
+
+白名单依据镜像内 senaite.core 2.7.0 的 FTI ``meta_type`` 实测得出，但**机制
+（AT / DX）不写在这里**——运行时查 FTI 决定（见 introspect.get_mechanism）。
+
+理由见需求文档 §6「机制中立」：AT 那一批每出一个 senaite 版本就会短一截，
+把机制写死在常量里，等于上游每迁移一个类型就要改所有站点的配置。
+"""
+
+#: 配置在 portal 上的 annotation key
+ANNOTATION_KEY = "maitux.dynamicfields.config"
+
+# --------------------------------------------------------------------------
+# 目标类型白名单
+# --------------------------------------------------------------------------
+
+#: 第一优先级：v1 必须支持
+PRIMARY_TYPES = (
+    "AnalysisRequest",
+    "Client",
+    "Batch",
+    "AnalysisService",
+    "Instrument",
+    "Method",
+    "Worksheet",
+    "SampleType",
+    "SamplePoint",
+    "Contact",
+    "Supplier",
+)
+
+#: 第二优先级：同样开放，但默认排在后面
+SECONDARY_TYPES = (
+    "LabContact",
+    "AnalysisSpec",
+    "ReferenceSample",
+    "ReferenceDefinition",
+    "InstrumentCalibration",
+    "InstrumentCertification",
+    "InstrumentValidation",
+    "InstrumentMaintenanceTask",
+    "Attachment",
+    "SampleTemplate",
+    "WorksheetTemplate",
+    "AnalysisProfile",
+    "Laboratory",
+    "Calculation",
+    "Department",
+    "AnalysisCategory",
+    "StorageLocation",
+    "SampleContainer",
+    "SampleCondition",
+    "SamplePreservation",
+    "SamplingDeviation",
+    "SampleMatrix",
+    "SubGroup",
+    "ContainerType",
+    "ARTemplate",
+)
+
+ALLOWED_TYPES = PRIMARY_TYPES + SECONDARY_TYPES
+
+#: 明确排除，不得出现在选择列表里。
+#: Analysis 系列：每样品×每检测项一个对象，年百万量级，且只经
+#: senaite.app.listing 渲染（列来自 self.columns，不读 schema），加了也看不见。
+#: BikaSetup / ARTemplate / ARReport：已被 DX 的 Setup / SampleTemplate /
+#: ResultsReport 取代，属 AT→DX 迁移遗留，选了字段死活不显示。
+EXCLUDED_TYPES = (
+    "Analysis",
+    "DuplicateAnalysis",
+    "ReferenceAnalysis",
+    "RejectAnalysis",
+    "BikaSetup",
+    "ARReport",
+    "Plone Site",
+    "Plone_Site",
+)
+
+#: 已废弃但仍保留的类型：AT→DX 迁移遗留，两个 FTI 在站点上都真实注册着。
+#:
+#: 不排除（第二优先级要求全部支持），但界面上必须打「已废弃」标记——否则用户
+#: 选了 ARTemplate 加字段，字段在实际使用的 SampleTemplate 上死活不出现，
+#: 排查起来毫无线索。需求文档 §3.2 原话是「显式屏蔽或『已废弃』标记」，
+#: 这里取后者。
+DEPRECATED_TYPES = {
+    "ARTemplate": "SampleTemplate",
+}
+
+#: 业务名 (中文, 英文)。取不到时回落 portal_type 本身。
+#: 不用 Message —— get_type_title() 是**每请求**调的视图方法，
+#: 按当前语言取值是安全的（跟 schema 字段不一样，那个是缓存的）。
+TYPE_TITLES = {
+    "AnalysisRequest": (u"样品 / 检验申请", u"Sample / Analysis Request"),
+    "Client": (u"客户", u"Client"),
+    "Batch": (u"批次 / 项目", u"Batch / Project"),
+    "AnalysisService": (u"检验项目", u"Analysis Service"),
+    "Instrument": (u"仪器", u"Instrument"),
+    "Method": (u"方法", u"Method"),
+    "Worksheet": (u"工作表", u"Worksheet"),
+    "SampleType": (u"样品类型", u"Sample Type"),
+    "SamplePoint": (u"采样点", u"Sample Point"),
+    "Contact": (u"客户联系人", u"Client Contact"),
+    "Supplier": (u"供应商", u"Supplier"),
+    "LabContact": (u"实验室人员", u"Lab Contact"),
+    "AnalysisSpec": (u"结果规格", u"Analysis Specification"),
+    "ReferenceSample": (u"标准物质", u"Reference Sample"),
+    "ReferenceDefinition": (u"标准物质定义", u"Reference Definition"),
+    "InstrumentCalibration": (u"仪器校准", u"Instrument Calibration"),
+    "InstrumentCertification": (u"仪器证书", u"Instrument Certification"),
+    "InstrumentValidation": (u"仪器验证", u"Instrument Validation"),
+    "InstrumentMaintenanceTask": (u"仪器保养", u"Instrument Maintenance Task"),
+    "Attachment": (u"附件", u"Attachment"),
+    "SampleTemplate": (u"样品模板", u"Sample Template"),
+    "WorksheetTemplate": (u"工作表模板", u"Worksheet Template"),
+    "AnalysisProfile": (u"分析套餐", u"Analysis Profile"),
+    "Laboratory": (u"实验室信息", u"Laboratory"),
+    "Calculation": (u"计算公式", u"Calculation"),
+    "Department": (u"部门", u"Department"),
+    "AnalysisCategory": (u"检验分类", u"Analysis Category"),
+    "StorageLocation": (u"存储位置", u"Storage Location"),
+    "SampleContainer": (u"样品容器", u"Sample Container"),
+    "SampleCondition": (u"样品状态", u"Sample Condition"),
+    "SamplePreservation": (u"样品保存", u"Sample Preservation"),
+    "SamplingDeviation": (u"采样偏差", u"Sampling Deviation"),
+    "SampleMatrix": (u"样品基质", u"Sample Matrix"),
+    "SubGroup": (u"子分组", u"Sub Group"),
+    "ContainerType": (u"容器类型", u"Container Type"),
+    "ARTemplate": (u"样品模板（旧）", u"Sample Template (legacy)"),
+}
+
+#: 配置页左侧的业务分组：((中文, 英文), (类型...))
+TYPE_GROUPS = (
+    ((u"样品与检测", u"Samples & Testing"), ("AnalysisRequest", "AnalysisService", "Batch", "Worksheet",
+                     "AnalysisSpec", "AnalysisProfile", "SampleTemplate",
+                     "WorksheetTemplate", "Attachment", "ARTemplate")),
+    ((u"客户与供应商", u"Clients & Suppliers"), ("Client", "Contact", "Supplier")),
+    ((u"实验室资源", u"Lab Resources"), ("Instrument", "Method", "LabContact", "Laboratory",
+                     "Calculation", "InstrumentCalibration",
+                     "InstrumentCertification", "InstrumentValidation",
+                     "InstrumentMaintenanceTask", "ReferenceSample",
+                     "ReferenceDefinition")),
+    ((u"字典与模板", u"Dictionaries & Templates"), ("SampleType", "SamplePoint", "StorageLocation",
+                     "SampleContainer", "SampleCondition",
+                     "SamplePreservation", "SamplingDeviation",
+                     "SampleMatrix", "SubGroup", "ContainerType",
+                     "Department", "AnalysisCategory")),
+)
+
+# --------------------------------------------------------------------------
+# 字段类型
+# --------------------------------------------------------------------------
+
+TYPE_TEXT = "text"
+TYPE_TEXTAREA = "textarea"
+TYPE_INT = "int"
+TYPE_DECIMAL = "decimal"
+TYPE_DATE = "date"
+TYPE_DATETIME = "datetime"
+TYPE_BOOL = "bool"
+TYPE_CHOICE = "choice"
+TYPE_REFERENCE = "reference"
+
+#: (id, 中文名, 英文名)
+FIELD_TYPES = (
+    (TYPE_TEXT, u"单行文本", u"Text line"),
+    (TYPE_TEXTAREA, u"多行文本", u"Text area"),
+    (TYPE_INT, u"整数", u"Integer"),
+    (TYPE_DECIMAL, u"小数", u"Decimal"),
+    (TYPE_DATE, u"日期", u"Date"),
+    (TYPE_DATETIME, u"日期时间", u"Date & time"),
+    (TYPE_BOOL, u"布尔", u"Boolean"),
+    (TYPE_CHOICE, u"固定选项", u"Choice"),
+    (TYPE_REFERENCE, u"对象引用", u"Reference"),
+)
+
+FIELD_TYPE_IDS = tuple([t[0] for t in FIELD_TYPES])
+
+#: 带「选项列表」的类型
+TYPES_WITH_OPTIONS = (TYPE_CHOICE,)
+#: 可多值的类型
+TYPES_MULTIVALUED = (TYPE_CHOICE, TYPE_REFERENCE)
+#: 数值类型
+TYPES_NUMERIC = (TYPE_INT, TYPE_DECIMAL)
+
+# --------------------------------------------------------------------------
+# 校验
+# --------------------------------------------------------------------------
+
+#: 字段名正则：ASCII 字母开头，后接字母数字下划线。
+#:
+#: 刻意**允许驼峰**。曾经限制成纯小写，结果把唯一有价值的用法锁死了：
+#: 要把 INNOCARE.arextension 的 MaterialCode / ProjectNo 那批字段迁到本包，
+#: 必须能建出**同名**字段——AT 的 AttributeStorage 按字段名存值，名字一致
+#: 历史数据才读得出来，不用迁数据。纯小写的话永远只能并排不能替换。
+FIELD_NAME_PATTERN = r"^[A-Za-z][A-Za-z0-9_]{1,49}$"
+
+#: 选项 key 正则。存储值必须是 ASCII——一旦存中文，这份数据永远翻译不了，
+#: 索引、导出、统计也全部锁死在中文上（需求文档 §5.4 设计红线）
+OPTION_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_\-]{0,63}$"
+
+#: 保留名：与之重名会让对象的基本行为出问题
+RESERVED_NAMES = frozenset([
+    "id", "uid", "UID", "title", "Title", "description", "Description",
+    "created", "modified", "creators", "creator", "Creator",
+    "portal_type", "meta_type", "path", "getId", "getObject",
+    "review_state", "workflow_history", "absolute_url", "aq_parent",
+    "getPhysicalPath", "Schema", "schema", "__name__", "__parent__",
+    "manage_options", "isPrincipiaFolderish", "REQUEST",
+])
+
+#: 「显示分组」只在很窄的范围里真的有效，实测（senaite.core 2.7.0）：
+#:
+#: - **DX 全部不行**：senaite 自己的 DX 编辑模板
+#:   （senaite/core/browser/dexterity/templates/edit.pt）里 group / fieldset /
+#:   nav-tabs 一个都没有，schema 上定义了 fieldset 也不画。
+#: - **AT 可以**：senaite 的 edit_macros.pt 开头原文写着
+#:   "Customized fieldsets to bootstrap nav-tabs"，base_edit.cpt 会按
+#:   view.fieldsets() 渲染标签页。
+#: - **AnalysisRequest 例外**：它虽是 AT，但 schema 里一个 schemata= 都没有，
+#:   而且样品新建页 ar_add2 完全不读 schemata。
+#: - **只有 default 一个分组的 AT 类型**：选无可选。
+#:
+#: 所以判定规则是「AT + 不在下面这张表里 + 已有分组多于一个」，
+#: 由 introspect.fieldset_supported() 实现——数据驱动，上游哪天给某个类型
+#: 加了分组就自动可用，不用改代码。
+#:
+#: 另外**不提供「新建分组」**：新分组的标题不走翻译，英文界面上会看到中文
+#: 标签页。只允许挂进 senaite 已有的分组。
+FIELDSET_UNSUPPORTED = ("AnalysisRequest",)
+
+#: 分组下拉里要藏掉的内部 schemata。
+#:
+#: ``metadata`` 是 Plone/AT 的内部分组（creators、rights 这些），实测
+#: AnalysisService 上就有它。把业务字段丢进去技术上能跑，但没有任何道理，
+#: 列出来只会让实施人员犹豫。其余几个是 Plone 基础 schema 带的，这批 AT
+#: 类型上一般看不到，一并防着。
+INTERNAL_FIELDSETS = frozenset([
+    "metadata", "categorization", "dates", "ownership", "settings",
+])
+
+#: 数量上限（NFR-3）
+MAX_FIELDS_PER_TYPE = 50
+MAX_FIELDS_TOTAL = 500
+
+#: 索引类型推荐
+DEFAULT_INDEX_TYPES = {
+    TYPE_TEXT: "FieldIndex",
+    TYPE_TEXTAREA: "ZCTextIndex",
+    TYPE_INT: "FieldIndex",
+    TYPE_DECIMAL: "FieldIndex",
+    TYPE_DATE: "DateIndex",
+    TYPE_DATETIME: "DateIndex",
+    TYPE_BOOL: "BooleanIndex",
+    TYPE_CHOICE: "KeywordIndex",
+    TYPE_REFERENCE: "KeywordIndex",
+}

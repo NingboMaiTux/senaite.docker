@@ -1,0 +1,910 @@
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      i18n:domain="maitux.dynamicfields"
+      metal:use-macro="context/main_template/macros/master">
+<body>
+<metal:content-core fill-slot="content-core">
+
+<tal:page define="tab view/tab;
+                  info view/selected_info;
+                  languages view/language_slugs;
+                  base view/base_url;
+                  q view/search_query;
+                  fq view/field_query;
+                  suffix view/link_suffix;">
+
+<style type="text/css">
+/* SENAITE 实测配色：#293333 深色条 / #428AAF 主色 / #f8f9fa 浅底。
+   正文链接用 #35708F —— #428AAF 在白底上只有 3.8:1，正文号字达不到 4.5:1。 */
+.mdf-wrap { color:#293333; }
+.mdf-wrap a { color:#35708F; }
+.mdf-mech { display:inline-block;font-size:10px;line-height:1;padding:3px 5px;
+            border-radius:3px;font-weight:700;letter-spacing:.04em; }
+.mdf-mech-AT { background:#f3ece0;color:#6b5c3c;border:1px solid #ded0b4; }
+.mdf-mech-DX { background:#e7f0f5;color:#2f6a8a;border:1px solid #bcd6e3; }
+.mdf-cnt { display:inline-block;min-width:20px;text-align:center;font-size:11px;
+           line-height:1;padding:4px 6px;border-radius:9px;background:#eef2f4;color:#606969; }
+.mdf-cnt-on { background:#428AAF;color:#fff; }
+.mdf-pos { display:inline-flex;align-items:center;justify-content:center;width:22px;
+           height:22px;border-radius:3px;font-size:11px;margin-right:3px; }
+.mdf-pos-on { background:#428AAF;color:#fff;border:1px solid #35708F; }
+.mdf-pos-off { background:#fff;color:#c2c9cc;border:1px dashed #d7dbdc; }
+.mdf-type { display:block;padding:6px 10px;border-left:3px solid transparent;
+            text-decoration:none;color:#293333; }
+.mdf-type:hover { background:#f2f6f8;text-decoration:none; }
+.mdf-type-on { background:rgba(66,138,175,.16);border-left-color:#428AAF; }
+.mdf-sec { border:1px solid #d7dbdc;border-radius:4px;margin-bottom:12px;background:#fff; }
+.mdf-sec > summary { background:#f8f9fa;padding:10px 14px;cursor:pointer;
+                     font-weight:600;font-size:13.5px;list-style:none; }
+.mdf-sec > summary::-webkit-details-marker { display:none; }
+.mdf-sec > summary:before { content:"\25B8";margin-right:8px;color:#909a9a; }
+.mdf-sec[open] > summary:before { content:"\25BE";color:#35708F; }
+.mdf-row { display:flex;align-items:center;border-top:1px solid #eef1f2;font-size:13px; }
+.mdf-row-ro { background:#fcfdfd; }
+.mdf-hrow { display:flex;align-items:center;background:#fcfdfd;
+            border-top:1px solid #d7dbdc;font-size:11.5px;font-weight:600;color:#606969; }
+.mdf-c { padding:8px 10px;min-width:0;overflow:hidden;text-overflow:ellipsis;
+         white-space:nowrap; }
+.mdf-lock { font-size:11.5px;color:#909a9a; }
+.mdf-code { font-family:Consolas,monospace;font-size:12px;background:#f4f6f7;
+            padding:1px 4px;border-radius:3px; }
+.mdf-stat { display:inline-flex;flex-direction:column;padding-right:22px;
+            margin-right:22px;border-right:1px solid #e3e8ea; }
+/* 添加字段：从右侧拉出的抽屉，覆盖在字段列表上。
+   为什么是覆盖而不是把右栏劈两半：字段表格固定列宽加起来最少 816px，
+   劈完放不下；抽屉压上去，表单能拿到 780px 的净宽。
+
+   固定定位的抽屉离了 JS 就永远打不开，所以样式挂在 body.mdf-js 上——
+   JS 一进来先打这个标记。没有 JS 时下面这几条都不生效，那块表单就是
+   页面底部一块普通区域，跟改成抽屉之前一样能用。 */
+.mdf-panel { border:1px solid #d7dbdc;border-radius:4px;background:#fff;
+             margin-top:14px; }
+.mdf-backdrop { display:none; }
+#mdf_open { display:none; }
+body:not(.mdf-js) .mdf-panel-x { display:none; }
+body.mdf-js #mdf_open { display:inline-block; }
+/* 1040px = 原来的 780 + 33%。往上顶到这儿而不是更宽：1550px 的屏上抽屉
+   左边缘落在 x≈510，页面标题在 x≈390，还露得出来——看得见自己在给哪个
+   对象加字段。再宽就把标题盖住了。窄屏由 max-width:94vw 兜着。 */
+body.mdf-js .mdf-panel { display:none;position:fixed;top:0;right:0;bottom:0;
+             width:1040px;max-width:94vw;z-index:1040;overflow-y:auto;
+             margin-top:0;border:0;border-radius:0;
+             box-shadow:-2px 0 14px rgba(0,0,0,.18); }
+body.mdf-js .mdf-backdrop { position:fixed;top:0;left:0;right:0;bottom:0;
+             background:rgba(0,0,0,.25);z-index:1039; }
+body.mdf-js.mdf-open .mdf-panel,
+body.mdf-js.mdf-open .mdf-backdrop { display:block; }
+body.mdf-js.mdf-open { overflow:hidden; }
+.mdf-panel-head { position:sticky;top:0;background:#35708F;color:#fff;
+                  padding:10px 14px;font-weight:600;z-index:1; }
+.mdf-panel-x { float:right;background:none;border:0;color:#fff;font-size:20px;
+               line-height:1;cursor:pointer;padding:0 4px; }
+.mdf-grp { border:1px solid #d7dbdc;border-radius:4px;margin-bottom:10px; }
+.mdf-grp > summary { background:#f4f7f8;padding:8px 12px;cursor:pointer; }
+/* 添加字段表单：每一项一行，形状统一为 名词 | 控件 | 说明。
+   三列宽度写死，所以不同 fieldset 里的行也能对齐。整行显隐时对包裹
+   div 设 display:none 即可，不会像按列排版那样留下半行空洞。 */
+.mdf-f { display:grid;grid-template-columns:110px 300px minmax(0,1fr);
+         align-items:center;gap:4px 16px;margin-bottom:9px; }
+.mdf-f > .mdf-n { text-align:right;font-size:13px;color:#2c3e44; }
+.mdf-f > .mdf-h { font-size:12px;color:#707c80;line-height:1.5; }
+.mdf-f .form-control { width:100%; }
+.mdf-fsub { margin:0 0 9px 126px; }
+</style>
+
+<div class="mdf-wrap">
+
+  <h1 class="documentFirstHeading" i18n:translate="">Dynamic Fields</h1>
+
+  <!-- 状态消息 -->
+  <div class="alert alert-info py-2" tal:condition="view/messages">
+    <div tal:repeat="msg view/messages" tal:content="msg">ok</div>
+  </div>
+  <div class="alert alert-danger py-2" tal:condition="view/errors">
+    <div tal:repeat="err view/errors" tal:content="err">error</div>
+  </div>
+
+  <!-- 本包的 assignable 被别的 add-on 旁路掉时的告警 -->
+  <div class="alert alert-warning py-2"
+       tal:define="shadow view/shadow_warning"
+       tal:condition="shadow"
+       tal:content="shadow">shadow</div>
+
+  <!-- tabs -->
+  <ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+      <a class="nav-link"
+         tal:attributes="class python:'nav-link active' if tab == 'objects' else 'nav-link';
+                         href string:${base}?tab=objects"
+         i18n:translate="">Browse by object</a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link"
+         tal:attributes="class python:'nav-link active' if tab == 'all' else 'nav-link';
+                         href string:${base}?tab=all"
+         i18n:translate="">All custom fields</a>
+    </li>
+    <li class="nav-item ml-auto">
+      <a class="nav-link" tal:attributes="href view/export_url"
+         i18n:translate="">Export JSON</a>
+    </li>
+  </ul>
+
+  <!-- ================= tab 1：按对象浏览 ================= -->
+  <div tal:condition="python:tab == 'objects'">
+  <div class="row">
+
+    <div class="col-md-3">
+      <form method="get" class="mb-2" tal:attributes="action base">
+        <input type="hidden" name="tab" value="objects" />
+        <input type="hidden" name="portal_type"
+               tal:attributes="value info/portal_type | nothing" />
+        <label class="small text-muted mb-1" for="mdf_q"
+               i18n:translate="">Search objects</label>
+        <div class="input-group input-group-sm">
+          <input type="text" id="mdf_q" name="q" class="form-control"
+                 placeholder="Business name or portal_type"
+                 i18n:attributes="placeholder"
+                 tal:attributes="value q" />
+          <div class="input-group-append">
+            <button type="submit" class="btn btn-outline-secondary"
+                    i18n:translate="">Go</button>
+            <a class="btn btn-outline-secondary" tal:condition="q"
+               tal:attributes="href string:${base}?tab=objects"
+               i18n:translate="">Clear</a>
+          </div>
+        </div>
+      </form>
+      <div class="border rounded" style="background:#fcfdfd;">
+        <div class="p-3 small text-muted" tal:condition="not:view/type_groups"
+             i18n:translate="">No object matches this keyword.</div>
+        <tal:groups repeat="group view/type_groups">
+          <div class="px-3 pt-2 pb-1 small font-weight-bold text-muted"
+               tal:content="group/title">group</div>
+          <tal:items repeat="item group/types">
+            <a class="mdf-type"
+               tal:attributes="href string:${base}?tab=objects&amp;portal_type=${item/portal_type}${suffix};
+                               class python:'mdf-type mdf-type-on' if info and item['portal_type'] == info['portal_type'] else 'mdf-type'">
+              <span class="d-flex align-items-center">
+                <span class="flex-grow-1" tal:content="item/title">title</span>
+                <span tal:attributes="class string:mdf-mech mdf-mech-${item/mechanism}"
+                      tal:content="item/mechanism">AT</span>
+                <span class="mdf-mech" tal:condition="item/deprecated"
+                      style="background:#fdf1f2;color:#8d232f;border:1px solid #e9b7bd;"
+                      i18n:translate="">deprecated</span>
+                <span tal:attributes="class python:'mdf-cnt mdf-cnt-on' if item['count'] else 'mdf-cnt'"
+                      class="ml-1" tal:content="item/count">0</span>
+              </span>
+              <span class="d-block text-muted" style="font-size:11px;"
+                    tal:content="item/portal_type">Type</span>
+            </a>
+          </tal:items>
+        </tal:groups>
+      </div>
+    </div>
+
+    <div class="col-md-9" tal:condition="info">
+      <!-- AT / DX 和「经 schemaextender 扩展」是实现细节，实施人员不需要
+           知道，也帮不上他任何忙。加字段的按钮放在这一行右端，不再是页面
+           最底下那条横幅。 -->
+      <div class="d-flex align-items-center mb-2">
+        <h2 class="h4 mb-0 mr-2" tal:content="info/title">Title</h2>
+        <span class="mdf-code" tal:content="info/portal_type">Type</span>
+        <button type="button" class="btn btn-sm ml-auto" id="mdf_open"
+                style="background:#35708F;border-color:#2c5f7a;color:#fff;"
+                i18n:translate="">Add field</button>
+      </div>
+
+      <div class="alert alert-danger py-2 small" tal:condition="info/deprecated">
+        <strong i18n:translate="">This object type is deprecated.</strong>
+        <span tal:content="view/deprecated_warning">x</span>
+      </div>
+
+      <form method="get" class="mb-2" tal:attributes="action base">
+        <input type="hidden" name="tab" value="objects" />
+        <input type="hidden" name="portal_type"
+               tal:attributes="value info/portal_type" />
+        <input type="hidden" name="q" tal:attributes="value q" />
+        <div class="input-group input-group-sm" style="max-width:420px;">
+          <div class="input-group-prepend">
+            <span class="input-group-text" i18n:translate="">Filter fields</span>
+          </div>
+          <input type="text" name="fq" class="form-control"
+                 placeholder="Field name or label"
+                 i18n:attributes="placeholder"
+                 tal:attributes="value fq" />
+          <div class="input-group-append">
+            <button type="submit" class="btn btn-outline-secondary"
+                    i18n:translate="">Go</button>
+            <a class="btn btn-outline-secondary" tal:condition="fq"
+               tal:attributes="href string:${base}?tab=objects&amp;portal_type=${info/portal_type}${suffix}"
+               i18n:translate="">Clear</a>
+          </div>
+        </div>
+      </form>
+
+      <tal:sections define="sections view/field_sections">
+
+        <!-- 三段都默认收起，不给「本包添加的字段」开小灶：数量就写在
+             summary 上的徽章里，要看明细再点。 -->
+        <details class="mdf-sec">
+          <summary>
+            <span i18n:translate="">Fields added here</span>
+            <span class="mdf-cnt mdf-cnt-on" tal:content="python:len(sections['own'])">0</span>
+            <span class="float-right small font-weight-normal"
+                  style="color:#35708F;" i18n:translate="">editable / deletable</span>
+          </summary>
+          <div class="mdf-hrow" tal:condition="sections/own">
+            <span class="mdf-c" style="width:170px;" i18n:translate="">Name</span>
+            <span class="mdf-c" style="width:92px;" i18n:translate="">Type</span>
+            <span class="mdf-c" style="flex-grow:1;" i18n:translate="">Label</span>
+            <span class="mdf-c" style="width:128px;" i18n:translate="">Shown in</span>
+            <span class="mdf-c" style="width:62px;" i18n:translate="">Index</span>
+            <span class="mdf-c" style="width:150px;" i18n:translate="">Actions</span>
+          </div>
+          <div class="mdf-row" tal:repeat="field sections/own">
+            <span class="mdf-c" style="width:170px;">
+              <span class="mdf-code" tal:content="field/name">name</span>
+            </span>
+            <span class="mdf-c text-muted" style="width:92px;"
+                  tal:content="field/type_title">type</span>
+            <span class="mdf-c" style="flex-grow:1;" tal:content="field/label">label</span>
+            <span class="mdf-c" style="width:128px;">
+              <span tal:repeat="slot field/positions"
+                    tal:attributes="class python:'mdf-pos mdf-pos-on' if slot['on'] else 'mdf-pos mdf-pos-off';
+                                    title slot/key"
+                    tal:content="slot/text">x</span>
+            </span>
+            <span class="mdf-c text-muted" style="width:62px;"
+                  tal:content="field/index_label">-</span>
+            <span class="mdf-c" style="width:150px;">
+              <form method="post" class="d-inline"
+                    tal:attributes="action base">
+                <input type="hidden" name="action" value="reindex_field" />
+                <input type="hidden" name="tab" value="objects" />
+                <input type="hidden" name="portal_type"
+                       tal:attributes="value field/portal_type" />
+                <input type="hidden" name="field_id"
+                       tal:attributes="value field/id" />
+                <button type="submit" class="btn btn-sm btn-link p-0 mr-2"
+                        tal:condition="field/indexed"
+                        i18n:translate="">Reindex</button>
+              </form>
+              <form method="post" class="d-inline"
+                    tal:attributes="action base;
+                                    onsubmit string:return confirm('${view/delete_confirm_text}');">
+                <input type="hidden" name="action" value="delete_field" />
+                <input type="hidden" name="tab" value="objects" />
+                <input type="hidden" name="portal_type"
+                       tal:attributes="value field/portal_type" />
+                <input type="hidden" name="field_id"
+                       tal:attributes="value field/id" />
+                <button type="submit" class="btn btn-sm btn-link text-danger p-0"
+                        i18n:translate="">Delete</button>
+              </form>
+            </span>
+          </div>
+          <div class="p-4 text-center text-muted" tal:condition="not:sections/own"
+               i18n:translate="">No custom fields on this object yet.</div>
+        </details>
+
+        <details class="mdf-sec">
+          <summary>
+            <span class="text-muted" i18n:translate="">Native fields</span>
+            <span class="mdf-cnt" tal:content="python:len(sections['native'])">0</span>
+            <span class="float-right mdf-lock font-weight-normal"
+                  i18n:translate="">read only / cannot be deleted</span>
+          </summary>
+          <div class="mdf-row mdf-row-ro" tal:repeat="field sections/native">
+            <span class="mdf-c" style="width:170px;">
+              <span class="mdf-code" tal:content="field/name">name</span></span>
+            <span class="mdf-c text-muted" style="width:92px;" tal:content="field/type">type</span>
+            <span class="mdf-c" style="flex-grow:1;" tal:content="field/label">label</span>
+            <span class="mdf-c" style="width:260px;">
+              <span class="mdf-code" tal:content="field/source">src</span></span>
+            <span class="mdf-c mdf-lock" style="width:130px;"
+                  i18n:translate="">cannot be deleted</span>
+          </div>
+        </details>
+
+        <details class="mdf-sec">
+          <summary>
+            <span class="text-muted" i18n:translate="">Added by other add-ons</span>
+            <span class="mdf-cnt" tal:content="python:len(sections['addon'])">0</span>
+            <span class="float-right mdf-lock font-weight-normal"
+                  i18n:translate="">read only / cannot be deleted</span>
+          </summary>
+          <div class="mdf-row mdf-row-ro" tal:repeat="field sections/addon">
+            <span class="mdf-c" style="width:170px;">
+              <span class="mdf-code" tal:content="field/name">name</span></span>
+            <span class="mdf-c text-muted" style="width:92px;" tal:content="field/type">type</span>
+            <span class="mdf-c" style="flex-grow:1;" tal:content="field/label">label</span>
+            <span class="mdf-c" style="width:260px;">
+              <span class="mdf-code" tal:content="field/source">src</span></span>
+            <span class="mdf-c mdf-lock" style="width:130px;"
+                  i18n:translate="">cannot be deleted</span>
+          </div>
+        </details>
+
+      </tal:sections>
+
+      <!-- ============ 添加字段：右侧抽屉（同页，不跳新页） ============ -->
+      <div class="mdf-backdrop" id="mdf_backdrop"></div>
+      <div class="mdf-panel" id="mdf_panel"
+           tal:attributes="data-mdf-reopen python:view.reopen_panel and '1' or '0'">
+        <div class="mdf-panel-head">
+          <button type="button" class="mdf-panel-x" id="mdf_close"
+                  aria-label="Close">&#215;</button>
+          <span i18n:translate="">Add field</span>
+        </div>
+        <!-- 保存失败时抽屉会自动重开，页面顶部那条报错就被挡在后面了，
+             所以这儿再放一份。只在重开的那一次显示。 -->
+        <div class="alert alert-danger py-2 m-3 mb-0"
+             tal:condition="view/reopen_panel">
+          <div tal:repeat="err view/errors" tal:content="err">error</div>
+        </div>
+        <form method="post" class="p-3" tal:attributes="action base">
+          <input type="hidden" name="action" value="save_field" />
+          <input type="hidden" name="tab" value="objects" />
+          <input type="hidden" name="portal_type"
+                 tal:attributes="value info/portal_type" />
+
+          <fieldset class="border rounded p-2 mb-3">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Basics</legend>
+
+          <!-- 这里不放「目标对象」那一行：它不是个能填的东西，摆在一堆输入框
+               中间只是噪音。抽屉宽 1040px，左边那半页（对象列表和标题
+               「检验项目 AnalysisService」）照样露在外面，看得见自己在给谁
+               加字段。真正提交用的 portal_type 是上面那个隐藏域。 -->
+          <div class="mdf-f">
+            <div class="mdf-n" i18n:translate="">Field name</div>
+            <div>
+              <input type="text" name="name" class="form-control form-control-sm"
+                     required="required"
+                     tal:attributes="pattern view/name_pattern;
+                                     value python:view.prefill('name')" />
+            </div>
+            <div class="mdf-h" i18n:translate="">
+              Starts with a letter. Cannot be changed later.
+            </div>
+          </div>
+
+          <div class="mdf-f">
+            <div class="mdf-n" i18n:translate="">Field type</div>
+            <div>
+              <select id="mdf_fieldtype" name="type"
+                      class="form-control form-control-sm">
+                <option tal:repeat="ft view/field_types"
+                        tal:attributes="value ft/id;
+                                        selected python:view.prefill_selected('type', ft['id'])"
+                        tal:content="ft/title">type</option>
+              </select>
+            </div>
+            <div class="mdf-h" i18n:translate="">
+              Cannot be changed later; delete and re-create instead.
+            </div>
+          </div>
+
+          <div class="mdf-f" tal:define="fs_ok view/fieldset_supported">
+            <div class="mdf-n" i18n:translate="">Fieldset</div>
+            <div>
+              <tal:ok condition="fs_ok">
+                <select id="mdf_fieldset" name="fieldset"
+                        class="form-control form-control-sm">
+                  <option tal:repeat="fs view/fieldset_options"
+                          tal:attributes="value fs;
+                                          selected python:view.prefill_selected('fieldset', fs)"
+                          tal:content="fs">default</option>
+                </select>
+              </tal:ok>
+              <tal:no condition="not:fs_ok">
+                <input type="hidden" name="fieldset" value="default" />
+                <div class="form-control form-control-sm bg-light text-muted"
+                     style="border-style:dashed;">default</div>
+              </tal:no>
+            </div>
+            <div class="mdf-h">
+              <tal:ok condition="fs_ok" i18n:translate="">
+                Puts the field into one of the tabs on the edit form. Only
+                groups this object type already has are offered.
+              </tal:ok>
+              <tal:no condition="not:fs_ok"
+                      tal:content="view/fieldset_skip_reason">why</tal:no>
+            </div>
+          </div>
+
+          <div class="mdf-f">
+            <div class="mdf-n" i18n:translate="">Order</div>
+            <div>
+              <input type="text" id="mdf_order" name="order"
+                     class="form-control form-control-sm" style="width:90px;"
+                     tal:attributes="value python:view.prefill('order', '0')" />
+            </div>
+            <div class="mdf-h" i18n:translate="">
+              Leave it at 0 unless you need a specific order. 0 means the
+              fields appear in the order they were created.
+            </div>
+          </div>
+
+          <!-- 默认值分两行：能手打的类型给输入框；固定选项给一句话，指路到
+               下面的选项列表。日期 / 对象引用 两行都不出现（没有默认值可言），
+               整行消失而不是留个空框。 -->
+          <div class="mdf-f" data-mdf-types="text textarea int decimal bool">
+            <div class="mdf-n" i18n:translate="">Default value</div>
+            <div>
+              <input type="text" id="mdf_default" name="default"
+                     class="form-control form-control-sm"
+                     tal:attributes="value python:view.prefill('default')" />
+            </div>
+            <div class="mdf-h" i18n:translate="">
+              Filled in automatically when a new object is created.
+            </div>
+          </div>
+
+          <div class="mdf-f" data-mdf-types="choice">
+            <div class="mdf-n" i18n:translate="">Default value</div>
+            <div class="small text-muted"
+                 i18n:translate="">picked in the Options list below</div>
+            <div class="mdf-h" i18n:translate="">
+              It has to be one of the options, so it is picked there. The
+              first option is the default.
+            </div>
+          </div>
+
+          <div class="mdf-f">
+            <div class="mdf-n" i18n:translate="">Required</div>
+            <div>
+              <input type="checkbox" id="mdf_req" name="required" value="1"
+                     tal:attributes="checked python:view.prefill_check('required')" />
+            </div>
+            <div class="mdf-h" i18n:translate="">
+              Once on, existing records have to fill it in the next time
+              anyone edits them.
+            </div>
+          </div>
+
+          <div class="mdf-f">
+            <div class="mdf-n" i18n:translate="">Read only</div>
+            <div>
+              <input type="checkbox" id="mdf_ro" name="readonly" value="1"
+                     tal:attributes="checked python:view.prefill_check('readonly')" />
+            </div>
+            <div class="mdf-h" i18n:translate="">
+              For values that come from an import, an instrument or a script.
+            </div>
+          </div>
+
+          <div class="mdf-f" data-mdf-types="choice reference">
+            <div class="mdf-n" i18n:translate="">Multiple values</div>
+            <div>
+              <input type="checkbox" id="mdf_multi" name="multi" value="1"
+                     tal:attributes="checked python:view.prefill_check('multi')" />
+            </div>
+            <div class="mdf-h" i18n:translate="">
+              More than one value may be picked.
+            </div>
+          </div>
+
+          </fieldset>
+
+          <fieldset class="border rounded p-2 mb-3">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Labels (stored as data, applied without a restart)</legend>
+            <div class="mdf-f" tal:repeat="lang languages">
+              <div class="mdf-n">
+                <span i18n:translate="">Label</span>
+                (<span tal:content="lang/label">zh</span>)
+              </div>
+              <div>
+                <input type="text" class="form-control form-control-sm"
+                       tal:attributes="name string:label_${lang/slug};
+                                       value python:view.prefill('label_%s' % lang['slug'])" />
+              </div>
+              <div class="mdf-h" tal:condition="repeat/lang/start"
+                   i18n:translate="">The name shown on the form and the view page.</div>
+            </div>
+            <div class="mdf-f" tal:repeat="lang languages">
+              <div class="mdf-n">
+                <span i18n:translate="">Description</span>
+                (<span tal:content="lang/label">zh</span>)
+              </div>
+              <div>
+                <input type="text" class="form-control form-control-sm"
+                       tal:attributes="name string:desc_${lang/slug};
+                                       value python:view.prefill('desc_%s' % lang['slug'])" />
+              </div>
+              <div class="mdf-h" tal:condition="repeat/lang/start"
+                   i18n:translate="">Optional. Shown as help text under the field.</div>
+            </div>
+          </fieldset>
+
+          <fieldset class="border rounded p-2 mb-3">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Where it shows</legend>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Edit form</div>
+              <div>
+                <input type="checkbox" id="mdf_edit" name="show_edit" value="1"
+                       tal:attributes="checked python:view.prefill_check('show_edit', True)" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Show the field on the object's edit form.
+              </div>
+            </div>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">View page</div>
+              <div>
+                <input type="checkbox" id="mdf_view" name="show_view" value="1"
+                       tal:attributes="checked python:view.prefill_check('show_view', True)" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Show the field on the object's view page.
+              </div>
+            </div>
+            <!-- 这里原来还有「列表列」和「列表默认显示」两个勾选框。两个
+                 都没实现：列表视图的列来自一份跟 schema 无关的 dict，本包
+                 的配置根本到不了那儿。勾了不报错，列也不会出现。
+                 跟 show_report 一个处理法——界面上不给，_read_common 里
+                 钉死 False。 -->
+            <div class="alert alert-warning py-2 mt-2 mb-0 small" i18n:translate="">
+                These two switches reach the standard edit and view forms,
+                the sample add form (it does read the AR schema) and the
+                header table. They do not reach the listing views, nor the
+                worksheet results entry header, which is a hand written
+                template.
+              </div>
+          </fieldset>
+
+          <!--
+            按字段类型联动：每块用 data-mdf-types 声明自己适用于哪些类型，
+            下面那段 JS 按当前选中的类型显隐。没有 JS 时全部显示（可降级）。
+
+            服务端不依赖显隐：_read_type_specific() 本来就只按 field_type 读
+            对应的项，界面藏起来的输入框即使被提交也不会进记录。
+          -->
+
+          <fieldset class="border rounded p-2 mb-3" data-mdf-types="choice">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Options</legend>
+            <div class="form-row mb-1">
+              <div class="col-md-1 small text-muted text-center"
+                   i18n:translate="">Default</div>
+              <div class="col-md-3 small text-muted"
+                   i18n:translate="">Stored value</div>
+              <div class="col-md-4 small text-muted" tal:repeat="lang languages">
+                <span i18n:translate="">Label</span>
+                (<span tal:content="lang/label">zh</span>)
+              </div>
+            </div>
+            <!-- 第一行的单选钮预先选中：固定选项字段总有一个默认值，没有
+                 「不设默认值」这个选项。 -->
+            <div class="form-row align-items-center"
+                 tal:repeat="n python:range(5)">
+              <div class="col-md-1 text-center">
+                <input type="radio" name="default_option"
+                       tal:attributes="value n; id string:mdf_defopt_${n};
+                                       checked python:view.prefill_radio(
+                                           'default_option', n, n == 0)" />
+              </div>
+              <div class="form-group col-md-3 mb-1">
+                <input type="text" name="option_key" placeholder="low"
+                       class="form-control form-control-sm"
+                       tal:attributes="value python:view.prefill_row('option_key', n)" />
+              </div>
+              <div class="form-group col-md-4 mb-1" tal:repeat="lang languages">
+                <input type="text" class="form-control form-control-sm"
+                       tal:attributes="name string:option_label_${lang/slug};
+                                       placeholder string:${lang/label};
+                                       value python:view.prefill_row(
+                                           'option_label_%s' % lang['slug'], n)" />
+              </div>
+            </div>
+            <div class="alert alert-warning py-2 mb-0 small" i18n:translate="">
+              The stored value takes letters, digits and underscore only -
+              it is what gets written onto the objects. Chinese goes in the
+              label next to it. Store Chinese here and the data can never be
+              translated, and indexes, exports and statistics are locked to
+              that one language; changing it later means migrating data.
+            </div>
+          </fieldset>
+
+          <fieldset class="border rounded p-2 mb-3" data-mdf-types="reference">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Reference target</legend>
+            <div class="mdf-f" style="align-items:start;">
+              <div class="mdf-n" style="padding-top:6px;"
+                   i18n:translate="">Allowed object types</div>
+              <div>
+                <select name="allowed_types" multiple="multiple" size="5"
+                        class="form-control form-control-sm">
+                  <option tal:repeat="rt view/reference_type_options"
+                          tal:attributes="value rt/id;
+                                          selected python:view.prefill_selected('allowed_types', rt['id'])"
+                          tal:content="rt/title">t</option>
+                </select>
+              </div>
+              <div class="mdf-h" style="padding-top:6px;" i18n:translate="">
+                Which kind of object this field points at. Hold Ctrl (Cmd on
+                a Mac) to pick more than one.
+              </div>
+            </div>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Include inactive objects</div>
+              <div>
+                <input type="checkbox" id="mdf_inact" name="include_inactive" value="1"
+                       tal:attributes="checked python:view.prefill_check('include_inactive')" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Traceability fields usually need this: the object that was
+                used back then may have been deactivated since.
+              </div>
+            </div>
+          </fieldset>
+
+          <!-- 这里原来有一段「数值范围」：最小值 / 最大值 / 小数位。
+               2026-09-21 查出来它们只做了一半，而且两边各做了一半：
+                 最小值 / 最大值  只有 dxfields.py 读，Archetypes 不读
+                 小数位          只有 atfields.py 读，Dexterity 不读
+               样品（AnalysisRequest）是 Archetypes，所以在最常用的那个
+               对象上设数值范围完全不起作用，而且不报错。
+
+               半生效比不生效更难查——同一个开关在这个对象上管用、换个
+               对象就不管用。按「最小功能实现、确保无 bug」先整段拿掉。
+
+               storage 的 min / max / precision、view 的读取、validation
+               和导入导出都保留着。真做出来时要补的是：AT 侧的数值范围
+               （atfields 里加 validators），DX 侧的小数位。 -->
+
+          <fieldset class="border rounded p-2 mb-3"
+                    data-mdf-types="text textarea">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Text constraints</legend>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Max length</div>
+              <div>
+                <input type="text" name="maxlen"
+                       class="form-control form-control-sm" style="width:110px;"
+                       tal:attributes="value python:view.prefill('maxlen')" />
+              </div>
+              <div class="mdf-h" i18n:translate="">Leave it empty for no limit.</div>
+            </div>
+            <!-- 这里原来还有「校验正则」和「校验失败提示」（后者每种语言
+                 一个框）。2026-09-21 查出来两个都没实现：regex / regex_msg
+                 在 atfields.py、dxfields.py、dxschema.py 里出现次数都是 0，
+                 填了正则不会校验任何东西。跟工作流状态那段一个毛病，按同一
+                 条规矩拿掉——不生效的控件不留在页面上。
+
+                 storage 的键、view 的读取、validation 里「填了正则就得填提示」
+                 那条、以及导入导出都保留着，真做出来时把界面放回来即可。
+                 要实现的是把 regex 挂成 AT 的 validator / DX 的 constraint。 -->
+          </fieldset>
+
+          <!-- 这里原来有一段「数据约束」：勾几个工作流状态，声称字段只有在
+               那些状态下才允许编辑。2026-09-21 查出来它根本没实现——表单把
+               勾选结果存进了配置记录，但 atfields.py / dxfields.py 里
+               `states` 出现 0 次，没有任何代码读它。勾完字段照样在所有状态
+               下能改。
+
+               一个按了没反应的开关比没有这个开关更糟：实施人员勾完会以为
+               字段已经冻住了。所以先从页面上拿掉。
+
+               storage 里的 `states` 键、view 里的读取、导入导出都保留着，
+               真做出来的时候把界面放回来就行。要实现的是：按对象**当前
+               所处的状态**算这个字段能不能写——AT 和 DX 两条路径都要做，
+               不是造 schema 时一次性能决定的事。 -->
+
+          <fieldset class="border rounded p-2 mb-3">
+            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
+                    i18n:translate="">Search</legend>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Catalog index</div>
+              <div>
+                <input type="checkbox" id="mdf_index" name="index" value="1"
+                       tal:attributes="checked python:view.prefill_check('index')" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Without an index the field cannot be searched or filtered on.
+              </div>
+            </div>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Metadata column</div>
+              <div>
+                <input type="checkbox" id="mdf_meta" name="metadata" value="1"
+                       tal:attributes="checked python:view.prefill_check('metadata')" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Needed before the field can be shown as a listing column.
+              </div>
+            </div>
+            <small class="form-text text-muted" i18n:translate="">
+              Existing objects are only covered after pressing Reindex.
+              Turn indexes off again before rolling the add-on back.
+            </small>
+          </fieldset>
+
+          <button type="submit" class="btn btn-primary btn-sm"
+                  style="background:#35708F;border-color:#2c5f7a;"
+                  i18n:translate="">Save</button>
+          <script type="text/javascript">
+          /* 按字段类型显隐配置项。
+             每个块用 data-mdf-types 声明适用类型（空格分隔）；没有这个属性的
+             块恒显示。没有 JS 时什么都不藏，功能不受影响，只是界面长一点。 */
+          (function () {
+            var sel = document.getElementById("mdf_fieldtype");
+            if (!sel) { return; }
+            var blocks = document.querySelectorAll("[data-mdf-types]");
+            function sync() {
+              var current = sel.value;
+              for (var i = 0; i < blocks.length; i++) {
+                var el = blocks[i];
+                var types = (el.getAttribute("data-mdf-types") || "").split(" ");
+                var show = false;
+                for (var j = 0; j < types.length; j++) {
+                  if (types[j] === current) { show = true; break; }
+                }
+                el.style.display = show ? "" : "none";
+              }
+            }
+            sel.addEventListener("change", sync);
+            sync();
+          })();
+
+          /* 右侧抽屉的开合。
+             保存失败时自动重开：表单已经回填（view.prefill*），抽屉里也另放
+             了一份报错，用户接着改就行，不用重头再填一遍。 */
+          (function () {
+            var opener = document.getElementById("mdf_open");
+            var panel = document.getElementById("mdf_panel");
+            if (!opener || !panel) { return; }
+            var body = document.body;
+            // 先声明「这一页有 JS」，样式表里的抽屉规则才生效
+            body.className += " mdf-js";
+            function show(on) {
+              var cls = body.className.replace(/\s*\bmdf-open\b/g, "");
+              body.className = on ? cls + " mdf-open" : cls;
+            }
+            opener.addEventListener("click", function () { show(true); });
+            var shut = document.getElementById("mdf_close");
+            if (shut) {
+              shut.addEventListener("click", function () { show(false); });
+            }
+            var back = document.getElementById("mdf_backdrop");
+            if (back) {
+              back.addEventListener("click", function () { show(false); });
+            }
+            document.addEventListener("keydown", function (ev) {
+              if (ev.keyCode === 27) { show(false); }
+            });
+            if (panel.getAttribute("data-mdf-reopen") === "1") { show(true); }
+          })();
+          </script>
+          <span class="small text-muted ml-2" i18n:translate="">
+            Takes effect immediately; no container restart needed.
+          </span>
+        </form>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <!-- ================= tab 2：全部自定义字段 ================= -->
+  <div tal:condition="python:tab == 'all'"
+       tal:define="stats view/stats; broken view/broken_records;">
+
+    <div class="alert alert-danger py-2" tal:condition="broken">
+      <div class="font-weight-bold">
+        <span tal:content="python:len(broken)">1</span>
+        <span i18n:translate="">configuration record(s) skipped</span>
+      </div>
+      <div tal:repeat="b broken" class="small mt-1">
+        <span class="mdf-code" tal:content="b/name">name</span>
+        <span tal:content="b/reason">reason</span>
+        <form method="post" class="d-inline ml-2" tal:attributes="action base">
+          <input type="hidden" name="action" value="drop_broken" />
+          <input type="hidden" name="tab" value="all" />
+          <input type="hidden" name="field_id" tal:attributes="value b/id" />
+          <button type="submit" class="btn btn-sm btn-link text-danger p-0"
+                  i18n:translate="">Delete this record</button>
+        </form>
+      </div>
+      <div class="small mt-1 text-muted" i18n:translate="">
+        Startup skipped them and logged an error; the site itself is unaffected.
+      </div>
+    </div>
+
+    <div class="border rounded p-3 mb-3" style="background:#f8f9fa;">
+      <span class="mdf-stat">
+        <strong style="font-size:21px;" tal:content="stats/total">0</strong>
+        <span class="small text-muted" i18n:translate="">custom fields</span></span>
+      <span class="mdf-stat">
+        <strong style="font-size:21px;" tal:content="stats/types">0</strong>
+        <span class="small text-muted" i18n:translate="">objects covered</span></span>
+      <span class="mdf-stat">
+        <strong style="font-size:21px;"
+                tal:content="python:'%s / %s' % (stats['at'], stats['dx'])">0 / 0</strong>
+        <span class="small text-muted" i18n:translate="">AT / DX objects</span></span>
+      <span class="mdf-stat">
+        <strong style="font-size:21px;" tal:content="stats/indexed">0</strong>
+        <span class="small text-muted" i18n:translate="">indexed</span></span>
+      <span class="mdf-stat" style="border-right:0;">
+        <strong style="font-size:21px;color:#b32d3c;" tal:content="stats/broken">0</strong>
+        <span class="small text-muted" i18n:translate="">broken records</span></span>
+      <span class="small text-muted float-right mt-2">
+        <span i18n:translate="">Limit</span>
+        <span tal:content="stats/max_per_type">50</span> /
+        <span tal:content="stats/max_total">500</span>
+      </span>
+    </div>
+
+    <details class="mdf-grp" tal:repeat="group view/all_field_groups" open="open">
+      <summary>
+        <strong tal:content="group/title">Title</strong>
+        <span class="mdf-code ml-1" tal:content="group/portal_type">Type</span>
+        <span tal:attributes="class string:mdf-mech mdf-mech-${group/mechanism}"
+              tal:content="group/mechanism">AT</span>
+        <span class="mdf-cnt mdf-cnt-on ml-1" tal:content="group/count">0</span>
+      </summary>
+      <div class="mdf-hrow">
+        <span class="mdf-c" style="width:186px;" i18n:translate="">Name</span>
+        <span class="mdf-c" style="width:96px;" i18n:translate="">Type</span>
+        <span class="mdf-c" style="width:168px;" i18n:translate="">Label</span>
+        <span class="mdf-c" style="width:168px;" i18n:translate="">English label</span>
+        <span class="mdf-c" style="width:124px;" i18n:translate="">Shown in</span>
+        <span class="mdf-c" style="width:74px;" i18n:translate="">Index</span>
+        <span class="mdf-c" style="flex-grow:1;" i18n:translate="">Created</span>
+      </div>
+      <div class="mdf-row" tal:repeat="field group/rows">
+        <span class="mdf-c" style="width:186px;">
+          <span class="mdf-code" tal:content="field/name">name</span></span>
+        <span class="mdf-c text-muted" style="width:96px;" tal:content="field/type_title">t</span>
+        <span class="mdf-c" style="width:168px;" tal:content="field/label">label</span>
+        <span class="mdf-c text-muted" style="width:168px;" tal:content="field/label_en">en</span>
+        <span class="mdf-c" style="width:124px;">
+          <span tal:repeat="slot field/positions"
+                tal:attributes="class python:'mdf-pos mdf-pos-on' if slot['on'] else 'mdf-pos mdf-pos-off'"
+                tal:content="slot/text">x</span></span>
+        <span class="mdf-c text-muted" style="width:74px;" tal:content="field/index_label">-</span>
+        <span class="mdf-c text-muted" style="flex-grow:1;"
+              tal:content="python:'%s, %s' % (field['creator'], field['created'])">who</span>
+      </div>
+    </details>
+
+    <details class="mdf-grp mt-3">
+      <summary i18n:translate="">Import configuration (JSON)</summary>
+      <form method="post" class="p-3" enctype="multipart/form-data"
+            tal:attributes="action base">
+        <input type="hidden" name="action" value="import_config" />
+        <input type="hidden" name="tab" value="all" />
+        <div class="form-group">
+          <label class="small" i18n:translate="">Upload the file exported from another site</label>
+          <input type="file" name="upload" class="form-control-file" />
+        </div>
+        <div class="form-group">
+          <label class="small" i18n:translate="">...or paste the JSON here</label>
+          <textarea name="payload" rows="5" class="form-control form-control-sm"></textarea>
+        </div>
+        <div class="form-group">
+          <select name="mode" class="form-control form-control-sm" style="width:220px;">
+            <option value="merge" i18n:translate="">Merge (add and overwrite)</option>
+            <option value="replace" i18n:translate="">Replace (wipe first)</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-sm btn-outline-secondary"
+                i18n:translate="">Import</button>
+        <span class="small text-muted ml-2" i18n:translate="">
+          Configuration does not travel with GenericSetup, so this is the only way
+          to move it between sites.
+        </span>
+      </form>
+    </details>
+  </div>
+
+</div>
+</tal:page>
+
+</metal:content-core>
+</body>
+</html>

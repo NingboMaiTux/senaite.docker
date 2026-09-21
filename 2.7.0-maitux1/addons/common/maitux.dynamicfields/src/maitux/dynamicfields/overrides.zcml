@@ -1,0 +1,23 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    i18n_domain="maitux.dynamicfields">
+
+  <!--
+    覆盖 plone.dexterity 的全局 IBehaviorAssignable。
+
+    本包的适配器签名与 plone.dexterity/configure.zcml:42 完全相同
+    （(IDexterityContent,) -> IBehaviorAssignable, name=u''），放 configure.zcml
+    会直接 ConfigurationConflictError、站点起不来。R5b：同接口同名的跨 addon
+    adapter 必须进 overrides.zcml。
+
+    覆盖是安全的：DynamicFieldsAssignable 继承 DexterityBehaviorAssignable，
+    enumerateBehaviors() 先 super() 枚举 FTI 上登记的 behavior，再追加本包的
+    动态 schema，原生行为一条不少。
+
+    已知边界：别的 add-on 若为更具体的接口注册了自己的 IBehaviorAssignable
+    （INNOCARE.labid 是 @adapter(ILaboratory)），zope 仍会挑更具体的那个，
+    本包在该类型上被旁路。配置页用 assignable.is_assignable_active() 实测告警。
+  -->
+  <adapter factory=".assignable.DynamicFieldsAssignable" />
+
+</configure>
