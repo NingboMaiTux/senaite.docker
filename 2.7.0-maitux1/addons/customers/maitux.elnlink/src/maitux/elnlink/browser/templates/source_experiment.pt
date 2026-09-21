@@ -1,0 +1,43 @@
+<div class="card mb-3 border-info maitux-elnlink-source"
+     tal:define="d view/data"
+     i18n:domain="maitux.elnlink">
+  <div class="card-header py-2 d-flex justify-content-between align-items-center">
+    <span>
+      <strong i18n:translate="">Source Experiment (MaiELN)</strong>
+      <span class="badge badge-info ml-2" tal:content="d/project_code"
+            tal:condition="d/project_code">PRJ-KRAS-001</span>
+    </span>
+    <span>
+      <a class="btn btn-sm btn-outline-primary mr-1"
+         tal:attributes="href d/sample_url" target="_blank" rel="noopener"
+         i18n:translate="">Open Sample in MaiELN</a>
+      <a class="btn btn-sm btn-primary"
+         tal:attributes="href d/experiment_url" target="_blank" rel="noopener"
+         i18n:translate="">Open Experiment in MaiELN</a>
+    </span>
+  </div>
+  <div class="card-body py-2">
+    <table class="table table-sm table-borderless mb-0" style="width:auto">
+      <tr>
+        <th class="text-muted pr-3" i18n:translate="">Experiment</th>
+        <td><a tal:attributes="href d/experiment_url" target="_blank" rel="noopener"><span tal:content="d/experiment_no">EXP-2026-000045</span></a></td>
+      </tr>
+      <tr tal:condition="d/experiment_title">
+        <th class="text-muted pr-3" i18n:translate="">Title</th>
+        <td tal:content="d/experiment_title">Synthesis of INC-KRAS-042</td>
+      </tr>
+      <tr tal:condition="d/scientist">
+        <th class="text-muted pr-3" i18n:translate="">Scientist</th>
+        <td tal:content="d/scientist">Dr. Chen Wei</td>
+      </tr>
+      <tr tal:condition="d/department">
+        <th class="text-muted pr-3" i18n:translate="">Department</th>
+        <td tal:content="d/department">Medicinal Chemistry</td>
+      </tr>
+      <tr tal:condition="d/project">
+        <th class="text-muted pr-3" i18n:translate="">Project</th>
+        <td tal:content="d/project">KRAS G12D Inhibitor Discovery</td>
+      </tr>
+    </table>
+  </div>
+</div>

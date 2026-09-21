@@ -1,0 +1,42 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:i18n="http://namespaces.zope.org/i18n"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    i18n_domain="maitux.elnlink">
+
+  <include package="Products.GenericSetup" file="meta.zcml" />
+  <!-- The explicit package-includes slug is processed BEFORE five:loadProducts
+       (see gen-custom-addon.sh), i.e. before Products.CMFCore has registered
+       cmf.ManagePortal, which the demo pages are protected by. Without this
+       the whole site fails to start (ComponentLookupError); ZCML de-duplicates
+       includes by file, so CMFCore loading it again later is harmless. -->
+  <include package="Products.CMFCore" file="permissions.zcml" />
+
+  <include package=".extenders" />
+  <include package=".browser" />
+
+  <!-- Push an analysis to MaiELN on submit / verify / retract / reject.
+       IAfterTransitionEvent is a DCWorkflow interface (no senaite.core
+       permission involved, so configure.zcml is the right place - R1). -->
+  <subscriber
+      for="bika.lims.interfaces.IAnalysis
+           Products.DCWorkflow.interfaces.IAfterTransitionEvent"
+      handler=".events.on_analysis_transition" />
+
+  <genericsetup:registerProfile
+      name="default"
+      title="maitux.elnlink"
+      directory="profiles/default"
+      description="MaiELN link: source experiment on samples, deep links, result push, demo seed"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="maitux.elnlink (uninstall)"
+      directory="profiles/uninstall"
+      description="Uninstalls maitux.elnlink"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+</configure>

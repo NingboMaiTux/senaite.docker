@@ -1,0 +1,39 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    i18n_domain="maitux.elnlink">
+
+  <!-- "Source Experiment (MaiELN)" card on a sample that came from MaiELN.
+       Same manager and layer as senaite.core's own sample viewlets
+       (sample_attachments); zope2.View is a Zope permission, so this is
+       fine in configure.zcml (R1). -->
+  <browser:viewlet
+      for="bika.lims.interfaces.IAnalysisRequest"
+      name="maitux.elnlink.source_experiment"
+      class=".viewlets.SourceExperimentViewlet"
+      manager="plone.app.layout.viewlets.interfaces.IBelowContentTitle"
+      permission="zope2.View"
+      layer="maitux.elnlink.interfaces.IElnLinkLayer"
+      />
+
+  <!-- Demo seed / reset / status (Manager only, JSON). -->
+  <browser:page
+      name="eln-demo-seed"
+      for="Products.CMFPlone.interfaces.IPloneSiteRoot"
+      class=".demo.SeedView"
+      permission="cmf.ManagePortal"
+      />
+  <browser:page
+      name="eln-demo-reset"
+      for="Products.CMFPlone.interfaces.IPloneSiteRoot"
+      class=".demo.ResetView"
+      permission="cmf.ManagePortal"
+      />
+  <browser:page
+      name="eln-demo-status"
+      for="Products.CMFPlone.interfaces.IPloneSiteRoot"
+      class=".demo.StatusView"
+      permission="cmf.ManagePortal"
+      />
+
+</configure>
