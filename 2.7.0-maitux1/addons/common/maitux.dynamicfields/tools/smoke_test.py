@@ -435,6 +435,38 @@ if os.path.exists(MO):
 else:
     check(u"找得到编译好的 zh_CN .mo", False, MO)
 
+# --- lint：模板里每条 i18n 文案都必须有 zh_CN 译文 ---
+# 漏一条的后果不是报错，是中文界面上突然冒出一句英文，而且很可能正好是
+# 那句关键提示。实测踩过：「Editable in workflow states (empty = any)」漏译，
+# 用户看到英文标签 + 一个多选框，以为那是必填项。
+TPL_PATH = ("/opt/addons/common/maitux.dynamicfields/src/maitux/"
+            "dynamicfields/browser/templates/dynamicfields.pt")
+PO_PATH = ("/opt/addons/common/maitux.dynamicfields/src/maitux/"
+           "dynamicfields/locales/zh_CN/LC_MESSAGES/maitux.dynamicfields.po")
+if os.path.exists(TPL_PATH) and os.path.exists(PO_PATH):
+    _tpl = io.open(TPL_PATH, encoding="utf-8").read()
+    _po = io.open(PO_PATH, encoding="utf-8").read()
+    _ids = set()
+    for _m in re.finditer(u'i18n:translate=""[^>]*>([^<]+)<', _tpl):
+        _t = u" ".join(_m.group(1).split())
+        if _t:
+            _ids.add(_t)
+    for _m in re.finditer(
+            u'placeholder="([^"]+)"\\s*\n?\\s*i18n:attributes="placeholder"',
+            _tpl):
+        _ids.add(_m.group(1))
+    _have = set()
+    for _m in re.finditer(u'^msgid "(.*)"\\s*\nmsgstr "(.+)"', _po, re.M):
+        if _m.group(2).strip():
+            _have.add(_m.group(1))
+    _missing = sorted([i for i in _ids if i not in _have])
+    check(u"模板里每条 i18n 文案（%d 条）都有 zh_CN 译文" % len(_ids),
+          not _missing,
+          u"缺 %d 条，第一条: %s" % (len(_missing), _missing[0][:50])
+          if _missing else u"")
+else:
+    check(u"找得到模板和 .po", False, TPL_PATH)
+
 # --- lint：源码里不许再出现写死的中文界面文案 ---
 # 白名单：这几处是刻意保留的中文字面量
 ALLOWED = set([u"\u7f16", u"\u67e5", u"\u5217", u"\u62a5",   # 徽章单字，与 E/V/L/R 配对

@@ -510,7 +510,7 @@
           <fieldset class="border rounded p-2 mb-3"
                     data-mdf-types="text textarea">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
-                    i18n:translate="">Text constraints</legend>
+                    i18n:translate="">What may be typed in</legend>
             <div class="form-row">
               <div class="form-group col-md-3">
                 <label class="small" i18n:translate="">Max length</label>
@@ -536,27 +536,56 @@
 
           <fieldset class="border rounded p-2 mb-3">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
-                    i18n:translate="">Data constraints</legend>
+                    i18n:translate="">How this field gets filled in</legend>
+            <p class="small text-muted mb-2" i18n:translate="">
+              All of this is optional. Leave everything alone and the field
+              behaves the most permissive way: anyone may leave it blank and
+              may change it at any time. Only touch it if you need something
+              stricter.
+            </p>
             <div class="form-row">
               <div class="form-group col-md-6">
-                <label class="small" i18n:translate="">Editable in workflow states (empty = any)</label>
-                <select name="states" multiple="multiple" size="4"
+                <label class="small" for="mdf_states"
+                       i18n:translate="">It may only be changed in these stages</label>
+                <select id="mdf_states" name="states" multiple="multiple" size="4"
                         class="form-control form-control-sm">
                   <option tal:repeat="st info/states"
                           tal:attributes="value python:st[0]"
                           tal:content="python:'%s (%s)' % (st[1], st[0])">state</option>
                 </select>
+                <small class="form-text text-muted" i18n:translate="">
+                  Select nothing and it can be changed at any time - that is
+                  the normal case. Only pick stages when the value has to be
+                  frozen once the sample moves on, so that nobody edits it
+                  after the fact.
+                </small>
               </div>
               <div class="col-md-6">
                 <div class="form-group"
                      data-mdf-types="text textarea int decimal bool choice">
                   <label class="small" for="mdf_default"
-                         i18n:translate="">Default value</label>
+                         i18n:translate="">Pre-fill it with</label>
                   <input type="text" id="mdf_default" name="default"
                          class="form-control form-control-sm" />
-                  <small class="form-text text-muted" i18n:translate="">
-                    Choice: one of the ASCII keys above. Boolean: 1 / true /
-                    yes means checked. Date fields take no default.
+                  <small class="form-text text-muted"
+                         data-mdf-types="text textarea" i18n:translate="">
+                    Pre-filled when a new object is created. Leave it empty if
+                    there is no sensible default.
+                  </small>
+                  <small class="form-text text-muted"
+                         data-mdf-types="int decimal" i18n:translate="">
+                    The number pre-filled when a new object is created. Leave
+                    it empty if there is no sensible default.
+                  </small>
+                  <small class="form-text text-muted"
+                         data-mdf-types="bool" i18n:translate="">
+                    Type 1 to have the box ticked by default. Leave it empty
+                    and the box starts unticked.
+                  </small>
+                  <small class="form-text text-muted"
+                         data-mdf-types="choice" i18n:translate="">
+                    Which option is picked by default. Type one of the storage
+                    keys from the Options list above, not the label.
                   </small>
                 </div>
                 <div class="custom-control custom-checkbox"
@@ -570,14 +599,22 @@
                   <input type="checkbox" class="custom-control-input" id="mdf_req"
                          name="required" value="1" />
                   <label class="custom-control-label small" for="mdf_req"
-                         i18n:translate="">Required</label>
+                         i18n:translate="">It must be filled in before saving</label>
                 </div>
+                <small class="form-text text-muted mb-1" i18n:translate="">
+                  Careful with data you already have: once this is on, old
+                  records have to fill it in the next time anyone edits them.
+                </small>
                 <div class="custom-control custom-checkbox">
                   <input type="checkbox" class="custom-control-input" id="mdf_ro"
                          name="readonly" value="1" />
                   <label class="custom-control-label small" for="mdf_ro"
-                         i18n:translate="">Read only</label>
+                         i18n:translate="">Show it, but nobody may type in it</label>
                 </div>
+                <small class="form-text text-muted" i18n:translate="">
+                  For values that come from somewhere else - an import, an
+                  instrument, a script. People see it but cannot change it.
+                </small>
               </div>
             </div>
           </fieldset>

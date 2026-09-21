@@ -419,3 +419,96 @@ msgstr "固定选项：填上面某个 ASCII key。布尔：1 / true / yes 表�
 
 msgid "Multi valued"
 msgstr "多值"
+
+msgid "ASCII lower case, digits and underscore. Cannot be changed later."
+msgstr "ASCII 字母开头，只能用字母、数字、下划线。创建后不能改。"
+
+msgid "As a listing column (requires the metadata column below)"
+msgstr "在列表页作为一列显示（需要同时勾下面的 metadata 列）"
+
+msgid "Cannot be changed later; delete and re-create instead."
+msgstr "创建后不能改。要换类型只能删掉重建。"
+
+msgid "Configuration does not travel with GenericSetup, so this is the only way to move it between sites."
+msgstr "配置不会跟着 GenericSetup 走，站点之间搬运只能用这个。"
+
+msgid "Editable in workflow states (empty = any)"
+msgstr "哪些状态下可以改这个字段"
+
+msgid "In which states can this field be edited"
+msgstr "哪些状态下可以改这个字段"
+
+msgid "Select nothing and the field can be edited in any state. That is what you want most of the time. Only pick states if the field must be frozen after a certain point."
+msgstr "什么都不选 = 任何状态下都能改，多数情况就该这样。只有当这个字段过了某个环节就不许再动时，才需要选。"
+
+msgid "Existing objects are only covered after pressing Reindex. Turn indexes off again before rolling the add-on back."
+msgstr "已有的旧数据要点「重建索引」才会补上。回滚本 add-on 之前记得先把索引关掉。"
+
+msgid "Labels (stored as data, applied without a restart)"
+msgstr "标签（存在配置库里，改完不用重启）"
+
+msgid "No custom fields on this object yet."
+msgstr "这个对象还没有自定义字段。"
+
+msgid "Startup skipped them and logged an error; the site itself is unaffected."
+msgstr "启动时已跳过并记了错误日志，站点本身不受影响。"
+
+msgid "Takes effect immediately; no container restart needed."
+msgstr "保存后立即生效，不用重启容器。"
+
+msgid "Pre-filled when a new object is created. Leave it empty if there is no sensible default."
+msgstr "新建对象时自动填好的内容。没有合适的默认值就留空。"
+
+msgid "The number pre-filled when a new object is created. Leave it empty if there is no sensible default."
+msgstr "新建对象时自动填好的数字。没有合适的默认值就留空。"
+
+msgid "Type 1 to have the box ticked by default. Leave it empty and the box starts unticked."
+msgstr "填 1 表示默认打勾。留空就是默认不打勾。"
+
+msgid "Which option is picked by default. Type one of the storage keys from the Options list above, not the label."
+msgstr "默认选中哪一项。填上面选项列表里「存储值 key」那一列的内容，不是标签。"
+
+msgid "Careful with existing data: once required, old objects have to fill it in the next time someone edits them."
+msgstr "对已有数据要当心：设成必填后，旧对象下次被编辑时会被要求补填这一项。"
+
+msgid "Shown but not editable in the interface; only an interface or a script can write it."
+msgstr "界面上只显示、不让改，只有接口或脚本能写。"
+
+msgid "Upload the file exported from another site"
+msgstr "上传从别的站点导出的文件"
+
+msgid "taken from the selection on the left; cannot be changed"
+msgstr "由左侧选中的对象带入，不能改"
+
+msgid "…or paste the JSON here"
+msgstr "…或者把 JSON 直接粘在这里"
+
+msgid "How this field gets filled in"
+msgstr "这个字段怎么填"
+
+msgid "All of this is optional. Leave everything alone and the field behaves the most permissive way: anyone may leave it blank and may change it at any time. Only touch it if you need something stricter."
+msgstr "这一整块都可以不管。什么都不动的话，这个字段最宽松：可以不填，任何时候都能改。只有你需要更严的规矩时才来动它。"
+
+msgid "What may be typed in"
+msgstr "能填什么内容"
+
+msgid "Pre-fill it with"
+msgstr "新建时先帮我填上"
+
+msgid "It must be filled in before saving"
+msgstr "不填就不让保存"
+
+msgid "Careful with data you already have: once this is on, old records have to fill it in the next time anyone edits them."
+msgstr "对已有数据要当心：勾上之后，旧记录下次被人编辑时会被要求补填这一项。"
+
+msgid "Show it, but nobody may type in it"
+msgstr "只给人看，不让人填"
+
+msgid "For values that come from somewhere else - an import, an instrument, a script. People see it but cannot change it."
+msgstr "适合那些值来自别处的字段——导入的、仪器传来的、脚本写的。人能看到但改不了。"
+
+msgid "It may only be changed in these stages"
+msgstr "只有在这些阶段才允许改"
+
+msgid "Select nothing and it can be changed at any time - that is the normal case. Only pick stages when the value has to be frozen once the sample moves on, so that nobody edits it after the fact."
+msgstr "什么都不选 = 任何时候都能改，这是常态。只有当这个值在样品流转到下一步之后就该定死、不许事后再改时，才去选阶段。"
