@@ -1055,6 +1055,79 @@ for _r in (rec_col, rec_hidden, rec_toggle):
 
 print()
 print("=" * 66)
+print(u"14. arextension 迁移包：导进来能不能真的造出那 14 个字段".encode("utf-8"))
+print("=" * 66)
+print(u"    —— 交付的 arextension_fields.json 必须导得进、造得出，不能只是好看".encode("utf-8"))
+print()
+
+# tools/make_arextension_config.py 生成的那份 JSON 是要交给实施人员在界面上
+# 导入的。光「生成时通过校验」不够 —— 真正要证明的是：导进去之后，
+# AnalysisRequest 的 schema 上确实多出这 14 个字段，类型和标签都对。
+# 这一节把整条链路跑一遍：文件 -> import_json -> atfields 造字段。
+
+_pkg_root = os.path.dirname(os.path.dirname(mdf_view.__file__))      # .../browser -> dynamicfields
+_json_path = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(_pkg_root))),
+    "arextension_fields.json")
+check(u"交付的 JSON 文件在", os.path.exists(_json_path), _json_path)
+
+if os.path.exists(_json_path):
+    _payload = io.open(_json_path, encoding="utf-8").read()
+    added, updated, skipped, errors = storage.import_json(_payload,
+                                                          mode="merge")
+    check(u"14 个字段全部导入成功，没有跳过、没有报错",
+          added == 14 and skipped == 0 and not errors,
+          u"added=%s updated=%s skipped=%s errors=%s"
+          % (added, updated, skipped, [_u(e) for e in errors]))
+
+    _recs = storage.get_records_for_type("AnalysisRequest")
+    _by_name = dict((r.get("name"), r) for r in _recs)
+    for _n in ("ProjectNo", "MaterialName", "SampleRecovery",
+               "SampleProperties", "SafetyPrecautions", "ManufactureDate"):
+        check(u"导入后配置库里有 %s" % _n, _n in _by_name)
+
+    check(u"CamelCase 字段名活下来了（这是能平移 arextension 的前提）",
+          all(_n in _by_name for _n in
+              ("MaterialCode", "StorageConditions", "RetentionTime")))
+    check(u"必填只有 MaterialName 一个",
+          [n for n, r in _by_name.items() if r.get("required")]
+          == ["MaterialName"],
+          u"%s" % ([n for n, r in _by_name.items() if r.get("required")],))
+    check(u"SampleProperties 是多值引用",
+          _by_name["SampleProperties"].get("multi") is True
+          and _by_name["SampleProperties"].get("allowed_types")
+          == ["HazardCategory"])
+    check(u"SampleRecovery 是固定选项，两个 ASCII key",
+          [o["key"] for o in _by_name["SampleRecovery"].get("options") or []]
+          == ["yes", "no"])
+
+    # ★ 真正的终点：这些配置能不能变成 Archetypes 字段
+    _built = []
+    for _n in ("ProjectNo", "MaterialName", "SampleRecovery",
+               "SafetyPrecautions", "ManufactureDate", "SampleProperties"):
+        try:
+            _f = atfields.build_field(_by_name[_n])
+        except Exception as _exc:
+            _f = None
+            check(u"造 %s 时抛异常" % _n, False, u"%s" % _exc)
+        _built.append((_n, _f))
+    check(u"★ 六种类型的代表字段都造得出 AT 字段（样品是 Archetypes）",
+          all(f is not None for _n, f in _built),
+          u"造不出: %s" % ([n for n, f in _built if f is None],))
+    check(u"字段名原样保留，没被小写化",
+          all(getattr(f, "getName", lambda: None)() == n
+              for n, f in _built if f is not None),
+          u"%s" % ([(n, getattr(f, "getName", lambda: None)())
+                    for n, f in _built if f is not None],))
+
+    # 收尾：把这一节导进来的记录删掉
+    for _r in list(storage.get_records_for_type("AnalysisRequest")):
+        if _r.get("creator") == "arextension-migration":
+            storage.delete_record(_r["id"])
+
+
+print()
+print("=" * 66)
 if FAILED:
     print("FAILED: %s" % ", ".join(FAILED))
     sys.exit(1)
