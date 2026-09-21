@@ -238,9 +238,11 @@ class DynamicFieldsView(BrowserView):
             "states": self._read_list(form, "states"),
             "show_edit": self._flag(form, "show_edit"),
             "show_view": self._flag(form, "show_view"),
-            "show_list": self._flag(form, "show_list"),
-            "list_default": self._flag(form, "list_default"),
-            # 二期：报告模板尚未接入本包配置，界面上置灰，这里也钉死
+            # 列表列 / 列表默认显示 / 报告：都还没接入，界面上不给，这里
+            # 也钉死 False，免得从表单绕进来一个永远不会生效的 True。
+            # 导入 JSON 走的是另一条路，那边仍然能带这几个键。
+            "show_list": False,
+            "list_default": False,
             "show_report": False,
             "fieldset": self._read_fieldset(form),
             "order": self._int(form.get("order"), 0),

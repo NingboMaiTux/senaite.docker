@@ -629,3 +629,6 @@ msgstr "基础信息"
 
 msgid "The stored value takes letters, digits and underscore only - it is what gets written onto the objects. Chinese goes in the label next to it. Store Chinese here and the data can never be translated, and indexes, exports and statistics are locked to that one language; changing it later means migrating data."
 msgstr "存储值只能用字母、数字和下划线——真正写到对象上的是它。中文填在旁边的标签里。把中文存进来，这份数据就永远翻译不了，索引、导出、统计也全锁死在那一种语言上，事后再改要迁数据。"
+
+msgid "These two switches reach the standard edit and view forms, the sample add form (it does read the AR schema) and the header table. They do not reach the listing views, nor the worksheet results entry header, which is a hand written template."
+msgstr "这两个开关能管到标准的编辑页、查看页、样品新建页（它确实会读 AR 的 schema）和表头。管不到列表视图，也管不到工作表结果录入的表头——那是一张手写模板。"

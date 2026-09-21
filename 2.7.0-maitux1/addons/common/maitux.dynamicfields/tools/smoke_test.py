@@ -650,18 +650,25 @@ REQUIRED = [
     # 基础
     "action", "portal_type", "name", "type", "fieldset", "order",
     # 前端显示
-    "show_edit", "show_view", "show_list", "list_default",
+    "show_edit", "show_view",
     # 数据约束
     "required", "readonly", "multi",
     # 类型专属
     "option_key", "default_option", "allowed_types", "include_inactive",
-    "min", "max", "precision", "maxlen", "default",
+    "maxlen", "default",
     # 检索
-    # 注意：这里没有 "states"，也没有 "regex"。这两段 2026-09-21 从界面上
-    # 拿掉了——存了但没有任何代码读它们，是按了没反应的开关（在
-    # atfields / dxfields / dxschema 里出现次数都是 0）。storage / view /
-    # 导入导出仍然支持这些键，真实现出来把界面放回来时，记得把 "states"、
-    # "regex" 和多语言的 regex_msg_* 加回这两份清单。
+    #
+    # ★ 这份清单里**故意没有**下面这些，它们 2026-09-21 从界面上拿掉了，
+    #   原因都一样：界面上有开关，底下没实现，勾了不报错也不生效。
+    #
+    #     states                  没有任何代码读
+    #     regex / regex_msg_*     没有任何代码读
+    #     show_list / list_default 列表视图的列来自跟 schema 无关的 dict
+    #     min / max               只有 dxfields 读，AT 不读（样品就是 AT）
+    #     precision               只有 atfields 读，DX 不读
+    #
+    #   storage / view / validation / 导入导出都还支持这些键。真做出来了
+    #   把界面放回来时，记得同时加回这份 REQUIRED 和下面的多语言模式清单。
     "index", "metadata",
     # 其它动作
     "field_id", "payload", "mode", "upload",

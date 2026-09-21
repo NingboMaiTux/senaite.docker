@@ -549,33 +549,17 @@ body.mdf-js.mdf-open { overflow:hidden; }
                 Show the field on the object's view page.
               </div>
             </div>
-            <div class="mdf-f">
-              <div class="mdf-n" i18n:translate="">Listing column</div>
-              <div>
-                <input type="checkbox" id="mdf_list" name="show_list" value="1"
-                       tal:attributes="checked python:view.prefill_check('show_list')" />
-              </div>
-              <div class="mdf-h" i18n:translate="">
-                Needs the metadata column under Search below as well.
-              </div>
-            </div>
-            <div class="mdf-f">
-              <div class="mdf-n" i18n:translate="">On by default</div>
-              <div>
-                <input type="checkbox" id="mdf_listdef" name="list_default" value="1"
-                       tal:attributes="checked python:view.prefill_check('list_default')" />
-              </div>
-              <div class="mdf-h" i18n:translate="">
-                The column comes up without the user switching it on.
-              </div>
-            </div>
+            <!-- 这里原来还有「列表列」和「列表默认显示」两个勾选框。两个
+                 都没实现：列表视图的列来自一份跟 schema 无关的 dict，本包
+                 的配置根本到不了那儿。勾了不报错，列也不会出现。
+                 跟 show_report 一个处理法——界面上不给，_read_common 里
+                 钉死 False。 -->
             <div class="alert alert-warning py-2 mt-2 mb-0 small" i18n:translate="">
-                These switches apply to the standard edit and view forms,
-                to the sample add form (it does read the AR schema) and to
-                the header table. They do NOT reach the listing views,
-                whose columns come from a dict unrelated to the schema,
-                nor the worksheet results entry header, which is a hand
-                written template.
+                These two switches reach the standard edit and view forms,
+                the sample add form (it does read the AR schema) and the
+                header table. They do not reach the listing views, nor the
+                worksheet results entry header, which is a hand written
+                template.
               </div>
           </fieldset>
 
@@ -665,40 +649,19 @@ body.mdf-js.mdf-open { overflow:hidden; }
             </div>
           </fieldset>
 
-          <fieldset class="border rounded p-2 mb-3"
-                    data-mdf-types="int decimal">
-            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
-                    i18n:translate="">Number range</legend>
-            <div class="mdf-f">
-              <div class="mdf-n" i18n:translate="">Min</div>
-              <div>
-                <input type="text" name="min"
-                       class="form-control form-control-sm" style="width:110px;"
-                       tal:attributes="value python:view.prefill('min')" />
-              </div>
-              <div class="mdf-h" i18n:translate="">Leave it empty for no limit.</div>
-            </div>
-            <div class="mdf-f">
-              <div class="mdf-n" i18n:translate="">Max</div>
-              <div>
-                <input type="text" name="max"
-                       class="form-control form-control-sm" style="width:110px;"
-                       tal:attributes="value python:view.prefill('max')" />
-              </div>
-              <div class="mdf-h" i18n:translate="">Leave it empty for no limit.</div>
-            </div>
-            <div class="mdf-f" data-mdf-types="decimal">
-              <div class="mdf-n" i18n:translate="">Decimals</div>
-              <div>
-                <input type="text" name="precision"
-                       class="form-control form-control-sm" style="width:110px;"
-                       tal:attributes="value python:view.prefill('precision', '2')" />
-              </div>
-              <div class="mdf-h" i18n:translate="">
-                How many decimal places to keep.
-              </div>
-            </div>
-          </fieldset>
+          <!-- 这里原来有一段「数值范围」：最小值 / 最大值 / 小数位。
+               2026-09-21 查出来它们只做了一半，而且两边各做了一半：
+                 最小值 / 最大值  只有 dxfields.py 读，Archetypes 不读
+                 小数位          只有 atfields.py 读，Dexterity 不读
+               样品（AnalysisRequest）是 Archetypes，所以在最常用的那个
+               对象上设数值范围完全不起作用，而且不报错。
+
+               半生效比不生效更难查——同一个开关在这个对象上管用、换个
+               对象就不管用。按「最小功能实现、确保无 bug」先整段拿掉。
+
+               storage 的 min / max / precision、view 的读取、validation
+               和导入导出都保留着。真做出来时要补的是：AT 侧的数值范围
+               （atfields 里加 validators），DX 侧的小数位。 -->
 
           <fieldset class="border rounded p-2 mb-3"
                     data-mdf-types="text textarea">
