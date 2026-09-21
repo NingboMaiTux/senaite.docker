@@ -302,8 +302,11 @@
 
       <!-- ============ 添加字段（同页展开，不跳新页） ============ -->
       <details class="mdf-drawer">
+        <!-- 不要在这儿加 "+"：浏览器给 <summary> 自带的展开三角还在
+             （.mdf-drawer 没有像 .mdf-sec 那样关掉 list-style），
+             加号叠在三角旁边，看着像个能点的按钮。 -->
         <summary>
-          + <span i18n:translate="">Add field</span>
+          <span i18n:translate="">Add field</span>
         </summary>
         <form method="post" class="p-3" tal:attributes="action base">
           <input type="hidden" name="action" value="save_field" />
@@ -681,45 +684,19 @@
             </div>
           </fieldset>
 
-          <fieldset class="border rounded p-2 mb-3">
-            <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
-                    i18n:translate="">Data constraints</legend>
-            <!-- 状态列表默认收起。不限制是绝大多数字段的情况，把一长串
-                 状态复选框常驻在页面上，等于让每个人都去读一遍跟自己无关
-                 的东西。勾上开关才展开。 -->
-            <div class="mdf-f">
-              <div class="mdf-n" i18n:translate="">State restriction</div>
-              <div>
-                <input type="checkbox" id="mdf_st_limit" />
-              </div>
-              <div class="mdf-h" i18n:translate="">
-                Unrestricted by default: the field is editable in every
-                workflow state. Switch this on only when the value has to be
-                locked once the sample moves on.
-              </div>
-            </div>
-            <!-- 不在 HTML 里写 display:none —— 没有 JS 时这块就永远打不开了。
-                 由下面那段 JS 在初始化时收起，跟模板里其它联动一个路子。 -->
-            <div class="mdf-fsub" id="mdf_st_box">
-              <div class="small text-muted mb-1"
-                   i18n:translate="">Editable only in the states ticked below</div>
-              <div class="border rounded p-2"
-                   style="max-height:150px;overflow-y:auto;background:#fcfdfd;">
-                <div class="custom-control custom-checkbox"
-                     tal:repeat="st info/states">
-                  <input type="checkbox" class="custom-control-input"
-                         name="states"
-                         tal:attributes="value python:st[0];
-                                         id python:'mdf_st_%s' % st[0]" />
-                  <label class="custom-control-label small"
-                         tal:attributes="for python:'mdf_st_%s' % st[0]"
-                         tal:content="python:'%s (%s)' % (st[1], st[0])">state</label>
-                </div>
-                <div class="small text-muted" tal:condition="not:info/states"
-                     i18n:translate="">This object type has no workflow stages.</div>
-              </div>
-            </div>
-          </fieldset>
+          <!-- 这里原来有一段「数据约束」：勾几个工作流状态，声称字段只有在
+               那些状态下才允许编辑。2026-09-21 查出来它根本没实现——表单把
+               勾选结果存进了配置记录，但 atfields.py / dxfields.py 里
+               `states` 出现 0 次，没有任何代码读它。勾完字段照样在所有状态
+               下能改。
+
+               一个按了没反应的开关比没有这个开关更糟：实施人员勾完会以为
+               字段已经冻住了。所以先从页面上拿掉。
+
+               storage 里的 `states` 键、view 里的读取、导入导出都保留着，
+               真做出来的时候把界面放回来就行。要实现的是：按对象**当前
+               所处的状态**算这个字段能不能写——AT 和 DX 两条路径都要做，
+               不是造 schema 时一次性能决定的事。 -->
 
           <fieldset class="border rounded p-2 mb-3">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
@@ -775,23 +752,6 @@
             sync();
           })();
 
-          /* 状态限制开关：勾上才展开状态列表。
-             取消勾选时把里面的复选框全部清掉——藏起来的输入框照样会提交，
-             不清的话会留下一份用户以为已经取消了的限制。 */
-          (function () {
-            var box = document.getElementById("mdf_st_box");
-            var flag = document.getElementById("mdf_st_limit");
-            if (!box || !flag) { return; }
-            function sync(clear) {
-              box.style.display = flag.checked ? "" : "none";
-              if (!flag.checked && clear) {
-                var cbs = box.querySelectorAll("input[name='states']");
-                for (var i = 0; i < cbs.length; i++) { cbs[i].checked = false; }
-              }
-            }
-            flag.addEventListener("change", function () { sync(true); });
-            sync(false);
-          })();
           </script>
           <span class="small text-muted ml-2" i18n:translate="">
             Takes effect immediately; no container restart needed.

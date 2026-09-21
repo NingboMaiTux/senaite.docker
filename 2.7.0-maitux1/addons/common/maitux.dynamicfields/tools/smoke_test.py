@@ -656,8 +656,12 @@ REQUIRED = [
     # 类型专属
     "option_key", "default_option", "allowed_types", "include_inactive",
     "min", "max", "precision", "maxlen", "regex", "default",
-    # 工作流与检索
-    "states", "index", "metadata",
+    # 检索
+    # 注意：这里没有 "states"。工作流状态限制那一段 2026-09-21 从界面上
+    # 拿掉了——存了但没有任何代码读它，是个按了没反应的开关。storage /
+    # view / 导入导出仍然支持这个键，真实现出来把界面放回来时，记得把
+    # "states" 加回这个清单。
+    "index", "metadata",
     # 其它动作
     "field_id", "payload", "mode", "upload",
     # 搜索
