@@ -237,12 +237,21 @@ class DynamicFieldsView(BrowserView):
             "list_default": self._flag(form, "list_default"),
             # 二期：报告模板尚未接入本包配置，界面上置灰，这里也钉死
             "show_report": False,
-            "fieldset": (safe_unicode(form.get("fieldset")).strip()
-                         or u"default"),
+            "fieldset": self._read_fieldset(form),
             "order": self._int(form.get("order"), 0),
             "index": self._flag(form, "index"),
             "metadata": self._flag(form, "metadata"),
         }
+
+    def _read_fieldset(self, form):
+        """显示分组：下拉选已有的，或在旁边的输入框里写个新名字
+
+        新名字优先——用户特意打了字，说明就是要新建一个。
+        """
+        new_name = safe_unicode(form.get("fieldset_new")).strip()
+        if new_name:
+            return new_name
+        return safe_unicode(form.get("fieldset")).strip() or u"default"
 
     def _read_type_specific(self, form, field_type):
         data = {"multi": self._flag(form, "multi")}
@@ -563,6 +572,18 @@ class DynamicFieldsView(BrowserView):
     # ------------------------------------------------------------------
     # 表单选项
     # ------------------------------------------------------------------
+
+    def fieldset_supported(self):
+        portal_type = self.selected_type()
+        if not portal_type:
+            return True
+        return introspect.fieldset_supported(portal_type)
+
+    def fieldset_options(self):
+        portal_type = self.selected_type()
+        if not portal_type:
+            return ["default"]
+        return introspect.get_fieldsets(portal_type)
 
     def deprecated_warning(self):
         """已废弃类型的告警文案（模板用）"""

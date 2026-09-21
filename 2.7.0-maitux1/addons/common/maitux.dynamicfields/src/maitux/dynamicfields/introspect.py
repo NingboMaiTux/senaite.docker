@@ -247,6 +247,76 @@ def list_reference_targets(language=None):
     return items
 
 
+def fieldset_supported(portal_type):
+    """该类型的编辑页会不会渲染分组"""
+    return portal_type not in config.FIELDSET_UNSUPPORTED
+
+
+def get_fieldsets(portal_type):
+    """该类型**已有**的分组名。
+
+    填现成的名字 = 把字段挂进那个已有分组（比如给客户加字段放进
+    Accounting）；填新名字 = 新建一个。下拉框列的就是这些。
+
+    - AT：字段的 ``schemata`` 属性（客户 8 个、仪器 6 个、检验项目 11 个）
+    - DX：schema 上 plone.supermodel 的 FIELDSETS 标签值
+    """
+    names = ["default"]
+
+    def push(value):
+        value = (u"%s" % (value or u"")).strip()
+        if value and value not in names:
+            names.append(value)
+
+    mechanism = get_mechanism(portal_type)
+    instance = _find_instance(portal_type)
+
+    if mechanism == MECH_AT:
+        schema = None
+        if instance is not None:
+            try:
+                schema = instance.Schema()
+            except Exception:
+                schema = None
+        if schema is None:
+            schema = _registered_at_schema(portal_type)
+        if schema is not None:
+            try:
+                for field in schema.fields():
+                    push(getattr(field, "schemata", None))
+            except Exception:
+                pass
+    elif mechanism == MECH_DX:
+        try:
+            from plone.supermodel.interfaces import FIELDSETS_KEY
+        except ImportError:
+            FIELDSETS_KEY = "plone.supermodel.fieldsets"
+        schemata = []
+        try:
+            if instance is not None:
+                from plone.dexterity.utils import iterSchemata
+                schemata = list(iterSchemata(instance))
+            else:
+                from plone.dexterity.utils import iterSchemataForType
+                schemata = list(iterSchemataForType(portal_type))
+        except Exception:
+            schemata = []
+        for schema in schemata:
+            try:
+                for fieldset in (schema.queryTaggedValue(FIELDSETS_KEY) or []):
+                    push(getattr(fieldset, "__name__", None))
+            except Exception:
+                continue
+
+    # 本包自己已经用过的分组名也列出来，方便第二个字段挂到同一组
+    try:
+        for record in storage.get_records_for_type(portal_type):
+            push(record.get("fieldset"))
+    except Exception:
+        pass
+    return names
+
+
 def get_workflow_states(portal_type):
     """该类型绑定的工作流状态 [(id, title)]，供「可编辑状态」下拉使用"""
     if api is None:

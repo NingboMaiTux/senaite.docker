@@ -209,6 +209,15 @@ RESERVED_NAMES = frozenset([
     "manage_options", "isPrincipiaFolderish", "REQUEST",
 ])
 
+#: 「显示分组」对哪些类型**不生效**。
+#:
+#: 实测（senaite.core 2.7.0）：
+#: - AnalysisRequest 的 schema 里一个 schemata= 都没有，全部字段在默认组；
+#: - 样品新建页 ar_add2 完全不读 schemata，字段顺序和分组是它自己算的。
+#: 所以在样品上填分组名不会有任何可见效果。界面上置灰并说明，
+#: 不要让人填了个没用的值还以为哪里配错了。
+FIELDSET_UNSUPPORTED = ("AnalysisRequest",)
+
 #: 数量上限（NFR-3）
 MAX_FIELDS_PER_TYPE = 50
 MAX_FIELDS_TOTAL = 500

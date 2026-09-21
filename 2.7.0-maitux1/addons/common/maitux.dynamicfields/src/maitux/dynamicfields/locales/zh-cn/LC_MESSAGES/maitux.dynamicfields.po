@@ -353,3 +353,12 @@ msgstr "该对象类型已废弃。"
 
 msgid "deprecated"
 msgstr "已废弃"
+
+msgid "or a new group name"
+msgstr "或填一个新分组名"
+
+msgid "Groups the field into a tab on the edit form. Pick an existing group, or type a new name to create one."
+msgstr "把字段归进编辑页上的一个分组标签页。可以选已有的分组，也可以填一个新名字新建一个。"
+
+msgid "This object type does not render fieldsets: its schema uses no groups at all and the sample add form ignores them. Anything set here would have no visible effect."
+msgstr "该对象类型不渲染分组：它的 schema 里一个分组都没用，样品新建页也完全不读分组。这里填什么都不会有可见效果。"
