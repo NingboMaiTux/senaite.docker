@@ -368,6 +368,68 @@
             </div>
           </div>
 
+          <!-- 第二行还是「字段本身长什么样」：必填 / 只读 / 默认值 / 多值。
+               这些是字段的基本属性，跟字段名、类型是一类东西，不该埋到下面
+               单独一段里——实施人员在这儿才找得到。 -->
+          <div class="form-row">
+            <div class="form-group col-md-5"
+                 data-mdf-types="text textarea int decimal bool choice">
+              <label class="small" for="mdf_default"
+                     i18n:translate="">Pre-fill it with</label>
+              <input type="text" id="mdf_default" name="default"
+                     class="form-control form-control-sm" />
+              <small class="form-text text-muted"
+                     data-mdf-types="text textarea" i18n:translate="">
+                Pre-filled when a new object is created. Leave it empty if
+                there is no sensible default.
+              </small>
+              <small class="form-text text-muted"
+                     data-mdf-types="int decimal" i18n:translate="">
+                The number pre-filled when a new object is created. Leave
+                it empty if there is no sensible default.
+              </small>
+              <small class="form-text text-muted"
+                     data-mdf-types="bool" i18n:translate="">
+                Type 1 to have the box ticked by default. Leave it empty
+                and the box starts unticked.
+              </small>
+              <small class="form-text text-muted"
+                     data-mdf-types="choice" i18n:translate="">
+                Which option is picked by default. Type one of the storage
+                keys from the Options list above, not the label.
+              </small>
+            </div>
+            <div class="col-md-7">
+              <div class="custom-control custom-checkbox">
+                <input type="checkbox" class="custom-control-input" id="mdf_req"
+                       name="required" value="1" />
+                <label class="custom-control-label small" for="mdf_req"
+                       i18n:translate="">It must be filled in before saving</label>
+              </div>
+              <small class="form-text text-muted mb-2" i18n:translate="">
+                Careful with data you already have: once this is on, old
+                records have to fill it in the next time anyone edits them.
+              </small>
+              <div class="custom-control custom-checkbox">
+                <input type="checkbox" class="custom-control-input" id="mdf_ro"
+                       name="readonly" value="1" />
+                <label class="custom-control-label small" for="mdf_ro"
+                       i18n:translate="">Show it, but nobody may type in it</label>
+              </div>
+              <small class="form-text text-muted mb-2" i18n:translate="">
+                For values that come from somewhere else - an import, an
+                instrument, a script. People see it but cannot change it.
+              </small>
+              <div class="custom-control custom-checkbox"
+                   data-mdf-types="choice reference">
+                <input type="checkbox" class="custom-control-input" id="mdf_multi"
+                       name="multi" value="1" />
+                <label class="custom-control-label small" for="mdf_multi"
+                       i18n:translate="">More than one value may be picked</label>
+              </div>
+            </div>
+          </div>
+
           <fieldset class="border rounded p-2 mb-3">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
                     i18n:translate="">Labels (stored as data, applied without a restart)</legend>
@@ -540,16 +602,10 @@
 
           <fieldset class="border rounded p-2 mb-3">
             <legend class="small text-muted px-1" style="width:auto;font-size:12px;"
-                    i18n:translate="">How this field gets filled in</legend>
-            <p class="small text-muted mb-2" i18n:translate="">
-              All of this is optional. Leave everything alone and the field
-              behaves the most permissive way: anyone may leave it blank and
-              may change it at any time. Only touch it if you need something
-              stricter.
-            </p>
+                    i18n:translate="">When it may be changed</legend>
             <div class="form-row">
-              <div class="form-group col-md-6">
-                <label class="small" for="mdf_states"
+              <div class="form-group col-md-6 mb-0">
+                <label class="small"
                        i18n:translate="">It may only be changed in these stages</label>
                 <div class="border rounded p-2"
                      style="max-height:150px;overflow-y:auto;background:#fcfdfd;">
@@ -566,68 +622,15 @@
                   <div class="small text-muted" tal:condition="not:info/states"
                        i18n:translate="">This object type has no workflow stages.</div>
                 </div>
-                <small class="form-text text-muted" i18n:translate="">
-                  Select nothing and it can be changed at any time - that is
-                  the normal case. Only pick stages when the value has to be
-                  frozen once the sample moves on, so that nobody edits it
-                  after the fact.
-                </small>
               </div>
               <div class="col-md-6">
-                <div class="form-group"
-                     data-mdf-types="text textarea int decimal bool choice">
-                  <label class="small" for="mdf_default"
-                         i18n:translate="">Pre-fill it with</label>
-                  <input type="text" id="mdf_default" name="default"
-                         class="form-control form-control-sm" />
-                  <small class="form-text text-muted"
-                         data-mdf-types="text textarea" i18n:translate="">
-                    Pre-filled when a new object is created. Leave it empty if
-                    there is no sensible default.
-                  </small>
-                  <small class="form-text text-muted"
-                         data-mdf-types="int decimal" i18n:translate="">
-                    The number pre-filled when a new object is created. Leave
-                    it empty if there is no sensible default.
-                  </small>
-                  <small class="form-text text-muted"
-                         data-mdf-types="bool" i18n:translate="">
-                    Type 1 to have the box ticked by default. Leave it empty
-                    and the box starts unticked.
-                  </small>
-                  <small class="form-text text-muted"
-                         data-mdf-types="choice" i18n:translate="">
-                    Which option is picked by default. Type one of the storage
-                    keys from the Options list above, not the label.
-                  </small>
-                </div>
-                <div class="custom-control custom-checkbox"
-                     data-mdf-types="choice reference">
-                  <input type="checkbox" class="custom-control-input" id="mdf_multi"
-                         name="multi" value="1" />
-                  <label class="custom-control-label small" for="mdf_multi"
-                         i18n:translate="">Multi valued</label>
-                </div>
-                <div class="custom-control custom-checkbox">
-                  <input type="checkbox" class="custom-control-input" id="mdf_req"
-                         name="required" value="1" />
-                  <label class="custom-control-label small" for="mdf_req"
-                         i18n:translate="">It must be filled in before saving</label>
-                </div>
-                <small class="form-text text-muted mb-1" i18n:translate="">
-                  Careful with data you already have: once this is on, old
-                  records have to fill it in the next time anyone edits them.
-                </small>
-                <div class="custom-control custom-checkbox">
-                  <input type="checkbox" class="custom-control-input" id="mdf_ro"
-                         name="readonly" value="1" />
-                  <label class="custom-control-label small" for="mdf_ro"
-                         i18n:translate="">Show it, but nobody may type in it</label>
-                </div>
-                <small class="form-text text-muted" i18n:translate="">
-                  For values that come from somewhere else - an import, an
-                  instrument, a script. People see it but cannot change it.
-                </small>
+                <p class="small text-muted mt-4" i18n:translate="">
+                  Tick nothing and it can be changed at any time - that is the
+                  normal case, and what you want unless someone asked for
+                  otherwise. Only tick stages when the value has to be frozen
+                  once the sample moves on, so that nobody edits it after the
+                  fact.
+                </p>
               </div>
             </div>
           </fieldset>

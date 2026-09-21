@@ -518,3 +518,12 @@ msgstr "这个对象类型没有工作流阶段。"
 
 msgid "Which kind of object this field points at. Hold Ctrl (Cmd on a Mac) to pick more than one."
 msgstr "这个字段指向哪一类对象。按住 Ctrl（Mac 上是 Cmd）可以多选。"
+
+msgid "When it may be changed"
+msgstr "什么时候允许改"
+
+msgid "More than one value may be picked"
+msgstr "可以选多个"
+
+msgid "Tick nothing and it can be changed at any time - that is the normal case, and what you want unless someone asked for otherwise. Only tick stages when the value has to be frozen once the sample moves on, so that nobody edits it after the fact."
+msgstr "一个都不勾 = 任何时候都能改，这是常态，没人特别要求的话就该这样。只有当这个值在样品流转到下一步之后就该定死、不许事后再改时，才去勾阶段。"
