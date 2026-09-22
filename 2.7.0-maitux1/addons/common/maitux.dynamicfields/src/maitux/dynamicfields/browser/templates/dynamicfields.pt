@@ -43,6 +43,11 @@
 .mdf-sec[open] > summary:before { content:"\25BE";color:#35708F; }
 .mdf-row { display:flex;align-items:center;border-top:1px solid #eef1f2;font-size:13px; }
 .mdf-row-ro { background:#fcfdfd; }
+/* 名字被别的包占了、当前不生效的记录。不用红色：它不是错误，是一个
+   待处理的状态（卸掉那个包就生效了），红色会让人以为数据坏了。 */
+.mdf-row-shadowed { background:#fdf8ee; }
+.mdf-shadow { font-size:11px;color:#8a6d3b;background:#fcf0d9;
+              border:1px solid #f0dcb4;border-radius:3px;padding:1px 5px; }
 .mdf-hrow { display:flex;align-items:center;background:#fcfdfd;
             border-top:1px solid #d7dbdc;font-size:11.5px;font-weight:600;color:#606969; }
 .mdf-c { padding:8px 10px;min-width:0;overflow:hidden;text-overflow:ellipsis;
@@ -244,13 +249,24 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <span class="mdf-c" style="width:62px;" i18n:translate="">Index</span>
             <span class="mdf-c" style="width:150px;" i18n:translate="">Actions</span>
           </div>
-          <div class="mdf-row" tal:repeat="field sections/own">
+          <!-- 被别人占了名字的记录：配置里有，对象上没有。同名字段不可能
+               并存（Schema.addField 是 dict 赋值），所以这一条现在不生效。
+               必须一眼看得出来，不能混在正常记录里。 -->
+          <div class="mdf-row" tal:repeat="field sections/own"
+               tal:attributes="class python:('mdf-row mdf-row-shadowed'
+                                      if field['shadowed_by'] else 'mdf-row')">
             <span class="mdf-c" style="width:170px;">
               <span class="mdf-code" tal:content="field/name">name</span>
             </span>
             <span class="mdf-c text-muted" style="width:92px;"
                   tal:content="field/type_title">type</span>
-            <span class="mdf-c" style="flex-grow:1;" tal:content="field/label">label</span>
+            <span class="mdf-c" style="flex-grow:1;">
+              <span tal:content="field/label">label</span>
+              <span class="mdf-shadow ml-1" tal:condition="field/shadowed_by">
+                <span i18n:translate="">not in effect - the name is taken by</span>
+                <span tal:content="field/shadowed_by">pkg</span>
+              </span>
+            </span>
             <span class="mdf-c" style="width:128px;">
               <span tal:repeat="slot field/positions"
                     tal:attributes="class python:'mdf-pos mdf-pos-on' if slot['on'] else 'mdf-pos mdf-pos-off';

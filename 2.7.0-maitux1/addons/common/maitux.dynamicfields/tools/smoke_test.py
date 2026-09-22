@@ -1170,6 +1170,102 @@ if os.path.exists(_json_path):
 
 print()
 print("=" * 66)
+print(u"15. 重名：导入不再静默放行；被遮住的记录要标出来".encode("utf-8"))
+print("=" * 66)
+print(u"    —— 同名字段不可能并存，Schema.addField 是 dict 赋值，后来者顶掉前者".encode("utf-8"))
+print()
+
+# 2026-09-22 的事故：把一份和 INNOCARE.arextension 同名的配置导进来，
+# 14 条静默入库、一条错都不报。原因是 import_json 传了 skip_uniqueness=True，
+# 它把「和本包记录重名」（导入时是正常覆盖）和「和外部字段重名」（任何时候
+# 都不能放过）一起关掉了。
+#
+# 后果不是「两套字段并存」—— 那在 Python 里根本做不到。真实后果是
+# archetypes.schemaextender 遍历 getAdapters() 时谁后跑谁赢，而那个顺序
+# 没有任何保证。配置页上还把没生效的记录显示成正常记录。
+
+import json as _json                                                 # noqa: E402
+import maitux.dynamicfields.introspect as _intro                     # noqa: E402
+
+_real_sources = mdf_intro.get_foreign_field_sources
+
+
+def _fake_sources(portal_type):
+    """假装 AnalysisRequest 上的 Occupied 已被别的包占了"""
+    if portal_type == "AnalysisRequest":
+        return {"Occupied": u"INNOCARE.arextension"}
+    return {}
+
+
+_intro.get_foreign_field_sources = _fake_sources
+try:
+    clash = storage.defaults("AnalysisRequest", "Occupied", config.TYPE_TEXT)
+    clash["labels"] = {"en": u"Occupied"}
+
+    # ① 界面路径（skip_uniqueness=False）本来就拦得住
+    check(u"界面上添加同名字段：拦下",
+          any(u"v_dup_foreign_owner" in _u(p)
+              for p in validation.validate_record(clash)))
+
+    # ★ ② 导入路径（skip_uniqueness=True）也必须拦下 —— 这是这次修的
+    problems = validation.validate_record(clash, skip_uniqueness=True)
+    check(u"★ 导入同名字段：也拦下（skip_uniqueness 不该放过外部重名）",
+          any(u"v_dup_foreign_owner" in _u(p) for p in problems),
+          u"%s" % ([_u(p) for p in problems],))
+    check(u"报错里点名是哪个包占的（实施人员据此决定卸载还是改名）",
+          any(u"INNOCARE.arextension" in _u(getattr(p, "mapping", {})
+                                             .get("owner", u""))
+              for p in problems),
+          u"%s" % ([getattr(p, "mapping", None) for p in problems],))
+
+    # ③ 但「和本包自己的记录重名」在导入时仍要放行 —— 那是覆盖，
+    #    否则重导一次自己的备份就会全军覆没
+    _intro.get_foreign_field_sources = lambda pt: {}
+    own = storage.defaults("Batch", "SameAgain", config.TYPE_TEXT)
+    own["labels"] = {"en": u"Same again"}
+    storage.save_record(own)
+    again = storage.defaults("Batch", "SameAgain", config.TYPE_TEXT)
+    again["labels"] = {"en": u"Same again"}
+    check(u"界面上重复添加本包已有的名字：拦下",
+          any(u"v_dup_own" in _u(p)
+              for p in validation.validate_record(again)))
+    check(u"★ 导入重复的本包记录：放行（那是覆盖，不是冲突）",
+          not any(u"v_dup_own" in _u(p)
+                  for p in validation.validate_record(
+                      again, skip_uniqueness=True)))
+    storage.delete_record(own["id"])
+
+    # ④ 真正走一遍 import_json：同名的那条要被跳过并报出来
+    _intro.get_foreign_field_sources = _fake_sources
+    payload = _json.dumps({"version": 1, "fields": [
+        {"portal_type": "AnalysisRequest", "name": "Occupied",
+         "type": config.TYPE_TEXT, "labels": {"en": u"Occupied"}},
+        {"portal_type": "AnalysisRequest", "name": "FreeName",
+         "type": config.TYPE_TEXT, "labels": {"en": u"Free name"}},
+    ]})
+    added, updated, skipped, errors = storage.import_json(payload)
+    check(u"★ 导入两条：占用的被跳过，没占用的进得去",
+          added == 1 and skipped == 1 and len(errors) == 1,
+          u"added=%s skipped=%s errors=%s"
+          % (added, skipped, [_u(e) for e in errors]))
+    check(u"跳过的那条在结果里点了名",
+          errors and u"Occupied" in _u(errors[0]), u"%s" % ([_u(e) for e in errors],))
+    for _r in list(storage.get_records_for_type("AnalysisRequest")):
+        if _r.get("name") == "FreeName":
+            storage.delete_record(_r["id"])
+finally:
+    _intro.get_foreign_field_sources = _real_sources
+
+# --- 配置页要把被遮住的记录标出来 ---
+check(u"模板给被遮住的行加了标记样式",
+      "mdf-row-shadowed" in tpl and "field/shadowed_by" in tpl)
+check(u"view 给每条 own 记录算了 shadowed_by",
+      "shadowed_by" in io.open(mdf_view.__file__.rstrip("c"),
+                               encoding="utf-8").read())
+
+
+print()
+print("=" * 66)
 if FAILED:
     print("FAILED: %s" % ", ".join(FAILED))
     sys.exit(1)

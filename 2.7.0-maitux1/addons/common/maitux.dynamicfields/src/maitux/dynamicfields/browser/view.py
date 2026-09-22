@@ -537,14 +537,30 @@ class DynamicFieldsView(BrowserView):
         }
 
     def field_sections(self):
-        """右栏三段。本包那段取自配置库（有全部元数据），另两段取自内省"""
+        """右栏三段。本包那段取自配置库（有全部元数据），另两段取自内省
+
+        ★ 两段的数据来源不同，这不是实现细节，是必须让人看见的事实：
+        「本包添加的字段」是**配置库里记了什么**，「其它 add-on 添加的字段」
+        是**对象上实际有什么**。同名时这两者会打架 —— Schema.addField 是
+        dict 赋值，同名字段不可能并存，后来者顶掉前者。所以这里给每条
+        own 记录算一个 shadowed_by：配置里有、但那个名字已经被别人占了，
+        这一条现在是**不生效**的，界面上必须标出来，不能让它混在正常记录
+        里还带着「可编辑 · 可删除」。
+        """
         portal_type = self.selected_type()
         if not portal_type:
             return {"own": [], "addon": [], "native": []}
         grouped = introspect.group_fields(portal_type)
         query = self.field_query()
-        own = [self.describe_record(r)
-               for r in storage.get_records_for_type(portal_type)]
+        try:
+            owners = introspect.get_foreign_field_sources(portal_type)
+        except Exception:
+            owners = {}
+        own = []
+        for record in storage.get_records_for_type(portal_type):
+            described = self.describe_record(record)
+            described["shadowed_by"] = owners.get(described["name"]) or u""
+            own.append(described)
         if query:
             own = [f for f in own
                    if introspect._matches(query, f["name"], f["label"])]
