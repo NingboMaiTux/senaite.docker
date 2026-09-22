@@ -1,10 +1,47 @@
 # -*- coding: utf-8 -*-
-"""把 INNOCARE.arextension 加在样品上的 14 个字段翻译成本包的配置 JSON
+"""把各 add-on 加在**现有** SENAITE 对象上的字段翻译成本包的配置 JSON
 
 用途
 ----
-验证「这个 addon 能不能替代手写的 schemaextender」。产物导进配置页之后，
-把 INNOCARE.arextension 停掉，样品上那 14 个字段应该照旧存在、照旧能填。
+验证「这个 addon 能不能替代手写的 schemaextender / behavior」。产物导进
+配置页之后，把对应 add-on 停掉，那些字段应该照旧存在、照旧能填。
+
+覆盖范围
+--------
+全仓库扫过一遍，**给现有类型加字段**的只有这几个（自建内容类型的包
+——maitux.stock / maitux.stability / maitux.glossary /
+maitux.hazardcategories / maitux.oauth2.0——不在此列，本包也做不了）：
+
+===========================  ==============  ====  ====
+add-on                        目标类型         机制   字段
+===========================  ==============  ====  ====
+INNOCARE.arextension          AnalysisRequest  AT    14
+INNOCARE.autoreceive          Client           AT     1
+INNOCARE.labid                Laboratory       DX     1
+maitux.reviewerassignment     Worksheet        DX     1
+maitux.worksheetfields        Worksheet        DX     2
+maitux.instrument_acquisition Instrument       AT     1
+===========================  ==============  ====  ====
+
+**故意不迁的一个**：INNOCARE.autoreceive 的 ``ReceivedByName``。它覆写了
+``get()``，值每次实时算出来、根本不入库（见该包 extenders/
+analysisrequest.py）。本包造的是真正存值的字段，迁过来只会得到一个
+永远空白的框 —— 那比没有更糟。
+
+**字段能迁，行为不能迁**
+------------------------
+下面这几个字段本身迁得过来，但真正干活的逻辑在各自 add-on 里，停掉
+add-on 之后字段还在、功能没了。别把「字段还在」当成「功能还在」：
+
+- ``AutoReceive``（Client）：勾上自动接收样品 —— 干活的是 autoreceive 的
+  事件订阅者
+- ``lab_id``（Laboratory）：用作新样品 ID 的前缀 —— 生成逻辑在 labid 里
+- ``reviewer_userid``（Worksheet）：审核人，驱动过滤和权限判断
+- ``ParsingTemplate``（Instrument）：仪器采集时用哪张解析模板
+
+真正「纯数据、停掉 add-on 也不影响」的是 arextension 那 14 个，和
+worksheetfields 那 2 个（它们自己的 docstring 就写明只作追溯记录、
+不参与任何自动指派）。
 
 跑法（要在镜像里跑，脚本要 import 本包做校验）：
 
@@ -51,16 +88,15 @@ from maitux.dynamicfields import config        # noqa: E402
 from maitux.dynamicfields import storage       # noqa: E402
 from maitux.dynamicfields import validation    # noqa: E402
 
-TYPE = "AnalysisRequest"
-
 T = config.TYPE_TEXT
 TA = config.TYPE_TEXTAREA
 D = config.TYPE_DATE
 R = config.TYPE_REFERENCE
 C = config.TYPE_CHOICE
+B = config.TYPE_BOOL
 
 #: (字段名, 类型, 中文, 英文, 中文说明, 英文说明, 必填, 额外)
-FIELDS = [
+AREXTENSION = [
     ("ProjectNo", R, u"项目", u"Project", u"", u"", False,
      {"allowed_types": ["Project"]}),
     ("MaterialCode", T, u"物料代码", u"Material Code",
@@ -100,14 +136,76 @@ FIELDS = [
      u"Safety Precautions or Comments", False, {}),
 ]
 
+#: INNOCARE.autoreceive 加在客户上的开关。
+#: 不含同包的 ReceivedByName —— 那是覆写 get() 的计算字段，见模块 docstring。
+AUTORECEIVE = [
+    ("AutoReceive", B, u"自动接收样品",
+     u"Auto Receive Samples",
+     u"勾上后，该客户的样品在"
+     u"登记时自动接收，跳过"
+     u"接收步骤。",
+     u"Checked: samples of this client are received automatically when "
+     u"they are registered, skipping the receive step.", False, {}),
+]
 
-def build():
-    out = []
-    problems = []
-    for order, row in enumerate(FIELDS, start=1):
+#: INNOCARE.labid 加在实验室上的 Lab ID（新样品 ID 的前缀）
+LABID = [
+    ("lab_id", T, u"实验室代码", u"Lab ID",
+     u"用作新样品 ID 的前缀。",
+     u"Laboratory identifier, used as the prefix of new sample IDs.",
+     False, {}),
+]
+
+#: maitux.reviewerassignment + maitux.worksheetfields 加在工作表上的
+WORKSHEET = [
+    ("reviewer_userid", T, u"审核人", u"Reviewer",
+     u"存放指定审核人的用户 ID，"
+     u"用于过滤和权限判断。",
+     u"Stores the assigned reviewer's user ID for filtering and "
+     u"permission checks.", False, {}),
+    ("instruments", R, u"仪器", u"Instruments",
+     u"与本工作表关联的多台"
+     u"仪器，仅作追溯记录，"
+     u"不会自动指派给其中的"
+     u"检验项。",
+     u"Multiple instruments associated with this worksheet. Stored for "
+     u"traceability; they are not assigned automatically to the "
+     u"contained analyses.", False,
+     {"allowed_types": ["Instrument"], "multi": True}),
+    ("stock_batches", R, u"库存批次", u"Stock Batches",
+     u"与本工作表关联的多个"
+     u"库存批次（来自 maitux.stock）。",
+     u"Multiple Stock Batch objects associated with this worksheet "
+     u"(from the maitux.stock module).", False,
+     {"allowed_types": ["StockBatch"], "multi": True}),
+]
+
+#: maitux.instrument_acquisition 加在仪器上的解析模板
+INSTRUMENT = [
+    ("ParsingTemplate", R, u"解析模板",
+     u"Parsing Template",
+     u"仪器采集时使用哪张"
+     u"解析模板。",
+     u"Which Instrument Parsing Template to use when acquiring data.",
+     False, {"allowed_types": ["InstrumentParsingTemplate"]}),
+]
+
+#: (portal_type, 来源 add-on, 字段表)
+GROUPS = [
+    ("AnalysisRequest", "INNOCARE.arextension", AREXTENSION),
+    ("Client", "INNOCARE.autoreceive", AUTORECEIVE),
+    ("Laboratory", "INNOCARE.labid", LABID),
+    ("Worksheet", "maitux.reviewerassignment + maitux.worksheetfields",
+     WORKSHEET),
+    ("Instrument", "maitux.instrument_acquisition", INSTRUMENT),
+]
+
+
+def build_group(portal_type, source, rows, out, problems):
+    for order, row in enumerate(rows, start=1):
         name, ftype, zh, en, zh_desc, en_desc, required, extra = row
-        record = storage.defaults(TYPE, name, ftype)
-        record["id"] = "arext-%s" % name.lower()
+        record = storage.defaults(portal_type, name, ftype)
+        record["id"] = "mig-%s-%s" % (portal_type.lower(), name.lower())
         record["labels"] = {"zh_CN": zh, "en": en}
         record["descriptions"] = {}
         if zh_desc or en_desc:
@@ -122,16 +220,27 @@ def build():
         record["list_default"] = False
         record["index"] = False
         record["metadata"] = False
-        record["fieldset"] = "default"      # AnalysisRequest 不支持分组
+        # 一律 default：AnalysisRequest 本来就不支持分组，其余几个类型
+        # 也没必要为迁移自造分组。
+        record["fieldset"] = "default"
         record["order"] = order
-        record["creator"] = "arextension-migration"
+        record["creator"] = "addon-migration"
+        # 留个来源标记，导入后在配置页上能看出这条是从哪个 add-on 平移过来的
+        record["source_addon"] = source
         record.update(extra)
 
         found = validation.validate_record(record, skip_uniqueness=True)
         if found:
-            problems.append(u"%s: %s" % (name, u"; ".join(
+            problems.append(u"%s.%s: %s" % (portal_type, name, u"; ".join(
                 u"%s" % p for p in found)))
         out.append(record)
+
+
+def build():
+    out = []
+    problems = []
+    for portal_type, source, rows in GROUPS:
+        build_group(portal_type, source, rows, out, problems)
     return out, problems
 
 
@@ -147,7 +256,7 @@ def main(argv):
 
     payload = {
         "version": 1,
-        "exported": "generated by tools/make_arextension_config.py",
+        "exported": "generated by tools/make_migration_config.py",
         "revision": 0,
         "fields": records,
     }
@@ -156,7 +265,10 @@ def main(argv):
         with io.open(argv[0], "w", encoding="utf-8") as handle:
             handle.write(text)
             handle.write(u"\n")
-        print((u"已写出 %s（%d 个字段，全部通过本包校验）"
+        for portal_type, source, rows in GROUPS:
+            print((u"  %-16s %2d 个   <- %s"
+                   % (portal_type, len(rows), source)).encode("utf-8"))
+        print((u"已写出 %s（共 %d 个字段，全部通过本包校验）"
                % (argv[0], len(records))).encode("utf-8"))
     else:
         print(text.encode("utf-8"))

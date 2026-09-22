@@ -1055,30 +1055,46 @@ for _r in (rec_col, rec_hidden, rec_toggle):
 
 print()
 print("=" * 66)
-print(u"14. arextension 迁移包：导进来能不能真的造出那 14 个字段".encode("utf-8"))
+print(u"14. 迁移包：20 个字段 / 5 个对象，导进来能不能真的造出字段".encode("utf-8"))
 print("=" * 66)
-print(u"    —— 交付的 arextension_fields.json 必须导得进、造得出，不能只是好看".encode("utf-8"))
+print(u"    —— 交付的 addon_fields.json 必须导得进、造得出，不能只是好看".encode("utf-8"))
 print()
 
-# tools/make_arextension_config.py 生成的那份 JSON 是要交给实施人员在界面上
-# 导入的。光「生成时通过校验」不够 —— 真正要证明的是：导进去之后，
-# AnalysisRequest 的 schema 上确实多出这 14 个字段，类型和标签都对。
-# 这一节把整条链路跑一遍：文件 -> import_json -> atfields 造字段。
+# tools/make_migration_config.py 生成的那份 JSON 是要交给实施人员在界面上
+# 导入的。光「生成时通过校验」不够 —— 真正要证明的是：导进去之后，各类型
+# 的 schema 上确实多出这些字段，类型和标签都对。
+# 这一节把整条链路跑一遍：文件 -> import_json -> atfields/dxfields 造字段。
+#
+# 覆盖的是全仓库**给现有类型加字段**的 6 个 add-on。自建内容类型的包
+# （stock / stability / glossary / hazardcategories / oauth2）不在范围内，
+# 本包也做不了新建类型。
 
 _pkg_root = os.path.dirname(os.path.dirname(mdf_view.__file__))      # .../browser -> dynamicfields
 _json_path = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(_pkg_root))),
-    "arextension_fields.json")
+    "addon_fields.json")
 check(u"交付的 JSON 文件在", os.path.exists(_json_path), _json_path)
 
 if os.path.exists(_json_path):
     _payload = io.open(_json_path, encoding="utf-8").read()
     added, updated, skipped, errors = storage.import_json(_payload,
                                                           mode="merge")
-    check(u"14 个字段全部导入成功，没有跳过、没有报错",
-          added == 14 and skipped == 0 and not errors,
+    check(u"20 个字段全部导入成功，没有跳过、没有报错",
+          added == 20 and skipped == 0 and not errors,
           u"added=%s updated=%s skipped=%s errors=%s"
           % (added, updated, skipped, [_u(e) for e in errors]))
+
+    # 五个对象类型都要落到位 —— 只验样品的话，另外四个包白迁了。
+    # 按 creator 限定：前面几节在 AnalysisRequest / Client 上也留了记录，
+    # 不限定的话数出来的是「本节 + 前面几节」的总和。
+    def _migrated(portal_type):
+        return [r for r in storage.get_records_for_type(portal_type)
+                if r.get("creator") == "addon-migration"]
+
+    for _t, _n in (("AnalysisRequest", 14), ("Client", 1), ("Laboratory", 1),
+                   ("Worksheet", 3), ("Instrument", 1)):
+        _got = len(_migrated(_t))
+        check(u"%s 上落了 %d 个字段" % (_t, _n), _got == _n, u"实际 %s" % _got)
 
     _recs = storage.get_records_for_type("AnalysisRequest")
     _by_name = dict((r.get("name"), r) for r in _recs)
@@ -1120,10 +1136,36 @@ if os.path.exists(_json_path):
           u"%s" % ([(n, getattr(f, "getName", lambda: None)())
                     for n, f in _built if f is not None],))
 
+    # ★ Worksheet / Laboratory 是 Dexterity，走的是另一条造字段的路。
+    #   只验 AT 的话，另外那几个包的字段能不能真出来是不知道的。
+    _ws = dict((r.get("name"), r)
+               for r in storage.get_records_for_type("Worksheet"))
+    _dx_built = []
+    for _n in ("reviewer_userid", "instruments", "stock_batches"):
+        try:
+            _dx_built.append((_n, dxfields.build_field(_ws[_n])))
+        except Exception as _exc:
+            _dx_built.append((_n, None))
+            check(u"造 DX 字段 %s 时抛异常" % _n, False, u"%s" % _exc)
+    check(u"★ 工作表那 3 个字段造得出 DX 字段（Worksheet 是 Dexterity）",
+          all(f is not None for _n, f in _dx_built),
+          u"造不出: %s" % ([n for n, f in _dx_built if f is None],))
+    check(u"两个多值引用的 allowed_types 没丢",
+          _ws["instruments"].get("allowed_types") == ["Instrument"]
+          and _ws["stock_batches"].get("allowed_types") == ["StockBatch"])
+
+    check(u"每条都带来源标记，导入后看得出是从哪个 add-on 平移的",
+          all(r.get("source_addon")
+              for t in ("AnalysisRequest", "Client", "Laboratory",
+                        "Worksheet", "Instrument")
+              for r in _migrated(t)))
+
     # 收尾：把这一节导进来的记录删掉
-    for _r in list(storage.get_records_for_type("AnalysisRequest")):
-        if _r.get("creator") == "arextension-migration":
-            storage.delete_record(_r["id"])
+    for _t in ("AnalysisRequest", "Client", "Laboratory", "Worksheet",
+               "Instrument"):
+        for _r in list(storage.get_records_for_type(_t)):
+            if _r.get("creator") == "addon-migration":
+                storage.delete_record(_r["id"])
 
 
 print()
