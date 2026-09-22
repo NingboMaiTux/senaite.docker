@@ -1266,6 +1266,116 @@ check(u"view 给每条 own 记录算了 shadowed_by",
 
 print()
 print("=" * 66)
+print(u"16. Setup 页入口（@@lims-setup 上的磁贴）".encode("utf-8"))
+print("=" * 66)
+print(u"    —— 覆盖了 senaite.core 的视图，坏了就是整个 Setup 页打不开".encode("utf-8"))
+print()
+
+# 记不住 @@dynamic-fields 这个路径，得有入口。三条轻的路都堵死了
+# （viewlet：prefs_main_template 里没有 viewlet manager；建内容对象：要写
+# 数据库；z3c.jbot：没装），只剩继承 SetupView 覆盖 lims-setup。
+#
+# 覆盖核心视图的风险是「坏了就是整个 Setup 页打不开」，所以这一节盯的是
+# **兜底有没有真的兜住**：本类只该多一块磁贴，出任何岔子都必须退回父类的
+# 结果，而不是把异常抛到页面上。
+
+from senaite.core.browser.controlpanel.setupview import (              # noqa: E402
+    SetupView as _CoreSetupView)
+from maitux.dynamicfields.browser import setupview as mdf_setup        # noqa: E402
+
+check(u"是 senaite.core SetupView 的子类（不是抄一份）",
+      issubclass(mdf_setup.DynamicFieldsSetupView, _CoreSetupView))
+
+_view = mdf_setup.DynamicFieldsSetupView.__new__(
+    mdf_setup.DynamicFieldsSetupView)
+
+# zopepy 里没有站点，api.get_portal() 会失败 —— 那条路是降级路径（下面 ②
+# 专门验），要验正常路径得先把 portal 桩上。
+class _FakeApi(object):
+    @staticmethod
+    def get_portal():
+        return object()
+
+    @staticmethod
+    def get_url(obj):
+        return u"http://nohost/lims"
+
+
+_real_api = mdf_setup.api
+mdf_setup.api = _FakeApi
+
+# ① 父类正常时：原有条目一个不少，末尾多一块
+_core_items = [object(), object()]
+mdf_setup.SetupView.setupitems = lambda self: list(_core_items)
+try:
+    got = _view.setupitems()
+    check(u"原有磁贴一个不少，自己那块加在最后",
+          len(got) == 3 and got[:2] == _core_items
+          and isinstance(got[2], mdf_setup._Tile),
+          u"%s" % (len(got),))
+    check(u"磁贴指向 @@dynamic-fields",
+          got[2].absolute_url().endswith("/@@dynamic-fields"),
+          got[2].absolute_url())
+    check(u"磁贴标题是可翻译的 Message，不是写死的字符串",
+          hasattr(got[2].Title(), "domain"))
+
+    # ★ ② 自己这块出岔子时：必须退回父类的结果，不能把异常抛出去
+    _boom = mdf_setup.DynamicFieldsSetupView._tile
+    mdf_setup.DynamicFieldsSetupView._tile = \
+        lambda self: (_ for _ in ()).throw(RuntimeError("boom"))
+    try:
+        fallback = _view.setupitems()
+        check(u"★ 自己那块造不出来时，退回父类结果（Setup 页不能因此打不开）",
+              fallback == _core_items, u"%s" % (fallback,))
+    except Exception as _exc:
+        check(u"★ 自己那块造不出来时，退回父类结果（Setup 页不能因此打不开）",
+              False, u"异常漏出来了: %s" % _exc)
+    finally:
+        mdf_setup.DynamicFieldsSetupView._tile = _boom
+finally:
+    del mdf_setup.SetupView.setupitems
+
+# ②b 没有站点时（api 拿不到 portal）：同样退回父类，不能抛
+mdf_setup.api = None
+mdf_setup.SetupView.setupitems = lambda self: list(_core_items)
+try:
+    check(u"拿不到 portal 时也退回父类结果",
+          _view.setupitems() == _core_items)
+finally:
+    del mdf_setup.SetupView.setupitems
+    mdf_setup.api = _FakeApi
+
+# ③ 图标：自己那块自己给，别的照旧交给父类
+_tile = mdf_setup._Tile(u"/x", u"X")
+check(u"自己那块的图标不走父类（假 portal_type 查不到会抛）",
+      "img" in _view.get_icon_for(_tile))
+_called = []
+mdf_setup.SetupView.get_icon_for = lambda self, b, **kw: _called.append(b) or u"core"
+try:
+    other = object()
+    check(u"不是自己那块时，原样交给父类",
+          _view.get_icon_for(other) == u"core" and _called == [other])
+finally:
+    del mdf_setup.SetupView.get_icon_for
+
+# ④ overrides.zcml 里三项必须和 senaite.core 原注册一致 —— permission 写错
+#    会把整个 Setup 页从 LabManager / LabClerk 手里收走
+_ov = io.open(os.path.join(os.path.dirname(os.path.dirname(
+    mdf_view.__file__)), "overrides.zcml"), encoding="utf-8").read()
+for _needle in ('name="lims-setup"',
+                'for="Products.CMFPlone.interfaces.IPloneSiteRoot"',
+                'permission="senaite.core.permissions.ManageBika"',
+                'layer="senaite.core.interfaces.ISenaiteCore"'):
+    check(u"overrides.zcml 保留了原注册的 %s" % _needle.split("=")[0],
+          _needle in _ov, _needle)
+check(u"引用 senaite 权限前先 include 了定义它的包（R1，实测踩过）",
+      '<include package="senaite.core.permissions" />' in _ov)
+
+mdf_setup.api = _real_api
+
+
+print()
+print("=" * 66)
 if FAILED:
     print("FAILED: %s" % ", ".join(FAILED))
     sys.exit(1)

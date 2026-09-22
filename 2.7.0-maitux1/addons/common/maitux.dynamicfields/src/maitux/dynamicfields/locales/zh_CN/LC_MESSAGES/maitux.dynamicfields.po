@@ -638,3 +638,6 @@ msgstr "当前不生效，名字已被占用："
 
 msgid "${type} already has a field named ${name}, from ${owner}. Two fields with the same name cannot coexist - one silently replaces the other. Uninstall that add-on first, or pick a different name."
 msgstr "${type} 上已经有一个叫 ${name} 的字段，来自 ${owner}。同名字段不可能并存——后加的会悄悄顶掉先前的。先卸掉那个 add-on，或者换一个名字。"
+
+msgid "tile_add_fields"
+msgstr "添加字段"

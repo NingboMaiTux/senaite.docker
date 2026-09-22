@@ -1,5 +1,6 @@
 <configure
     xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
     i18n_domain="maitux.dynamicfields">
 
   <!--
@@ -19,5 +20,39 @@
     本包在该类型上被旁路。配置页用 assignable.is_assignable_active() 实测告警。
   -->
   <adapter factory=".assignable.DynamicFieldsAssignable" />
+
+  <!--
+    Setup 页（@@lims-setup）加一块「动态字段」磁贴。
+
+    为什么是覆盖视图而不是 viewlet：那个页面用 prefs_main_template.pt，
+    里面一个 viewlet manager 都没有，任何 viewlet 都渲染不出来。建内容
+    对象要写数据库，本包不写；z3c.jbot 这个环境没装。三条轻的路都堵死，
+    详见 browser/setupview.py 的模块 docstring。
+
+    ★ for / permission / layer 三项必须和 senaite.core 原注册**逐字一致**
+      （senaite/core/browser/controlpanel/configure.zcml:15-20）。尤其是
+      permission：换成本包别处用的 cmf.ManagePortal 会把整个 Setup 页从
+      LabManager / LabClerk 手里收走 —— 为了加个入口把人家的页面弄没了。
+
+      这里引用 senaite.core 的权限是安全的：overrides.zcml 在所有
+      configure.zcml 之后才处理，那时权限早已注册，不存在 R1 那个
+      「Undefined permission ID」的加载顺序问题。
+  -->
+  <!--
+    ★ 这一行是必须的，不是保险。原先以为「overrides 在 configure 之后处理，
+      权限那时一定已注册」—— 错的，实测（tools/zcml_check.py）直接
+      ValueError: ('Undefined permission ID', 'senaite.core.permissions.ManageBika')。
+      跟 configure.zcml 里治 cmf.ManagePortal 是同一套路：用谁的权限，
+      就先把定义它的包 include 进来，把注册顺序钉死。
+  -->
+  <include package="senaite.core.permissions" />
+
+  <browser:page
+      name="lims-setup"
+      for="Products.CMFPlone.interfaces.IPloneSiteRoot"
+      class=".browser.setupview.DynamicFieldsSetupView"
+      permission="senaite.core.permissions.ManageBika"
+      layer="senaite.core.interfaces.ISenaiteCore"
+      />
 
 </configure>
