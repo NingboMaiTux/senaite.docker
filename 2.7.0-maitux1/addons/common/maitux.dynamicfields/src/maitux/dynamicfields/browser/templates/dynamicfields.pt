@@ -43,6 +43,11 @@
 .mdf-sec[open] > summary:before { content:"\25BE";color:#35708F; }
 .mdf-row { display:flex;align-items:center;border-top:1px solid #eef1f2;font-size:13px; }
 .mdf-row-ro { background:#fcfdfd; }
+/* 名字被别的包占了、当前不生效的记录。不用红色：它不是错误，是一个
+   待处理的状态（卸掉那个包就生效了），红色会让人以为数据坏了。 */
+.mdf-row-shadowed { background:#fdf8ee; }
+.mdf-shadow { font-size:11px;color:#8a6d3b;background:#fcf0d9;
+              border:1px solid #f0dcb4;border-radius:3px;padding:1px 5px; }
 .mdf-hrow { display:flex;align-items:center;background:#fcfdfd;
             border-top:1px solid #d7dbdc;font-size:11.5px;font-weight:600;color:#606969; }
 .mdf-c { padding:8px 10px;min-width:0;overflow:hidden;text-overflow:ellipsis;
@@ -62,9 +67,11 @@
 .mdf-panel { border:1px solid #d7dbdc;border-radius:4px;background:#fff;
              margin-top:14px; }
 .mdf-backdrop { display:none; }
-#mdf_open { display:none; }
+/* 没有 JS 时，抽屉退化成页面底部的普通区块，那两个「打开抽屉」的入口
+   就是死链接 —— 一律藏起来，别给点了没反应的东西。关闭按钮同理。 */
+[data-mdf-opens] { display:none; }
 body:not(.mdf-js) .mdf-panel-x { display:none; }
-body.mdf-js #mdf_open { display:inline-block; }
+body.mdf-js [data-mdf-opens] { display:inline-block; }
 /* 1040px = 原来的 780 + 33%。往上顶到这儿而不是更宽：1550px 的屏上抽屉
    左边缘落在 x≈510，页面标题在 x≈390，还露得出来——看得见自己在给哪个
    对象加字段。再宽就把标题盖住了。窄屏由 max-width:94vw 兜着。 */
@@ -74,7 +81,9 @@ body.mdf-js .mdf-panel { display:none;position:fixed;top:0;right:0;bottom:0;
              box-shadow:-2px 0 14px rgba(0,0,0,.18); }
 body.mdf-js .mdf-backdrop { position:fixed;top:0;left:0;right:0;bottom:0;
              background:rgba(0,0,0,.25);z-index:1039; }
-body.mdf-js.mdf-open .mdf-panel,
+/* 页面上有多块抽屉（添加字段 / 导入配置），只显示被点中的那一块 ——
+   不能像原来那样用 body.mdf-open 一把全开，否则两块会叠在一起。 */
+body.mdf-js .mdf-panel.mdf-panel-on { display:block; }
 body.mdf-js.mdf-open .mdf-backdrop { display:block; }
 body.mdf-js.mdf-open { overflow:hidden; }
 .mdf-panel-head { position:sticky;top:0;background:#35708F;color:#fff;
@@ -126,11 +135,21 @@ body.mdf-js.mdf-open { overflow:hidden; }
                          href string:${base}?tab=all"
          i18n:translate="">All custom fields</a>
     </li>
+    <!-- 导入 / 导出是一对操作，放在一起。原来导出在这儿、导入却埋在
+         页签 2 底部，在「按对象浏览」页签上根本够不着。 -->
     <li class="nav-item ml-auto">
+      <a class="nav-link" href="#" id="mdf_open_import"
+         data-mdf-opens="mdf_panel_import"
+         i18n:translate="">Import configuration</a>
+    </li>
+    <li class="nav-item">
       <a class="nav-link" tal:attributes="href view/export_url"
          i18n:translate="">Export JSON</a>
     </li>
   </ul>
+
+  <!-- 遮罩：页面级，所有抽屉共用一块 -->
+  <div class="mdf-backdrop" id="mdf_backdrop"></div>
 
   <!-- ================= tab 1：按对象浏览 ================= -->
   <div tal:condition="python:tab == 'objects'">
@@ -193,6 +212,7 @@ body.mdf-js.mdf-open { overflow:hidden; }
         <h2 class="h4 mb-0 mr-2" tal:content="info/title">Title</h2>
         <span class="mdf-code" tal:content="info/portal_type">Type</span>
         <button type="button" class="btn btn-sm ml-auto" id="mdf_open"
+                data-mdf-opens="mdf_panel"
                 style="background:#35708F;border-color:#2c5f7a;color:#fff;"
                 i18n:translate="">Add field</button>
       </div>
@@ -244,13 +264,24 @@ body.mdf-js.mdf-open { overflow:hidden; }
             <span class="mdf-c" style="width:62px;" i18n:translate="">Index</span>
             <span class="mdf-c" style="width:150px;" i18n:translate="">Actions</span>
           </div>
-          <div class="mdf-row" tal:repeat="field sections/own">
+          <!-- 被别人占了名字的记录：配置里有，对象上没有。同名字段不可能
+               并存（Schema.addField 是 dict 赋值），所以这一条现在不生效。
+               必须一眼看得出来，不能混在正常记录里。 -->
+          <div class="mdf-row" tal:repeat="field sections/own"
+               tal:attributes="class python:('mdf-row mdf-row-shadowed'
+                                      if field['shadowed_by'] else 'mdf-row')">
             <span class="mdf-c" style="width:170px;">
               <span class="mdf-code" tal:content="field/name">name</span>
             </span>
             <span class="mdf-c text-muted" style="width:92px;"
                   tal:content="field/type_title">type</span>
-            <span class="mdf-c" style="flex-grow:1;" tal:content="field/label">label</span>
+            <span class="mdf-c" style="flex-grow:1;">
+              <span tal:content="field/label">label</span>
+              <span class="mdf-shadow ml-1" tal:condition="field/shadowed_by">
+                <span i18n:translate="">not in effect - the name is taken by</span>
+                <span tal:content="field/shadowed_by">pkg</span>
+              </span>
+            </span>
             <span class="mdf-c" style="width:128px;">
               <span tal:repeat="slot field/positions"
                     tal:attributes="class python:'mdf-pos mdf-pos-on' if slot['on'] else 'mdf-pos mdf-pos-off';
@@ -330,12 +361,12 @@ body.mdf-js.mdf-open { overflow:hidden; }
 
       </tal:sections>
 
-      <!-- ============ 添加字段：右侧抽屉（同页，不跳新页） ============ -->
-      <div class="mdf-backdrop" id="mdf_backdrop"></div>
+      <!-- ============ 添加字段：右侧抽屉（同页，不跳新页） ============
+           遮罩不在这儿了：页面上有两块抽屉，共用页面级那一块（第 150 行）。 -->
       <div class="mdf-panel" id="mdf_panel"
            tal:attributes="data-mdf-reopen python:view.reopen_panel and '1' or '0'">
         <div class="mdf-panel-head">
-          <button type="button" class="mdf-panel-x" id="mdf_close"
+          <button type="button" class="mdf-panel-x" data-mdf-closes="1"
                   aria-label="Close">&#215;</button>
           <span i18n:translate="">Add field</span>
         </div>
@@ -534,7 +565,13 @@ body.mdf-js.mdf-open { overflow:hidden; }
                 Show the field on the object's edit form.
               </div>
             </div>
-            <div class="mdf-f">
+            <!-- 「查看页」只对 Archetypes 生效：atfields 的 _visibility()
+                 读 show_view，dxschema 那边只处理 show_edit 和 readonly。
+                 与其在 Dexterity 类型上摆一个按了没反应的开关，不如整行
+                 不出现 —— 实施人员不需要知道 AT / DX 是什么，只是在那些
+                 对象上看不到这一项。DX 侧做出来之后把 tal:condition 去掉。 -->
+            <div class="mdf-f"
+                 tal:condition="python:info['mechanism'] == 'AT'">
               <div class="mdf-n" i18n:translate="">View page</div>
               <div>
                 <input type="checkbox" id="mdf_view" name="show_view" value="1"
@@ -544,11 +581,35 @@ body.mdf-js.mdf-open { overflow:hidden; }
                 Show the field on the object's view page.
               </div>
             </div>
-            <!-- 这里原来还有「列表列」和「列表默认显示」两个勾选框。两个
-                 都没实现：列表视图的列来自一份跟 schema 无关的 dict，本包
-                 的配置根本到不了那儿。勾了不报错，列也不会出现。
-                 跟 show_report 一个处理法——界面上不给，_read_common 里
-                 钉死 False。 -->
+            <!-- DX 上这一行不渲染，没勾的复选框不会提交，记录里就会存成
+                 False —— 可 DX 的字段在查看页上**确实是显示的**，存 False
+                 等于记了一笔假账。补个隐藏域把它钉成 True，和实际行为对上。 -->
+            <input type="hidden" name="show_view" value="1"
+                   tal:condition="python:info['mechanism'] != 'AT'" />
+            <!-- 「列表列」不走 schema：列表视图的列来自视图类里写死的
+                 self.columns，所以由 browser/listing.py 的
+                 IListingViewAdapter 往里插。2026-09-21 曾因没实现而撤下，
+                 现在补上了。 -->
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">Listing column</div>
+              <div>
+                <input type="checkbox" id="mdf_list" name="show_list" value="1"
+                       tal:attributes="checked python:view.prefill_check('show_list')" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                Needs the metadata column under Search below as well.
+              </div>
+            </div>
+            <div class="mdf-f">
+              <div class="mdf-n" i18n:translate="">On by default</div>
+              <div>
+                <input type="checkbox" id="mdf_listdef" name="list_default" value="1"
+                       tal:attributes="checked python:view.prefill_check('list_default')" />
+              </div>
+              <div class="mdf-h" i18n:translate="">
+                The column comes up without the user switching it on.
+              </div>
+            </div>
             <div class="alert alert-warning py-2 mt-2 mb-0 small" i18n:translate="">
                 These two switches reach the standard edit and view forms,
                 the sample add form (it does read the AR schema) and the
@@ -752,34 +813,6 @@ body.mdf-js.mdf-open { overflow:hidden; }
             sync();
           })();
 
-          /* 右侧抽屉的开合。
-             保存失败时自动重开：表单已经回填（view.prefill*），抽屉里也另放
-             了一份报错，用户接着改就行，不用重头再填一遍。 */
-          (function () {
-            var opener = document.getElementById("mdf_open");
-            var panel = document.getElementById("mdf_panel");
-            if (!opener || !panel) { return; }
-            var body = document.body;
-            // 先声明「这一页有 JS」，样式表里的抽屉规则才生效
-            body.className += " mdf-js";
-            function show(on) {
-              var cls = body.className.replace(/\s*\bmdf-open\b/g, "");
-              body.className = on ? cls + " mdf-open" : cls;
-            }
-            opener.addEventListener("click", function () { show(true); });
-            var shut = document.getElementById("mdf_close");
-            if (shut) {
-              shut.addEventListener("click", function () { show(false); });
-            }
-            var back = document.getElementById("mdf_backdrop");
-            if (back) {
-              back.addEventListener("click", function () { show(false); });
-            }
-            document.addEventListener("keydown", function (ev) {
-              if (ev.keyCode === 27) { show(false); }
-            });
-            if (panel.getAttribute("data-mdf-reopen") === "1") { show(true); }
-          })();
           </script>
           <span class="small text-muted ml-2" i18n:translate="">
             Takes effect immediately; no container restart needed.
@@ -872,35 +905,119 @@ body.mdf-js.mdf-open { overflow:hidden; }
       </div>
     </details>
 
-    <details class="mdf-grp mt-3">
-      <summary i18n:translate="">Import configuration (JSON)</summary>
-      <form method="post" class="p-3" enctype="multipart/form-data"
-            tal:attributes="action base">
-        <input type="hidden" name="action" value="import_config" />
-        <input type="hidden" name="tab" value="all" />
-        <div class="form-group">
-          <label class="small" i18n:translate="">Upload the file exported from another site</label>
-          <input type="file" name="upload" class="form-control-file" />
-        </div>
-        <div class="form-group">
-          <label class="small" i18n:translate="">...or paste the JSON here</label>
-          <textarea name="payload" rows="5" class="form-control form-control-sm"></textarea>
-        </div>
-        <div class="form-group">
-          <select name="mode" class="form-control form-control-sm" style="width:220px;">
-            <option value="merge" i18n:translate="">Merge (add and overwrite)</option>
-            <option value="replace" i18n:translate="">Replace (wipe first)</option>
-          </select>
-        </div>
-        <button type="submit" class="btn btn-sm btn-outline-secondary"
-                i18n:translate="">Import</button>
-        <span class="small text-muted ml-2" i18n:translate="">
-          Configuration does not travel with GenericSetup, so this is the only way
-          to move it between sites.
-        </span>
-      </form>
-    </details>
   </div>
+
+  <!-- ============ 导入配置：右侧抽屉（页面级，两个页签都够得着） ============
+       原来这块是页签 2 底部的一个 <details> —— 在「按对象浏览」页签上根本
+       够不着，而导出按钮却一直在右上角，一对操作被拆到两处。现在两个都放
+       右上角，点导入从右边拉出来。
+
+       为什么是抽屉不是弹框：页面上已经有一套抽屉（添加字段），再引入弹框
+       就是两种交互并存；而且弹框的遮罩 / Esc / 滚动锁 / 无 JS 降级都得重写
+       一遍，那四处正是最容易出 bug 的地方。导入完会列出「新增 / 覆盖 /
+       跳过 + 每条跳过原因」，可能很长，抽屉天然能滚。 -->
+  <div class="mdf-panel" id="mdf_panel_import">
+    <div class="mdf-panel-head">
+      <button type="button" class="mdf-panel-x" data-mdf-closes="1"
+              aria-label="Close">&#215;</button>
+      <span i18n:translate="">Import configuration (JSON)</span>
+    </div>
+    <form method="post" class="p-3" enctype="multipart/form-data"
+          tal:attributes="action base">
+      <input type="hidden" name="action" value="import_config" />
+      <!-- 回到用户当前所在的页签和对象，不要一律甩回 tab=all -->
+      <input type="hidden" name="tab" tal:attributes="value tab" />
+      <input type="hidden" name="portal_type"
+             tal:attributes="value info/portal_type | nothing" />
+      <div class="form-group">
+        <label class="small" i18n:translate="">Upload the file exported from another site</label>
+        <input type="file" name="upload" class="form-control-file" />
+      </div>
+      <div class="form-group">
+        <label class="small" i18n:translate="">...or paste the JSON here</label>
+        <textarea name="payload" rows="8" class="form-control form-control-sm"></textarea>
+      </div>
+      <div class="form-group">
+        <select name="mode" class="form-control form-control-sm" style="width:220px;">
+          <option value="merge" i18n:translate="">Merge (add and overwrite)</option>
+          <option value="replace" i18n:translate="">Replace (wipe first)</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-sm btn-outline-secondary"
+              i18n:translate="">Import</button>
+      <span class="small text-muted ml-2" i18n:translate="">
+        Configuration does not travel with GenericSetup, so this is the only way
+        to move it between sites.
+      </span>
+    </form>
+  </div>
+
+  <script type="text/javascript">
+  /* 右侧抽屉的开合（页面级，管所有 .mdf-panel）。
+
+     放在这儿而不是某个表单里：导入抽屉两个页签都要用，埋在「添加字段」
+     表单里的话，切到页签 2 就没有 JS 了。
+
+     约定：
+       按钮  data-mdf-opens="<面板 id>"   点它打开那个面板
+       关闭  data-mdf-closes="1"          抽屉头上的 ×
+       面板  class="mdf-panel"            同一时刻只开一个
+
+     保存失败时自动重开（data-mdf-reopen="1"）：表单已经回填
+     （view.prefill*），抽屉里也另放了一份报错，用户接着改就行。 */
+  (function () {
+    var panels = document.querySelectorAll(".mdf-panel");
+    if (!panels.length) { return; }
+    var body = document.body;
+    // 先声明「这一页有 JS」，样式表里的抽屉规则才生效。没有这行的话
+    // 面板就是页面底部几块普通区域，功能照旧。
+    body.className += " mdf-js";
+
+    function closeAll() {
+      for (var i = 0; i < panels.length; i++) {
+        panels[i].className =
+          panels[i].className.replace(/\s*\bmdf-panel-on\b/g, "");
+      }
+      body.className = body.className.replace(/\s*\bmdf-open\b/g, "");
+    }
+
+    function open(id) {
+      var panel = document.getElementById(id);
+      if (!panel) { return; }
+      closeAll();
+      panel.className += " mdf-panel-on";
+      body.className += " mdf-open";
+    }
+
+    var openers = document.querySelectorAll("[data-mdf-opens]");
+    for (var i = 0; i < openers.length; i++) {
+      (function (el) {
+        el.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          open(el.getAttribute("data-mdf-opens"));
+        });
+      })(openers[i]);
+    }
+
+    var shutters = document.querySelectorAll("[data-mdf-closes]");
+    for (var j = 0; j < shutters.length; j++) {
+      shutters[j].addEventListener("click", closeAll);
+    }
+
+    var back = document.getElementById("mdf_backdrop");
+    if (back) { back.addEventListener("click", closeAll); }
+    document.addEventListener("keydown", function (ev) {
+      if (ev.keyCode === 27) { closeAll(); }
+    });
+
+    for (var k = 0; k < panels.length; k++) {
+      if (panels[k].getAttribute("data-mdf-reopen") === "1") {
+        open(panels[k].id);
+        break;
+      }
+    }
+  })();
+  </script>
 
 </div>
 </tal:page>

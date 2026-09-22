@@ -57,9 +57,24 @@ def validate_record(record, portal=None, existing_id=None,
 
     problems.extend(_validate_type_specific(record, field_type))
 
-    if portal_type and name and not skip_uniqueness:
-        problems.extend(
-            _validate_uniqueness(portal_type, name, portal, existing_id))
+    if portal_type and name:
+        # 「和本包已有记录重名」——导入时是正常的覆盖（同一份配置再导一次），
+        # 所以 skip_uniqueness 只管得着这一条。
+        if not skip_uniqueness:
+            problems.extend(
+                _validate_own_uniqueness(portal_type, name, portal,
+                                         existing_id))
+        # 「和原生字段 / 其它 add-on 的字段重名」——**任何路径都要拦，导入
+        # 也不例外**。两个同名字段进同一个 schema 不会并存：Archetypes 的
+        # Schema.addField 是 `self._fields[name] = field`，后来者直接顶掉
+        # 前者，而 archetypes.schemaextender 遍历 getAdapters() 的顺序没有
+        # 任何保证 —— 谁赢不确定，换个进程可能就换个结果。
+        #
+        # 这条以前被 skip_uniqueness 一起关掉了，结果是：导一份和
+        # INNOCARE.arextension 同名的配置进来，14 条静默入库、一条错都不报，
+        # 配置页上还显示成「本包添加的字段」，而活 schema 里其实是 arextension
+        # 那套在生效。2026-09-22 因此拆开。
+        problems.extend(_validate_foreign_uniqueness(portal_type, name))
 
     if portal_type and existing_id is None and not skip_uniqueness:
         problems.extend(_validate_quota(portal_type, portal))
@@ -192,29 +207,41 @@ def _regex_msg_ok(record):
     return False
 
 
-def _validate_uniqueness(portal_type, name, portal, existing_id):
-    """与原生字段、其它 add-on 字段、本包已有字段都不得重名"""
+def _validate_own_uniqueness(portal_type, name, portal, existing_id):
+    """与**本包已有记录**不得重名。导入时放行（那是覆盖，不是冲突）"""
     problems = []
-
     for record in storage.get_records_for_type(portal_type, portal):
         if record.get("name") == name and record.get("id") != existing_id:
-            problems.append(_(u"v_dup_own", default=u"This object already has a custom field named ${name}",
-                        mapping={"name": name}))
+            problems.append(_(
+                u"v_dup_own",
+                default=u"This object already has a custom field named ${name}",
+                mapping={"name": name}))
             break
+    return problems
 
-    # 原生字段 / 其它 add-on 的字段
+
+def _validate_foreign_uniqueness(portal_type, name):
+    """与原生字段 / 其它 add-on 的字段不得重名。**所有路径都查，导入也查**
+
+    报错里带上占用者是谁 —— 只说「已存在同名字段」的话，实施人员还得自己
+    去猜是哪个包占了，而这正是他决定「卸载那个 addon 还是改个名字」时
+    唯一需要的信息。
+    """
+    problems = []
     try:
         from maitux.dynamicfields import introspect
-        foreign = introspect.get_foreign_field_names(portal_type)
+        owners = introspect.get_foreign_field_sources(portal_type)
     except Exception:
-        foreign = set()
-    if name in foreign:
+        owners = {}
+    if name in owners:
         problems.append(_(
-            u"v_dup_foreign",
-            default=u"${type} already has a field with this name (native or "
-                    u"from another add-on); pick a different one",
-            mapping={"type": portal_type}))
-
+            u"v_dup_foreign_owner",
+            default=u"${type} already has a field named ${name}, from "
+                    u"${owner}. Two fields with the same name cannot coexist "
+                    u"- one silently replaces the other. Uninstall that "
+                    u"add-on first, or pick a different name.",
+            mapping={"type": portal_type, "name": name,
+                     "owner": owners[name] or u"?"}))
     return problems
 
 

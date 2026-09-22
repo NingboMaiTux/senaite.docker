@@ -238,11 +238,11 @@ class DynamicFieldsView(BrowserView):
             "states": self._read_list(form, "states"),
             "show_edit": self._flag(form, "show_edit"),
             "show_view": self._flag(form, "show_view"),
-            # 列表列 / 列表默认显示 / 报告：都还没接入，界面上不给，这里
-            # 也钉死 False，免得从表单绕进来一个永远不会生效的 True。
-            # 导入 JSON 走的是另一条路，那边仍然能带这几个键。
-            "show_list": False,
-            "list_default": False,
+            # 列表列由 browser/listing.py 的 IListingViewAdapter 实现，
+            # 2026-09-21 补上，不再钉死。
+            "show_list": self._flag(form, "show_list"),
+            "list_default": self._flag(form, "list_default"),
+            # 报告模板仍未接入本包配置，界面上不给，这里钉死 False
             "show_report": False,
             "fieldset": self._read_fieldset(form),
             "order": self._int(form.get("order"), 0),
@@ -537,14 +537,30 @@ class DynamicFieldsView(BrowserView):
         }
 
     def field_sections(self):
-        """右栏三段。本包那段取自配置库（有全部元数据），另两段取自内省"""
+        """右栏三段。本包那段取自配置库（有全部元数据），另两段取自内省
+
+        ★ 两段的数据来源不同，这不是实现细节，是必须让人看见的事实：
+        「本包添加的字段」是**配置库里记了什么**，「其它 add-on 添加的字段」
+        是**对象上实际有什么**。同名时这两者会打架 —— Schema.addField 是
+        dict 赋值，同名字段不可能并存，后来者顶掉前者。所以这里给每条
+        own 记录算一个 shadowed_by：配置里有、但那个名字已经被别人占了，
+        这一条现在是**不生效**的，界面上必须标出来，不能让它混在正常记录
+        里还带着「可编辑 · 可删除」。
+        """
         portal_type = self.selected_type()
         if not portal_type:
             return {"own": [], "addon": [], "native": []}
         grouped = introspect.group_fields(portal_type)
         query = self.field_query()
-        own = [self.describe_record(r)
-               for r in storage.get_records_for_type(portal_type)]
+        try:
+            owners = introspect.get_foreign_field_sources(portal_type)
+        except Exception:
+            owners = {}
+        own = []
+        for record in storage.get_records_for_type(portal_type):
+            described = self.describe_record(record)
+            described["shadowed_by"] = owners.get(described["name"]) or u""
+            own.append(described)
         if query:
             own = [f for f in own
                    if introspect._matches(query, f["name"], f["label"])]

@@ -533,11 +533,23 @@ def get_foreign_field_names(portal_type):
     挂 DX 字段，且当前站点没有该类型的实例，这里可能漏掉它——此时重名校验会放行。
     实例存在时（正常运行的站点）不受影响。
     """
-    names = set()
+    return set(get_foreign_field_sources(portal_type))
+
+
+def get_foreign_field_sources(portal_type):
+    """同上，但返回 {字段名: 占用它的包/来源}
+
+    重名报错里要说清是谁占了 —— 实施人员据此决定「卸掉那个 addon」还是
+    「换个名字」，只说「已存在」等于让他自己去猜。
+    """
+    owners = {}
     for field in get_all_fields(portal_type):
-        if field.get("kind") != "own":
-            names.add(field.get("name"))
-    return names
+        if field.get("kind") == "own":
+            continue
+        name = field.get("name")
+        if name:
+            owners[name] = field.get("source") or u""
+    return owners
 
 
 def group_fields(portal_type):

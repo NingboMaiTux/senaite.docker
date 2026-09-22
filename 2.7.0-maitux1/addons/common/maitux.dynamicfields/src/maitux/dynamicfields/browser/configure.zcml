@@ -50,4 +50,24 @@
       permission="cmf.ManagePortal"
       />
 
+  <!--
+    「列表列」：列表视图的列来自视图类里写死的 self.columns，跟 schema
+    无关，所以造字段那条路管不到，只能用官方的 IListingViewAdapter 扩展点
+    往里插。
+
+    for 的第二项是 Interface（所有上下文）—— 本包是平台级的，事先不知道
+    用户会给哪个类型加字段，没法按对象接口逐个注册。门控在 before_render()
+    里按 contentFilter["portal_type"] 做：没配置列的类型第一个 if 就返回。
+
+    R14 / E17 要求往外来视图注入 UI 必须判 browser layer。本包没有 layer
+    也不需要：它随镜像发布，不存在「没装本包的站点」，E17 防的泄漏在这儿
+    不成立。
+  -->
+  <subscriber
+      for="senaite.app.listing.interfaces.IListingView
+           zope.interface.Interface"
+      factory=".listing.DynamicFieldsListingAdapter"
+      provides="senaite.app.listing.interfaces.IListingViewAdapter"
+      />
+
 </configure>

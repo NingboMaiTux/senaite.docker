@@ -632,3 +632,15 @@ msgstr "存储值只能用字母、数字和下划线——真正写到对象上
 
 msgid "These two switches reach the standard edit and view forms, the sample add form (it does read the AR schema) and the header table. They do not reach the listing views, nor the worksheet results entry header, which is a hand written template."
 msgstr "这两个开关能管到标准的编辑页、查看页、样品新建页（它确实会读 AR 的 schema）和表头。管不到列表视图，也管不到工作表结果录入的表头——那是一张手写模板。"
+
+msgid "not in effect - the name is taken by"
+msgstr "当前不生效，名字已被占用："
+
+msgid "${type} already has a field named ${name}, from ${owner}. Two fields with the same name cannot coexist - one silently replaces the other. Uninstall that add-on first, or pick a different name."
+msgstr "${type} 上已经有一个叫 ${name} 的字段，来自 ${owner}。同名字段不可能并存——后加的会悄悄顶掉先前的。先卸掉那个 add-on，或者换一个名字。"
+
+msgid "tile_add_fields"
+msgstr "添加字段"
+
+msgid "Import configuration"
+msgstr "导入配置"

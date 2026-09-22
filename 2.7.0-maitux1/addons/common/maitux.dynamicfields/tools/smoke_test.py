@@ -650,7 +650,9 @@ REQUIRED = [
     # 基础
     "action", "portal_type", "name", "type", "fieldset", "order",
     # 前端显示
-    "show_edit", "show_view",
+    # show_view 只在 AT 对象上渲染（DX 侧 dxschema 不读它），但模板里
+    # 那个 tal:condition 为假时还有个同名隐藏域，所以字面量照样在。
+    "show_edit", "show_view", "show_list", "list_default",
     # 数据约束
     "required", "readonly", "multi",
     # 类型专属
@@ -663,9 +665,11 @@ REQUIRED = [
     #
     #     states                  没有任何代码读
     #     regex / regex_msg_*     没有任何代码读
-    #     show_list / list_default 列表视图的列来自跟 schema 无关的 dict
     #     min / max               只有 dxfields 读，AT 不读（样品就是 AT）
     #     precision               只有 atfields 读，DX 不读
+    #
+    #   show_list / list_default 曾经也在这个名单里，2026-09-21 由
+    #   browser/listing.py 实现后放回上面的清单。
     #
     #   storage / view / validation / 导入导出都还支持这些键。真做出来了
     #   把界面放回来时，记得同时加回这份 REQUIRED 和下面的多语言模式清单。
@@ -903,6 +907,594 @@ for needle in ["view.prefill('name')", "view.prefill_check('required')",
                "view/reopen_panel"]:
     check(u"模板接上了 %s" % needle, needle in tpl)
 check(u"模板里不再写死 name 的 pattern", 'pattern="[a-z]' not in tpl)
+
+
+print()
+print("=" * 66)
+print(u"13. 列表列（IListingViewAdapter）".encode("utf-8"))
+print("=" * 66)
+print(u"    —— 这一段是 2026-09-21 补实现的，之前 show_list 存了没人读".encode("utf-8"))
+print()
+
+# 列表视图的列来自视图类里写死的 self.columns，跟 schema 无关，所以造字段
+# 那条路管不到。新增的 browser/listing.py 用官方 IListingViewAdapter 往里插。
+#
+# 这一节要盯住三件事：
+#   ① 门控：没配置列的列表（绝大多数）必须一列都不动。订阅者注册给了
+#      **所有**列表，门控破了就是全站每张表都被塞东西。
+#   ② toggle：list_default 要映射成列定义里的 toggle，不是「加不加这一列」。
+#   ③ 固定选项列要显示**标签**不是存储值——列表里一片 low/mid/high 没人看得懂。
+
+import collections as _coll                                          # noqa: E402
+from zope.interface import implementer as _impl                      # noqa: E402
+from senaite.app.listing.interfaces import IListingView              # noqa: E402
+from maitux.dynamicfields.browser import listing as mdf_listing      # noqa: E402
+
+
+@_impl(IListingView)
+class FakeListing(object):
+    """够 add_column() 用的最小列表视图（它会校验 IListingView）"""
+
+    def __init__(self, portal_type=None):
+        self.contentFilter = {} if portal_type is None else {
+            "portal_type": portal_type}
+        self.columns = _coll.OrderedDict([("Title", {"title": "Title"})])
+        self.review_states = [
+            {"id": "default", "title": "All", "columns": ["Title"]},
+            {"id": "active", "title": "Active", "columns": ["Title"]},
+        ]
+        self.request = SaveReq()
+
+
+class FakeBrain(object):
+    def __init__(self, **kw):
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+# --- 造两个配置：一个上列表，一个不上 ---
+rec_col = storage.defaults("Batch", "ListedField", config.TYPE_CHOICE)
+rec_col["labels"] = {"en": u"Grade", "zh_CN": u"等级"}     # 等级
+rec_col["options"] = [
+    {"key": "low", "labels": {"en": u"Low", "zh_CN": u"低"}},   # 低
+    {"key": "high", "labels": {"en": u"High", "zh_CN": u"高"}},  # 高
+]
+rec_col["show_list"] = True
+rec_col["list_default"] = True
+rec_col["metadata"] = True
+rec_col["order"] = 1
+storage.save_record(rec_col)
+
+rec_hidden = storage.defaults("Batch", "NotListed", config.TYPE_TEXT)
+rec_hidden["labels"] = {"en": u"Hidden"}
+rec_hidden["show_list"] = False
+storage.save_record(rec_hidden)
+
+rec_toggle = storage.defaults("Batch", "OffByDefault", config.TYPE_TEXT)
+rec_toggle["labels"] = {"en": u"Off by default"}
+rec_toggle["show_list"] = True
+rec_toggle["list_default"] = False
+rec_toggle["metadata"] = True
+rec_toggle["order"] = 2
+storage.save_record(rec_toggle)
+
+# --- ① 门控：没配置的类型一列都不许动 ---
+untouched = FakeListing("AnalysisProfile")
+before_cols = list(untouched.columns.keys())
+mdf_listing.DynamicFieldsListingAdapter(untouched, None).before_render()
+check(u"★ 没配置列的类型：一列都没动（订阅者注册给所有列表，门控破了全站遭殃）",
+      list(untouched.columns.keys()) == before_cols,
+      u"%s" % (list(untouched.columns.keys()),))
+
+no_filter = FakeListing(None)
+mdf_listing.DynamicFieldsListingAdapter(no_filter, None).before_render()
+check(u"contentFilter 里没有 portal_type 时也不动",
+      list(no_filter.columns.keys()) == ["Title"])
+
+# --- ② 配置了的类型：列插进去，顺序、标题、toggle 都要对 ---
+listed = FakeListing("Batch")
+adapter = mdf_listing.DynamicFieldsListingAdapter(listed, None)
+adapter.before_render()
+cols = list(listed.columns.keys())
+check(u"两个 show_list 的字段都插进来了，没上列表的没进来",
+      "ListedField" in cols and "OffByDefault" in cols
+      and "NotListed" not in cols, u"%s" % (cols,))
+check(u"列标题用的是标签不是字段名",
+      listed.columns["ListedField"]["title"] in (u"Grade", u"等级"),
+      u"%r" % (listed.columns["ListedField"]["title"],))
+check(u"★ list_default 映射成 toggle（不是「加不加这一列」）",
+      listed.columns["ListedField"]["toggle"] is True
+      and listed.columns["OffByDefault"]["toggle"] is False)
+check(u"不声明 index —— 没建索引的字段点表头会静默无反应",
+      "index" not in listed.columns["ListedField"])
+check(u"每个 review state 的 columns 里都加上了",
+      all("ListedField" in s["columns"] for s in listed.review_states),
+      u"%s" % ([s["columns"] for s in listed.review_states],))
+
+# 列表可能带 portal_type 列表而不是单个字符串
+multi = FakeListing(["Batch", "AnalysisProfile"])
+mdf_listing.DynamicFieldsListingAdapter(multi, None).before_render()
+check(u"portal_type 是列表时也认",
+      "ListedField" in multi.columns)
+
+# --- ③ 每一行的取值与呈现 ---
+brain = FakeBrain(ListedField="low", OffByDefault=b"\xe6\xb5\x8b\xe8\xaf\x95")
+item = adapter.folder_item(brain, {}, 0)
+check(u"★ 固定选项显示标签，不是存储值 low",
+      item["ListedField"] in (u"Low", u"低"), u"%r" % (item["ListedField"],))
+check(u"brain 上的 utf-8 bytes 不炸（Py2 老坑）",
+      item["OffByDefault"] == u"测试", u"%r" % (item["OffByDefault"],))
+
+brain_bad = FakeBrain(ListedField="removed_key", OffByDefault=None)
+item_bad = adapter.folder_item(brain_bad, {}, 0)
+check(u"配置里已删的旧选项 key 原样显示，不显示空白",
+      item_bad["ListedField"] == u"removed_key")
+check(u"值为 None 时给空串，不是 'None'",
+      item_bad["OffByDefault"] == u"")
+
+check(u"布尔渲染成勾号",
+      adapter._render({"type": config.TYPE_BOOL}, FakeBrain()) == u""
+      and adapter._render(
+          {"type": config.TYPE_BOOL, "name": "x"},
+          FakeBrain(x=True)) == u"✓")
+check(u"多值用逗号连起来",
+      adapter._render({"type": config.TYPE_TEXT, "name": "x"},
+                      FakeBrain(x=["a", "b"])) == u"a, b")
+
+# 没配置列的列表上 folder_item 必须原样返回，不能白跑一圈
+passthrough = mdf_listing.DynamicFieldsListingAdapter(
+    FakeListing("AnalysisProfile"), None)
+same = {"keep": 1}
+check(u"没配置列时 folder_item 原样返回",
+      passthrough.folder_item(FakeBrain(), same, 0) is same)
+
+# 清掉这一节造的记录，免得影响后面（目前没有后续节，但别给以后挖坑）
+for _r in (rec_col, rec_hidden, rec_toggle):
+    storage.delete_record(_r["id"])
+
+
+print()
+print("=" * 66)
+print(u"14. 迁移包：20 个字段 / 5 个对象，导进来能不能真的造出字段".encode("utf-8"))
+print("=" * 66)
+print(u"    —— 交付的 addon_fields.json 必须导得进、造得出，不能只是好看".encode("utf-8"))
+print()
+
+# tools/make_migration_config.py 生成的那份 JSON 是要交给实施人员在界面上
+# 导入的。光「生成时通过校验」不够 —— 真正要证明的是：导进去之后，各类型
+# 的 schema 上确实多出这些字段，类型和标签都对。
+# 这一节把整条链路跑一遍：文件 -> import_json -> atfields/dxfields 造字段。
+#
+# 覆盖的是全仓库**给现有类型加字段**的 6 个 add-on。自建内容类型的包
+# （stock / stability / glossary / hazardcategories / oauth2）不在范围内，
+# 本包也做不了新建类型。
+
+_pkg_root = os.path.dirname(os.path.dirname(mdf_view.__file__))      # .../browser -> dynamicfields
+_json_path = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(_pkg_root))),
+    "addon_fields.json")
+check(u"交付的 JSON 文件在", os.path.exists(_json_path), _json_path)
+
+if os.path.exists(_json_path):
+    _payload = io.open(_json_path, encoding="utf-8").read()
+    added, updated, skipped, errors = storage.import_json(_payload,
+                                                          mode="merge")
+    check(u"20 个字段全部导入成功，没有跳过、没有报错",
+          added == 20 and skipped == 0 and not errors,
+          u"added=%s updated=%s skipped=%s errors=%s"
+          % (added, updated, skipped, [_u(e) for e in errors]))
+
+    # 五个对象类型都要落到位 —— 只验样品的话，另外四个包白迁了。
+    # 按 creator 限定：前面几节在 AnalysisRequest / Client 上也留了记录，
+    # 不限定的话数出来的是「本节 + 前面几节」的总和。
+    def _migrated(portal_type):
+        return [r for r in storage.get_records_for_type(portal_type)
+                if r.get("creator") == "addon-migration"]
+
+    for _t, _n in (("AnalysisRequest", 14), ("Client", 1), ("Laboratory", 1),
+                   ("Worksheet", 3), ("Instrument", 1)):
+        _got = len(_migrated(_t))
+        check(u"%s 上落了 %d 个字段" % (_t, _n), _got == _n, u"实际 %s" % _got)
+
+    _recs = storage.get_records_for_type("AnalysisRequest")
+    _by_name = dict((r.get("name"), r) for r in _recs)
+    for _n in ("ProjectNo", "MaterialName", "SampleRecovery",
+               "SampleProperties", "SafetyPrecautions", "ManufactureDate"):
+        check(u"导入后配置库里有 %s" % _n, _n in _by_name)
+
+    check(u"CamelCase 字段名活下来了（这是能平移 arextension 的前提）",
+          all(_n in _by_name for _n in
+              ("MaterialCode", "StorageConditions", "RetentionTime")))
+    check(u"必填只有 MaterialName 一个",
+          [n for n, r in _by_name.items() if r.get("required")]
+          == ["MaterialName"],
+          u"%s" % ([n for n, r in _by_name.items() if r.get("required")],))
+    check(u"SampleProperties 是多值引用",
+          _by_name["SampleProperties"].get("multi") is True
+          and _by_name["SampleProperties"].get("allowed_types")
+          == ["HazardCategory"])
+    check(u"SampleRecovery 是固定选项，两个 ASCII key",
+          [o["key"] for o in _by_name["SampleRecovery"].get("options") or []]
+          == ["yes", "no"])
+
+    # ★ 真正的终点：这些配置能不能变成 Archetypes 字段
+    _built = []
+    for _n in ("ProjectNo", "MaterialName", "SampleRecovery",
+               "SafetyPrecautions", "ManufactureDate", "SampleProperties"):
+        try:
+            _f = atfields.build_field(_by_name[_n])
+        except Exception as _exc:
+            _f = None
+            check(u"造 %s 时抛异常" % _n, False, u"%s" % _exc)
+        _built.append((_n, _f))
+    check(u"★ 六种类型的代表字段都造得出 AT 字段（样品是 Archetypes）",
+          all(f is not None for _n, f in _built),
+          u"造不出: %s" % ([n for n, f in _built if f is None],))
+    check(u"字段名原样保留，没被小写化",
+          all(getattr(f, "getName", lambda: None)() == n
+              for n, f in _built if f is not None),
+          u"%s" % ([(n, getattr(f, "getName", lambda: None)())
+                    for n, f in _built if f is not None],))
+
+    # ★ Worksheet / Laboratory 是 Dexterity，走的是另一条造字段的路。
+    #   只验 AT 的话，另外那几个包的字段能不能真出来是不知道的。
+    _ws = dict((r.get("name"), r)
+               for r in storage.get_records_for_type("Worksheet"))
+    _dx_built = []
+    for _n in ("reviewer_userid", "instruments", "stock_batches"):
+        try:
+            _dx_built.append((_n, dxfields.build_field(_ws[_n])))
+        except Exception as _exc:
+            _dx_built.append((_n, None))
+            check(u"造 DX 字段 %s 时抛异常" % _n, False, u"%s" % _exc)
+    check(u"★ 工作表那 3 个字段造得出 DX 字段（Worksheet 是 Dexterity）",
+          all(f is not None for _n, f in _dx_built),
+          u"造不出: %s" % ([n for n, f in _dx_built if f is None],))
+    check(u"两个多值引用的 allowed_types 没丢",
+          _ws["instruments"].get("allowed_types") == ["Instrument"]
+          and _ws["stock_batches"].get("allowed_types") == ["StockBatch"])
+
+    check(u"每条都带来源标记，导入后看得出是从哪个 add-on 平移的",
+          all(r.get("source_addon")
+              for t in ("AnalysisRequest", "Client", "Laboratory",
+                        "Worksheet", "Instrument")
+              for r in _migrated(t)))
+
+    # 收尾：把这一节导进来的记录删掉
+    for _t in ("AnalysisRequest", "Client", "Laboratory", "Worksheet",
+               "Instrument"):
+        for _r in list(storage.get_records_for_type(_t)):
+            if _r.get("creator") == "addon-migration":
+                storage.delete_record(_r["id"])
+
+
+print()
+print("=" * 66)
+print(u"15. 重名：导入不再静默放行；被遮住的记录要标出来".encode("utf-8"))
+print("=" * 66)
+print(u"    —— 同名字段不可能并存，Schema.addField 是 dict 赋值，后来者顶掉前者".encode("utf-8"))
+print()
+
+# 2026-09-22 的事故：把一份和 INNOCARE.arextension 同名的配置导进来，
+# 14 条静默入库、一条错都不报。原因是 import_json 传了 skip_uniqueness=True，
+# 它把「和本包记录重名」（导入时是正常覆盖）和「和外部字段重名」（任何时候
+# 都不能放过）一起关掉了。
+#
+# 后果不是「两套字段并存」—— 那在 Python 里根本做不到。真实后果是
+# archetypes.schemaextender 遍历 getAdapters() 时谁后跑谁赢，而那个顺序
+# 没有任何保证。配置页上还把没生效的记录显示成正常记录。
+
+import json as _json                                                 # noqa: E402
+import maitux.dynamicfields.introspect as _intro                     # noqa: E402
+
+_real_sources = mdf_intro.get_foreign_field_sources
+
+
+def _fake_sources(portal_type):
+    """假装 AnalysisRequest 上的 Occupied 已被别的包占了"""
+    if portal_type == "AnalysisRequest":
+        return {"Occupied": u"INNOCARE.arextension"}
+    return {}
+
+
+_intro.get_foreign_field_sources = _fake_sources
+try:
+    clash = storage.defaults("AnalysisRequest", "Occupied", config.TYPE_TEXT)
+    clash["labels"] = {"en": u"Occupied"}
+
+    # ① 界面路径（skip_uniqueness=False）本来就拦得住
+    check(u"界面上添加同名字段：拦下",
+          any(u"v_dup_foreign_owner" in _u(p)
+              for p in validation.validate_record(clash)))
+
+    # ★ ② 导入路径（skip_uniqueness=True）也必须拦下 —— 这是这次修的
+    problems = validation.validate_record(clash, skip_uniqueness=True)
+    check(u"★ 导入同名字段：也拦下（skip_uniqueness 不该放过外部重名）",
+          any(u"v_dup_foreign_owner" in _u(p) for p in problems),
+          u"%s" % ([_u(p) for p in problems],))
+    check(u"报错里点名是哪个包占的（实施人员据此决定卸载还是改名）",
+          any(u"INNOCARE.arextension" in _u(getattr(p, "mapping", {})
+                                             .get("owner", u""))
+              for p in problems),
+          u"%s" % ([getattr(p, "mapping", None) for p in problems],))
+
+    # ③ 但「和本包自己的记录重名」在导入时仍要放行 —— 那是覆盖，
+    #    否则重导一次自己的备份就会全军覆没
+    _intro.get_foreign_field_sources = lambda pt: {}
+    own = storage.defaults("Batch", "SameAgain", config.TYPE_TEXT)
+    own["labels"] = {"en": u"Same again"}
+    storage.save_record(own)
+    again = storage.defaults("Batch", "SameAgain", config.TYPE_TEXT)
+    again["labels"] = {"en": u"Same again"}
+    check(u"界面上重复添加本包已有的名字：拦下",
+          any(u"v_dup_own" in _u(p)
+              for p in validation.validate_record(again)))
+    check(u"★ 导入重复的本包记录：放行（那是覆盖，不是冲突）",
+          not any(u"v_dup_own" in _u(p)
+                  for p in validation.validate_record(
+                      again, skip_uniqueness=True)))
+    storage.delete_record(own["id"])
+
+    # ④ 真正走一遍 import_json：同名的那条要被跳过并报出来
+    _intro.get_foreign_field_sources = _fake_sources
+    payload = _json.dumps({"version": 1, "fields": [
+        {"portal_type": "AnalysisRequest", "name": "Occupied",
+         "type": config.TYPE_TEXT, "labels": {"en": u"Occupied"}},
+        {"portal_type": "AnalysisRequest", "name": "FreeName",
+         "type": config.TYPE_TEXT, "labels": {"en": u"Free name"}},
+    ]})
+    added, updated, skipped, errors = storage.import_json(payload)
+    check(u"★ 导入两条：占用的被跳过，没占用的进得去",
+          added == 1 and skipped == 1 and len(errors) == 1,
+          u"added=%s skipped=%s errors=%s"
+          % (added, skipped, [_u(e) for e in errors]))
+    check(u"跳过的那条在结果里点了名",
+          errors and u"Occupied" in _u(errors[0]), u"%s" % ([_u(e) for e in errors],))
+    for _r in list(storage.get_records_for_type("AnalysisRequest")):
+        if _r.get("name") == "FreeName":
+            storage.delete_record(_r["id"])
+finally:
+    _intro.get_foreign_field_sources = _real_sources
+
+# --- 配置页要把被遮住的记录标出来 ---
+check(u"模板给被遮住的行加了标记样式",
+      "mdf-row-shadowed" in tpl and "field/shadowed_by" in tpl)
+check(u"view 给每条 own 记录算了 shadowed_by",
+      "shadowed_by" in io.open(mdf_view.__file__.rstrip("c"),
+                               encoding="utf-8").read())
+
+
+print()
+print("=" * 66)
+print(u"16. Setup 页入口（@@lims-setup 上的磁贴）".encode("utf-8"))
+print("=" * 66)
+print(u"    —— 覆盖了 senaite.core 的视图，坏了就是整个 Setup 页打不开".encode("utf-8"))
+print()
+
+# 记不住 @@dynamic-fields 这个路径，得有入口。三条轻的路都堵死了
+# （viewlet：prefs_main_template 里没有 viewlet manager；建内容对象：要写
+# 数据库；z3c.jbot：没装），只剩继承 SetupView 覆盖 lims-setup。
+#
+# 覆盖核心视图的风险是「坏了就是整个 Setup 页打不开」，所以这一节盯的是
+# **兜底有没有真的兜住**：本类只该多一块磁贴，出任何岔子都必须退回父类的
+# 结果，而不是把异常抛到页面上。
+
+from senaite.core.browser.controlpanel.setupview import (              # noqa: E402
+    SetupView as _CoreSetupView)
+from maitux.dynamicfields.browser import setupview as mdf_setup        # noqa: E402
+
+check(u"是 senaite.core SetupView 的子类（不是抄一份）",
+      issubclass(mdf_setup.DynamicFieldsSetupView, _CoreSetupView))
+
+_view = mdf_setup.DynamicFieldsSetupView.__new__(
+    mdf_setup.DynamicFieldsSetupView)
+
+# zopepy 里没有站点，api.get_portal() 会失败 —— 那条路是降级路径（下面 ②
+# 专门验），要验正常路径得先把 portal 桩上。
+class _FakeApi(object):
+    @staticmethod
+    def get_portal():
+        return object()
+
+    @staticmethod
+    def get_url(obj):
+        return u"http://nohost/lims"
+
+
+_real_api = mdf_setup.api
+mdf_setup.api = _FakeApi
+
+# zopepy 里没有安全上下文，checkPermission 判不出来 —— 默认当作「有权限」
+# 来验正常路径，权限那条单独在 ⑤ 验。
+_real_can = mdf_setup.DynamicFieldsSetupView.can_manage
+mdf_setup.DynamicFieldsSetupView.can_manage = lambda self: True
+
+# ① 父类正常时：原有条目一个不少，末尾多一块
+_core_items = [object(), object()]
+mdf_setup.SetupView.setupitems = lambda self: list(_core_items)
+try:
+    got = _view.setupitems()
+    check(u"原有磁贴一个不少，自己那块加在最后",
+          len(got) == 3 and got[:2] == _core_items
+          and isinstance(got[2], mdf_setup._Tile),
+          u"%s" % (len(got),))
+    check(u"磁贴指向 @@dynamic-fields",
+          got[2].absolute_url().endswith("/@@dynamic-fields"),
+          got[2].absolute_url())
+    check(u"磁贴标题是可翻译的 Message，不是写死的字符串",
+          hasattr(got[2].Title(), "domain"))
+
+    # ★ ② 自己这块出岔子时：必须退回父类的结果，不能把异常抛出去
+    _boom = mdf_setup.DynamicFieldsSetupView._tile
+    mdf_setup.DynamicFieldsSetupView._tile = \
+        lambda self: (_ for _ in ()).throw(RuntimeError("boom"))
+    try:
+        fallback = _view.setupitems()
+        check(u"★ 自己那块造不出来时，退回父类结果（Setup 页不能因此打不开）",
+              fallback == _core_items, u"%s" % (fallback,))
+    except Exception as _exc:
+        check(u"★ 自己那块造不出来时，退回父类结果（Setup 页不能因此打不开）",
+              False, u"异常漏出来了: %s" % _exc)
+    finally:
+        mdf_setup.DynamicFieldsSetupView._tile = _boom
+finally:
+    del mdf_setup.SetupView.setupitems
+
+# ②b 没有站点时（api 拿不到 portal）：同样退回父类，不能抛
+mdf_setup.api = None
+mdf_setup.SetupView.setupitems = lambda self: list(_core_items)
+try:
+    check(u"拿不到 portal 时也退回父类结果",
+          _view.setupitems() == _core_items)
+finally:
+    del mdf_setup.SetupView.setupitems
+    mdf_setup.api = _FakeApi
+
+# ③ 图标：自己那块自己给，别的照旧交给父类
+_tile = mdf_setup._Tile(u"/x", u"X")
+check(u"自己那块的图标不走父类（假 portal_type 查不到会抛）",
+      "img" in _view.get_icon_for(_tile))
+_called = []
+mdf_setup.SetupView.get_icon_for = lambda self, b, **kw: _called.append(b) or u"core"
+try:
+    other = object()
+    check(u"不是自己那块时，原样交给父类",
+          _view.get_icon_for(other) == u"core" and _called == [other])
+finally:
+    del mdf_setup.SetupView.get_icon_for
+
+# ④ overrides.zcml 里三项必须和 senaite.core 原注册一致 —— permission 写错
+#    会把整个 Setup 页从 LabManager / LabClerk 手里收走
+_ov = io.open(os.path.join(os.path.dirname(os.path.dirname(
+    mdf_view.__file__)), "overrides.zcml"), encoding="utf-8").read()
+for _needle in ('name="lims-setup"',
+                'for="Products.CMFPlone.interfaces.IPloneSiteRoot"',
+                'permission="senaite.core.permissions.ManageBika"',
+                'layer="senaite.core.interfaces.ISenaiteCore"'):
+    check(u"overrides.zcml 保留了原注册的 %s" % _needle.split("=")[0],
+          _needle in _ov, _needle)
+check(u"引用 senaite 权限前先 include 了定义它的包（R1，实测踩过）",
+      '<include package="senaite.core.permissions" />' in _ov)
+
+# ⑤ ★ 权限：磁贴必须按**目标页**的权限渲染，不是按 Setup 页的。
+#    Setup 页是 senaite.core: Manage Bika（LabClerk / LabManager / Manager，
+#    见 senaite.core rolemap.xml:673），@@dynamic-fields 是 cmf.ManagePortal
+#    （只有 Manager / Site Administrator）。不判的话 LabClerk 看得见、
+#    点进去吃 Insufficient Privileges。
+mdf_setup.DynamicFieldsSetupView.can_manage = lambda self: False
+mdf_setup.SetupView.setupitems = lambda self: list(_core_items)
+try:
+    check(u"★ 没有 ManagePortal 的用户看不到这块磁贴（点不开的入口比没有更糟）",
+          _view.setupitems() == _core_items,
+          u"%s" % (len(_view.setupitems()),))
+finally:
+    del mdf_setup.SetupView.setupitems
+    mdf_setup.DynamicFieldsSetupView.can_manage = _real_can
+
+check(u"can_manage 判的是 ManagePortal，和配置页注册的权限同一个",
+      "ManagePortal" in io.open(mdf_setup.__file__.rstrip("c"),
+                                encoding="utf-8").read())
+
+# ⑥ ★★ 模板对每一项调的每个 view 方法，本类都必须能应付
+#
+# 2026-09-22 线上事故：只读了 setupview.pt 前 50 行，以为每项只调
+# absolute_url / Title / get_icon_for，漏了第 73 行的 get_count(item)。
+# 父类的 get_count 走 api.get_portal_type(obj) -> APIError，整个 Setup 页
+# 500。这类遗漏不该靠人眼 —— 直接从 senaite.core 的模板里把调用抓出来。
+#
+# 这一条同时是「SENAITE 升级了但我们没跟」的哨兵：哪天官方模板多调一个
+# 方法，这里立刻红，而不是等线上 500。
+_core_pt = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(
+        _CoreSetupView.__module__ and
+        sys.modules[_CoreSetupView.__module__].__file__))),
+    "controlpanel", "templates", "setupview.pt")
+if not os.path.exists(_core_pt):
+    _core_pt = os.path.join(os.path.dirname(os.path.abspath(
+        sys.modules[_CoreSetupView.__module__].__file__)),
+        "templates", "setupview.pt")
+
+check(u"找得到 senaite.core 的 setupview.pt", os.path.exists(_core_pt), _core_pt)
+if os.path.exists(_core_pt):
+    _pt_src = io.open(_core_pt, encoding="utf-8").read()
+    # 抓 view.xxx(item ...) —— 只认作用在循环变量 item 上的
+    _called_on_item = sorted(set(
+        _re2.findall(r"view\.(\w+)\(\s*item\b", _pt_src)))
+    check(u"模板对每一项调的方法抓出来了", bool(_called_on_item),
+          u"%s" % (_called_on_item,))
+    _tile_obj = mdf_setup._Tile(u"/x", u"X")
+    _unhandled = []
+    for _m in _called_on_item:
+        _fn = getattr(mdf_setup.DynamicFieldsSetupView, _m, None)
+        if _fn is None:
+            _unhandled.append(u"%s（本类没有）" % _m)
+            continue
+        try:
+            _fn(_view, _tile_obj)
+        except Exception as _exc:
+            _unhandled.append(u"%s（%s: %s）"
+                              % (_m, _exc.__class__.__name__, _exc))
+    check(u"★★ 模板对每一项调的 %d 个方法，本类拿假磁贴全都不炸：%s"
+          % (len(_called_on_item), u", ".join(_called_on_item)),
+          not _unhandled, u"炸了: %s" % (u"; ".join(_unhandled),))
+    # item/xxx 这种路径取值（absolute_url / Title）也要有
+    _paths = sorted(set(_re2.findall(r"item/(\w+)", _pt_src)))
+    _missing_attr = [p for p in _paths if not hasattr(_tile_obj, p)]
+    check(u"模板用到的 item/%s 假磁贴都提供了" % u", item/".join(_paths),
+          not _missing_attr, u"缺: %s" % (_missing_attr,))
+
+mdf_setup.api = _real_api
+
+
+print()
+print("=" * 66)
+print(u"17. 抽屉：一页两块，导入/导出都在右上角".encode("utf-8"))
+print("=" * 66)
+print(u"    —— 导入原来埋在页签 2 底部，在「按对象浏览」页签上够不着".encode("utf-8"))
+print()
+
+# 这一节全是对模板的静态检查：抽屉的开合是 JS 行为，zopepy 里跑不了真浏览器。
+# 但下面这几条恰恰是「改完人眼看不出、上线才发现」的那类：
+#   - 遮罩留了两块 -> 叠加后背景更黑，点一次关不掉
+#   - 面板少了 mdf-panel-on 规则 -> 两块抽屉同时铺开
+#   - 入口没按 data-mdf-opens 走 -> 按钮点了没反应
+
+check(u"导入和导出都在顶部导航条里（一对操作不该拆两处）",
+      'data-mdf-opens="mdf_panel_import"' in tpl
+      and "view/export_url" in tpl)
+check(u"导入抽屉在页面级，不在某个页签里面",
+      tpl.index('id="mdf_panel_import"')
+      > tpl.rindex('tal:condition="python:tab == \'all\'"'),
+      u"导入面板还在 tab 2 的 div 里")
+
+_backdrops = tpl.count('class="mdf-backdrop"')
+check(u"★ 全页只有一块遮罩（两块会叠加，背景更黑而且点一次关不掉）",
+      _backdrops == 1, u"实际 %d 块" % _backdrops)
+
+check(u"★ 只显示被点中的那一块（少了这条规则两块抽屉会同时铺开）",
+      "body.mdf-js .mdf-panel.mdf-panel-on { display:block; }" in tpl)
+
+_openers = _re2.findall(r'data-mdf-opens="(\w+)"', tpl)
+check(u"两个入口都按 data-mdf-opens 走：%s" % (_openers,),
+      sorted(_openers) == ["mdf_panel", "mdf_panel_import"], u"%s" % (_openers,))
+for _pid in _openers:
+    check(u"入口指向的面板 %s 真的存在" % _pid, 'id="%s"' % _pid in tpl)
+
+# 数的是真按钮，不是字符串出现次数 —— 模板里那段 JS 注释也写了这个属性名
+_closers = tpl.count('class="mdf-panel-x" data-mdf-closes="1"')
+check(u"两块抽屉各有一个关闭按钮（改用属性，不能再靠 id）",
+      _closers == 2, u"%d 个" % _closers)
+
+check(u"无 JS 时两个入口都藏起来（面板退化成页面底部区块，链接是死的）",
+      "[data-mdf-opens] { display:none; }" in tpl
+      and "body.mdf-js [data-mdf-opens] { display:inline-block; }" in tpl)
+
+check(u"抽屉 JS 提到了页面级（埋在添加字段表单里的话，页签 2 上没有 JS）",
+      tpl.index("querySelectorAll(\".mdf-panel\")")
+      > tpl.rindex('tal:condition="python:tab == \'all\'"'))
+
+check(u"导入表单带回当前页签和对象，不一律甩回 tab=all",
+      '<input type="hidden" name="tab" tal:attributes="value tab" />' in tpl)
 
 
 print()
