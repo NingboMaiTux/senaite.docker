@@ -41,10 +41,27 @@
       name="maitux.glossary-hiddenprofiles"
       />
 
+  <!-- ★ 词表工厂必须用 component= 注册（注册的是**函数本身**）。
+       用 factory= 会让 Zope 先把函数调用一次、把得到的 SimpleVocabulary
+       实例注册成工厂，`z3c.form` 解析 Choice 词表时再调用它 →
+       `TypeError: 'SimpleVocabulary' object is not callable`（@@edit 500，实测）。
+       同一处隐患的 SyncStates 一并改正。 -->
   <utility
-      factory=".vocabularies.SyncStatesVocabulary"
+      component=".vocabularies.SyncStatesVocabulary"
       provides="zope.schema.interfaces.IVocabularyFactory"
       name="maitux.glossary.vocabularies.SyncStates"
+      />
+
+  <utility
+      component=".vocabularies.AcquisitionPickVocabulary"
+      provides="zope.schema.interfaces.IVocabularyFactory"
+      name="maitux.glossary.vocabularies.AcquisitionPick"
+      />
+
+  <utility
+      component=".vocabularies.AcquisitionDecimalsVocabulary"
+      provides="zope.schema.interfaces.IVocabularyFactory"
+      name="maitux.glossary.vocabularies.AcquisitionDecimals"
       />
 
 </configure>

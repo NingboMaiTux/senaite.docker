@@ -46,6 +46,21 @@ SYNC_STATES = (STATE_ACTIVE, STATE_INACTIVE)
 # 两个字段**默认为空**，由人工填写；不参与同步回填。
 EDITABLE_FIELDS = (u"zh", u"en")
 
+# 报告导入映射列（人工配置，采集侧只读消费）。
+#
+# ★ 与 EDITABLE_FIELDS 的区别是**写入范围**：
+#   - zh / en 按 calc keyword **批量**写兄弟行（同一字段译文必须一致）
+#   - 这 12 列**只写当前行**（同一 calc keyword 在不同分析上来源不同，
+#     实测 `g_rt` 有 8 行、来源各异，批量写必然错）
+# 因此它们**不能**并入 EDITABLE_FIELDS，见 datamanagers/glossaryentry.py。
+ACQUISITION_FIELDS = (u"acq_enabled", u"acq_source_sample", u"acq_pick",
+                      u"acq_decimals", u"acq_length", u"acq_injection",
+                      u"acq_peaks", u"acq_rt", u"acq_peak_indexes",
+                      u"acq_row_key", u"acq_slot", u"acq_drop_rt")
+
+# 列表页保存链路允许写的全部字段
+WRITABLE_FIELDS = EDITABLE_FIELDS + ACQUISITION_FIELDS
+
 # 同步首次写入、之后不再改动的字段
 SEEDED_FIELDS = (u"analysis_keyword", u"calc_keyword", u"category")
 

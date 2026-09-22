@@ -99,7 +99,7 @@ def translated(msgid, request=None):
         return safe_unicode(msgid)
 
 
-#: 搜索覆盖的列（中文名/英文名/两个 keyword/分析类别/检测项目标题）
+#: 搜索覆盖的列（中文名/英文名/两个 keyword/分析类别/检测项目标题/采集来源）
 SEARCH_FIELDS = (
     u"category",
     u"service_title",
@@ -107,7 +107,12 @@ SEARCH_FIELDS = (
     u"calc_keyword",
     u"zh",
     u"en",
+    u"acq_source_sample",
+    u"acq_marker",
 )
+
+#: 勾选为报告导入目标位时，往搜索词里放这个标记 —— 便于一眼筛出全部目标位
+ACQ_SEARCH_TOKEN = u"报告导入目标位"
 
 ADAPTIVE_STYLE = u"""
 <style type="text/css">
@@ -168,7 +173,16 @@ class GlossaryListingView(ListingView):
                 u"zh / en are editable in place. Changes are kept in the page "
                 u"(this listing does NOT autosave): click the Save button at "
                 u"the bottom of the table, or tick the row, to store them. "
-                u"Unsaved changes are lost when you leave the page.")))
+                u"Unsaved changes are lost when you leave the page."))
+            + u'<br/><span class="text-muted">%s</span>'
+            % self.label(_(
+                u"The mapping columns (report-import target / source "
+                u"SampleName / pick rule / decimals / expected length / "
+                u"injection no. / first N peaks / target RT / peak indexes / "
+                u"row-key column / row slot / excluded RT) are read-only here: "
+                u"click the Analysis Keyword of a row to open its edit form. "
+                u"Search for 'report-import target' to list every configured "
+                u"row.")))
 
         # 工具栏按钮：手动刷新（重新与站点对账）
         self.context_actions = {
@@ -219,6 +233,72 @@ class GlossaryListingView(ListingView):
             ("site_title", {
                 "title": self.label(_(u"Site Field title (reference)")),
                 "sortable": False,
+                "toggle": True,
+            }),
+            # 报告导入映射（采集侧消费）：
+            # ★ 这 12 列在**本列表里只读展示**，编辑走该行的 @@edit 表单 ——
+            #   原因：布尔列与受控词表（下拉）在 listing 就地编辑里要额外
+            #   处理，而这个数据的错误后果是"写错数据"，不值得为省一次点击
+            #   去踩 listing 就地编辑的坑（本项目已有先例）。
+            #   列表里点 analysis keyword 即进该行编辑表单。
+            ("acq_enabled", {
+                "title": self.label(_(u"报告导入目标位")),
+                "sortable": True,
+                "toggle": True,
+            }),
+            ("acq_source_sample", {
+                "title": self.label(_(u"来源 SampleName")),
+                "sortable": True,
+                "toggle": True,
+            }),
+            ("acq_pick", {
+                "title": self.label(_(u"取值规则")),
+                "sortable": True,
+                "toggle": True,
+            }),
+            ("acq_decimals", {
+                "title": self.label(_(u"写法")),
+                "sortable": True,
+                "toggle": True,
+            }),
+            ("acq_length", {
+                "title": self.label(_(u"期望长度")),
+                "sortable": True,
+                "toggle": True,
+            }),
+            ("acq_injection", {
+                "title": self.label(_(u"第 N 针")),
+                "sortable": True,
+                "toggle": True,
+            }),
+            ("acq_peaks", {
+                "title": self.label(_(u"取前 N 峰")),
+                "sortable": True,
+                "toggle": True,
+            }),
+            ("acq_rt", {
+                "title": self.label(_(u"目标 RT(min)")),
+                "sortable": True,
+                "toggle": True,
+            }),
+            ("acq_peak_indexes", {
+                "title": self.label(_(u"峰序号清单")),
+                "sortable": True,
+                "toggle": True,
+            }),
+            ("acq_row_key", {
+                "title": self.label(_(u"行键列")),
+                "sortable": True,
+                "toggle": True,
+            }),
+            ("acq_slot", {
+                "title": self.label(_(u"行槽位")),
+                "sortable": True,
+                "toggle": True,
+            }),
+            ("acq_drop_rt", {
+                "title": self.label(_(u"排除 RT")),
+                "sortable": True,
                 "toggle": True,
             }),
             ("sync_state", {
@@ -388,6 +468,32 @@ class GlossaryListingView(ListingView):
             zh = text(getattr(obj, "zh", None))
             en = text(getattr(obj, "en", None))
 
+            # 报告导入映射（人工配置；本页只读展示）
+            acq_enabled = bool(getattr(obj, "acq_enabled", False))
+            acq_source_sample = text(getattr(obj, "acq_source_sample", None))
+            acq_pick = text(getattr(obj, "acq_pick", None))
+            acq_decimals = text(getattr(obj, "acq_decimals", None))
+            try:
+                acq_length = int(getattr(obj, "acq_length", 0) or 0)
+            except (TypeError, ValueError):
+                acq_length = 0
+            try:
+                acq_injection = int(getattr(obj, "acq_injection", 0) or 0)
+            except (TypeError, ValueError):
+                acq_injection = 0
+            try:
+                acq_peaks = int(getattr(obj, "acq_peaks", 0) or 0)
+            except (TypeError, ValueError):
+                acq_peaks = 0
+            try:
+                acq_rt = float(getattr(obj, "acq_rt", 0) or 0)
+            except (TypeError, ValueError):
+                acq_rt = 0.0
+            acq_peak_indexes = text(getattr(obj, "acq_peak_indexes", None))
+            acq_row_key = text(getattr(obj, "acq_row_key", None))
+            acq_slot = text(getattr(obj, "acq_slot", None))
+            acq_drop_rt = text(getattr(obj, "acq_drop_rt", None))
+
             key = (analysis_keyword, calc_keyword)
             info = site_keys.get(key) or {}
             service_title = text(info.get("service_title"))
@@ -402,6 +508,8 @@ class GlossaryListingView(ListingView):
                 u"calc_keyword": calc_keyword,
                 u"zh": zh,
                 u"en": en,
+                u"acq_source_sample": acq_source_sample,
+                u"acq_marker": ACQ_SEARCH_TOKEN if acq_enabled else u"",
             }
             values = tuple([search_values[name] for name in SEARCH_FIELDS])
             if not self._matches(term, values):
@@ -437,6 +545,30 @@ class GlossaryListingView(ListingView):
                 "sync_state": state_label,
                 "sync_state_sort": state,
                 "site_title": site_title,
+                "acq_enabled": ACQ_SEARCH_TOKEN if acq_enabled else u"",
+                "acq_enabled_sort": u"1" if acq_enabled else u"0",
+                "acq_source_sample": acq_source_sample,
+                "acq_source_sample_sort": acq_source_sample.lower(),
+                "acq_pick": acq_pick,
+                "acq_pick_sort": acq_pick.lower(),
+                "acq_decimals": acq_decimals,
+                "acq_decimals_sort": acq_decimals,
+                "acq_length": acq_length or u"",
+                "acq_length_sort": u"%08d" % acq_length,
+                "acq_injection": acq_injection or u"",
+                "acq_injection_sort": u"%08d" % acq_injection,
+                "acq_peaks": acq_peaks or u"",
+                "acq_peaks_sort": u"%08d" % acq_peaks,
+                "acq_rt": acq_rt or u"",
+                "acq_rt_sort": u"%012.4f" % acq_rt,
+                "acq_peak_indexes": acq_peak_indexes,
+                "acq_peak_indexes_sort": acq_peak_indexes.lower(),
+                "acq_row_key": acq_row_key,
+                "acq_row_key_sort": acq_row_key.lower(),
+                "acq_slot": acq_slot,
+                "acq_slot_sort": acq_slot.lower(),
+                "acq_drop_rt": acq_drop_rt,
+                "acq_drop_rt_sort": acq_drop_rt.lower(),
                 "first_seen": _fmt_date(getattr(obj, "first_seen", None)),
                 "state_changed_on": _fmt_date(
                     getattr(obj, "state_changed_on", None)),
@@ -506,6 +638,18 @@ COLUMN_SORT_KEYS = {
     "calc_keyword": "calc_keyword_sort",
     "zh": "zh_sort",
     "en": "en_sort",
+    "acq_enabled": "acq_enabled_sort",
+    "acq_source_sample": "acq_source_sample_sort",
+    "acq_pick": "acq_pick_sort",
+    "acq_decimals": "acq_decimals_sort",
+    "acq_length": "acq_length_sort",
+    "acq_injection": "acq_injection_sort",
+    "acq_peaks": "acq_peaks_sort",
+    "acq_rt": "acq_rt_sort",
+    "acq_peak_indexes": "acq_peak_indexes_sort",
+    "acq_row_key": "acq_row_key_sort",
+    "acq_slot": "acq_slot_sort",
+    "acq_drop_rt": "acq_drop_rt_sort",
     "sync_state": "sync_state_sort",
     "last_sync_by": "last_sync_by_sort",
 }

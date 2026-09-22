@@ -6,6 +6,7 @@ from bika.lims import api
 
 from maitux.instrument_acquisition.extender.instrument import FIELD_NAME
 from maitux.instrument_acquisition.browser.deemo import instrument_acquisition_test
+from maitux.instrument_acquisition.services import report_import
 
 
 def get_template_from_instrument(instrument):
@@ -41,9 +42,25 @@ def get_template_from_instrument(instrument):
     return None
 
 
-def parse_and_write_report(template, upload):
-    """复用现有测试页的提取、解析、写回逻辑，供手工导入和自动导入共用。"""
-    success, message, text, filename = instrument_acquisition_test._extract_pdf_text(upload)
+def parse_and_write_report(template, upload, allow_overwrite=False):
+    """复用现有测试页的提取、解析、写回逻辑，供手工导入和自动导入共用。
+
+    解析按模板 `script_file` 后缀分发：`.py` 进程内执行 `parse(payload)`
+    （payload 带坐标，PDF 报告走这条），`.js` 仍走 node（兼容旧模板）。
+
+    写回按**解析产物形态**分流：
+
+    | 产物形态 | 通道 | 说明 |
+    |---|---|---|
+    | 报告产物（`injections` / `grouped`） | `report_import.run(confirm=True)` | 目标位由 `keyword_glossary` 页面配置；按槽位落位；**PDF 强制留档**；**默认不覆盖已有不同值** |
+    | 调试通道 A 产物（`samples`） | `_write_parsed_results_to_sample` | 现有天平/读数链路，行为不变 |
+
+    ★ 自动导入（目录 → `@@auto_import_results`）没有人工复核这一步，所以这里
+    `confirm=True` 直接写、`allow_overwrite=False` 不碰已有不同值 —— 落位被闸门
+    拦下时返回失败，由调用方（适配器）把文件归到 `failed/`。
+    """
+    success, message, text, filename, extraction = \
+        instrument_acquisition_test._extract_pdf_payload(upload)
     if not success:
         return False, message, {
             "filename": filename,
@@ -52,8 +69,8 @@ def parse_and_write_report(template, upload):
             "details": {},
         }
 
-    js_source = instrument_acquisition_test._get_js_source(template)
-    parsed_text = instrument_acquisition_test._run_js_parser(js_source, text)
+    parsed_text = instrument_acquisition_test._run_template_parser(
+        template, text, extraction)
 
     try:
         parsed = json.loads(parsed_text)
@@ -65,6 +82,22 @@ def parse_and_write_report(template, upload):
             "extracted_text": text,
             "parsed_text": parsed_text,
             "details": {},
+        }
+
+    if report_import.is_report_payload(parsed):
+        # ★ 报告产物：走 M2 报告落位（页面目标位 + 槽位 + 附件 + 覆盖门禁）
+        success, message, details = report_import.run(
+            parsed,
+            confirm=True,
+            allow_overwrite=allow_overwrite,
+            attachment=upload,
+            attachment_title=filename or u"Instrument report",
+        )
+        return success, message, {
+            "filename": filename,
+            "extracted_text": text,
+            "parsed_text": parsed_text,
+            "details": details,
         }
 
     success, message, details = instrument_acquisition_test._write_parsed_results_to_sample(

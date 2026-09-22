@@ -1,4 +1,4 @@
-﻿<configure
+<configure
     xmlns="http://namespaces.zope.org/zope"
     i18n_domain="maitux.instrument_acquisition">
 
@@ -7,6 +7,14 @@
       for="Products.CMFPlone.interfaces.IPloneSiteRoot"
       factory=".instrumentacquisition.InstrumentAcquisitionImporter"
       provides="senaite.core.exportimport.instruments.IInstrumentImportInterface" />
+
+  <!-- 自动导入的失败归档：原生 AutoImportResultsView 会把**失败文件也写进
+  imported.csv**（于是永不重试）。这里对它的 write_imported_file 做一层极薄包装，
+  只介入"本插件适配器失败"的文件 —— 移入 <folder>/failed/ 且不记账，可重投。
+  原生模块在冷启动时可能还没 import 完，所以挂在 IDatabaseOpenedWithRoot 上。 -->
+  <subscriber
+      for="zope.processlifetime.IDatabaseOpenedWithRoot"
+      handler=".auto_import_archive.patch_deferred" />
 
 </configure>
 
