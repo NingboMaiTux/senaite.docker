@@ -641,3 +641,6 @@ msgstr "${type} 上已经有一个叫 ${name} 的字段，来自 ${owner}。同�
 
 msgid "tile_add_fields"
 msgstr "添加字段"
+
+msgid "Import configuration"
+msgstr "导入配置"

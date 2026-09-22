@@ -67,9 +67,11 @@
 .mdf-panel { border:1px solid #d7dbdc;border-radius:4px;background:#fff;
              margin-top:14px; }
 .mdf-backdrop { display:none; }
-#mdf_open { display:none; }
+/* 没有 JS 时，抽屉退化成页面底部的普通区块，那两个「打开抽屉」的入口
+   就是死链接 —— 一律藏起来，别给点了没反应的东西。关闭按钮同理。 */
+[data-mdf-opens] { display:none; }
 body:not(.mdf-js) .mdf-panel-x { display:none; }
-body.mdf-js #mdf_open { display:inline-block; }
+body.mdf-js [data-mdf-opens] { display:inline-block; }
 /* 1040px = 原来的 780 + 33%。往上顶到这儿而不是更宽：1550px 的屏上抽屉
    左边缘落在 x≈510，页面标题在 x≈390，还露得出来——看得见自己在给哪个
    对象加字段。再宽就把标题盖住了。窄屏由 max-width:94vw 兜着。 */
@@ -79,7 +81,9 @@ body.mdf-js .mdf-panel { display:none;position:fixed;top:0;right:0;bottom:0;
              box-shadow:-2px 0 14px rgba(0,0,0,.18); }
 body.mdf-js .mdf-backdrop { position:fixed;top:0;left:0;right:0;bottom:0;
              background:rgba(0,0,0,.25);z-index:1039; }
-body.mdf-js.mdf-open .mdf-panel,
+/* 页面上有多块抽屉（添加字段 / 导入配置），只显示被点中的那一块 ——
+   不能像原来那样用 body.mdf-open 一把全开，否则两块会叠在一起。 */
+body.mdf-js .mdf-panel.mdf-panel-on { display:block; }
 body.mdf-js.mdf-open .mdf-backdrop { display:block; }
 body.mdf-js.mdf-open { overflow:hidden; }
 .mdf-panel-head { position:sticky;top:0;background:#35708F;color:#fff;
@@ -131,11 +135,21 @@ body.mdf-js.mdf-open { overflow:hidden; }
                          href string:${base}?tab=all"
          i18n:translate="">All custom fields</a>
     </li>
+    <!-- 导入 / 导出是一对操作，放在一起。原来导出在这儿、导入却埋在
+         页签 2 底部，在「按对象浏览」页签上根本够不着。 -->
     <li class="nav-item ml-auto">
+      <a class="nav-link" href="#" id="mdf_open_import"
+         data-mdf-opens="mdf_panel_import"
+         i18n:translate="">Import configuration</a>
+    </li>
+    <li class="nav-item">
       <a class="nav-link" tal:attributes="href view/export_url"
          i18n:translate="">Export JSON</a>
     </li>
   </ul>
+
+  <!-- 遮罩：页面级，所有抽屉共用一块 -->
+  <div class="mdf-backdrop" id="mdf_backdrop"></div>
 
   <!-- ================= tab 1：按对象浏览 ================= -->
   <div tal:condition="python:tab == 'objects'">
@@ -198,6 +212,7 @@ body.mdf-js.mdf-open { overflow:hidden; }
         <h2 class="h4 mb-0 mr-2" tal:content="info/title">Title</h2>
         <span class="mdf-code" tal:content="info/portal_type">Type</span>
         <button type="button" class="btn btn-sm ml-auto" id="mdf_open"
+                data-mdf-opens="mdf_panel"
                 style="background:#35708F;border-color:#2c5f7a;color:#fff;"
                 i18n:translate="">Add field</button>
       </div>
@@ -346,12 +361,12 @@ body.mdf-js.mdf-open { overflow:hidden; }
 
       </tal:sections>
 
-      <!-- ============ 添加字段：右侧抽屉（同页，不跳新页） ============ -->
-      <div class="mdf-backdrop" id="mdf_backdrop"></div>
+      <!-- ============ 添加字段：右侧抽屉（同页，不跳新页） ============
+           遮罩不在这儿了：页面上有两块抽屉，共用页面级那一块（第 150 行）。 -->
       <div class="mdf-panel" id="mdf_panel"
            tal:attributes="data-mdf-reopen python:view.reopen_panel and '1' or '0'">
         <div class="mdf-panel-head">
-          <button type="button" class="mdf-panel-x" id="mdf_close"
+          <button type="button" class="mdf-panel-x" data-mdf-closes="1"
                   aria-label="Close">&#215;</button>
           <span i18n:translate="">Add field</span>
         </div>
@@ -798,34 +813,6 @@ body.mdf-js.mdf-open { overflow:hidden; }
             sync();
           })();
 
-          /* 右侧抽屉的开合。
-             保存失败时自动重开：表单已经回填（view.prefill*），抽屉里也另放
-             了一份报错，用户接着改就行，不用重头再填一遍。 */
-          (function () {
-            var opener = document.getElementById("mdf_open");
-            var panel = document.getElementById("mdf_panel");
-            if (!opener || !panel) { return; }
-            var body = document.body;
-            // 先声明「这一页有 JS」，样式表里的抽屉规则才生效
-            body.className += " mdf-js";
-            function show(on) {
-              var cls = body.className.replace(/\s*\bmdf-open\b/g, "");
-              body.className = on ? cls + " mdf-open" : cls;
-            }
-            opener.addEventListener("click", function () { show(true); });
-            var shut = document.getElementById("mdf_close");
-            if (shut) {
-              shut.addEventListener("click", function () { show(false); });
-            }
-            var back = document.getElementById("mdf_backdrop");
-            if (back) {
-              back.addEventListener("click", function () { show(false); });
-            }
-            document.addEventListener("keydown", function (ev) {
-              if (ev.keyCode === 27) { show(false); }
-            });
-            if (panel.getAttribute("data-mdf-reopen") === "1") { show(true); }
-          })();
           </script>
           <span class="small text-muted ml-2" i18n:translate="">
             Takes effect immediately; no container restart needed.
@@ -918,35 +905,119 @@ body.mdf-js.mdf-open { overflow:hidden; }
       </div>
     </details>
 
-    <details class="mdf-grp mt-3">
-      <summary i18n:translate="">Import configuration (JSON)</summary>
-      <form method="post" class="p-3" enctype="multipart/form-data"
-            tal:attributes="action base">
-        <input type="hidden" name="action" value="import_config" />
-        <input type="hidden" name="tab" value="all" />
-        <div class="form-group">
-          <label class="small" i18n:translate="">Upload the file exported from another site</label>
-          <input type="file" name="upload" class="form-control-file" />
-        </div>
-        <div class="form-group">
-          <label class="small" i18n:translate="">...or paste the JSON here</label>
-          <textarea name="payload" rows="5" class="form-control form-control-sm"></textarea>
-        </div>
-        <div class="form-group">
-          <select name="mode" class="form-control form-control-sm" style="width:220px;">
-            <option value="merge" i18n:translate="">Merge (add and overwrite)</option>
-            <option value="replace" i18n:translate="">Replace (wipe first)</option>
-          </select>
-        </div>
-        <button type="submit" class="btn btn-sm btn-outline-secondary"
-                i18n:translate="">Import</button>
-        <span class="small text-muted ml-2" i18n:translate="">
-          Configuration does not travel with GenericSetup, so this is the only way
-          to move it between sites.
-        </span>
-      </form>
-    </details>
   </div>
+
+  <!-- ============ 导入配置：右侧抽屉（页面级，两个页签都够得着） ============
+       原来这块是页签 2 底部的一个 <details> —— 在「按对象浏览」页签上根本
+       够不着，而导出按钮却一直在右上角，一对操作被拆到两处。现在两个都放
+       右上角，点导入从右边拉出来。
+
+       为什么是抽屉不是弹框：页面上已经有一套抽屉（添加字段），再引入弹框
+       就是两种交互并存；而且弹框的遮罩 / Esc / 滚动锁 / 无 JS 降级都得重写
+       一遍，那四处正是最容易出 bug 的地方。导入完会列出「新增 / 覆盖 /
+       跳过 + 每条跳过原因」，可能很长，抽屉天然能滚。 -->
+  <div class="mdf-panel" id="mdf_panel_import">
+    <div class="mdf-panel-head">
+      <button type="button" class="mdf-panel-x" data-mdf-closes="1"
+              aria-label="Close">&#215;</button>
+      <span i18n:translate="">Import configuration (JSON)</span>
+    </div>
+    <form method="post" class="p-3" enctype="multipart/form-data"
+          tal:attributes="action base">
+      <input type="hidden" name="action" value="import_config" />
+      <!-- 回到用户当前所在的页签和对象，不要一律甩回 tab=all -->
+      <input type="hidden" name="tab" tal:attributes="value tab" />
+      <input type="hidden" name="portal_type"
+             tal:attributes="value info/portal_type | nothing" />
+      <div class="form-group">
+        <label class="small" i18n:translate="">Upload the file exported from another site</label>
+        <input type="file" name="upload" class="form-control-file" />
+      </div>
+      <div class="form-group">
+        <label class="small" i18n:translate="">...or paste the JSON here</label>
+        <textarea name="payload" rows="8" class="form-control form-control-sm"></textarea>
+      </div>
+      <div class="form-group">
+        <select name="mode" class="form-control form-control-sm" style="width:220px;">
+          <option value="merge" i18n:translate="">Merge (add and overwrite)</option>
+          <option value="replace" i18n:translate="">Replace (wipe first)</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-sm btn-outline-secondary"
+              i18n:translate="">Import</button>
+      <span class="small text-muted ml-2" i18n:translate="">
+        Configuration does not travel with GenericSetup, so this is the only way
+        to move it between sites.
+      </span>
+    </form>
+  </div>
+
+  <script type="text/javascript">
+  /* 右侧抽屉的开合（页面级，管所有 .mdf-panel）。
+
+     放在这儿而不是某个表单里：导入抽屉两个页签都要用，埋在「添加字段」
+     表单里的话，切到页签 2 就没有 JS 了。
+
+     约定：
+       按钮  data-mdf-opens="<面板 id>"   点它打开那个面板
+       关闭  data-mdf-closes="1"          抽屉头上的 ×
+       面板  class="mdf-panel"            同一时刻只开一个
+
+     保存失败时自动重开（data-mdf-reopen="1"）：表单已经回填
+     （view.prefill*），抽屉里也另放了一份报错，用户接着改就行。 */
+  (function () {
+    var panels = document.querySelectorAll(".mdf-panel");
+    if (!panels.length) { return; }
+    var body = document.body;
+    // 先声明「这一页有 JS」，样式表里的抽屉规则才生效。没有这行的话
+    // 面板就是页面底部几块普通区域，功能照旧。
+    body.className += " mdf-js";
+
+    function closeAll() {
+      for (var i = 0; i < panels.length; i++) {
+        panels[i].className =
+          panels[i].className.replace(/\s*\bmdf-panel-on\b/g, "");
+      }
+      body.className = body.className.replace(/\s*\bmdf-open\b/g, "");
+    }
+
+    function open(id) {
+      var panel = document.getElementById(id);
+      if (!panel) { return; }
+      closeAll();
+      panel.className += " mdf-panel-on";
+      body.className += " mdf-open";
+    }
+
+    var openers = document.querySelectorAll("[data-mdf-opens]");
+    for (var i = 0; i < openers.length; i++) {
+      (function (el) {
+        el.addEventListener("click", function (ev) {
+          ev.preventDefault();
+          open(el.getAttribute("data-mdf-opens"));
+        });
+      })(openers[i]);
+    }
+
+    var shutters = document.querySelectorAll("[data-mdf-closes]");
+    for (var j = 0; j < shutters.length; j++) {
+      shutters[j].addEventListener("click", closeAll);
+    }
+
+    var back = document.getElementById("mdf_backdrop");
+    if (back) { back.addEventListener("click", closeAll); }
+    document.addEventListener("keydown", function (ev) {
+      if (ev.keyCode === 27) { closeAll(); }
+    });
+
+    for (var k = 0; k < panels.length; k++) {
+      if (panels[k].getAttribute("data-mdf-reopen") === "1") {
+        open(panels[k].id);
+        break;
+      }
+    }
+  })();
+  </script>
 
 </div>
 </tal:page>

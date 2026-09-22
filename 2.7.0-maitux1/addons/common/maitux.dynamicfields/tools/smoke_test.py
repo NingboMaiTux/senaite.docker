@@ -1448,6 +1448,57 @@ mdf_setup.api = _real_api
 
 print()
 print("=" * 66)
+print(u"17. 抽屉：一页两块，导入/导出都在右上角".encode("utf-8"))
+print("=" * 66)
+print(u"    —— 导入原来埋在页签 2 底部，在「按对象浏览」页签上够不着".encode("utf-8"))
+print()
+
+# 这一节全是对模板的静态检查：抽屉的开合是 JS 行为，zopepy 里跑不了真浏览器。
+# 但下面这几条恰恰是「改完人眼看不出、上线才发现」的那类：
+#   - 遮罩留了两块 -> 叠加后背景更黑，点一次关不掉
+#   - 面板少了 mdf-panel-on 规则 -> 两块抽屉同时铺开
+#   - 入口没按 data-mdf-opens 走 -> 按钮点了没反应
+
+check(u"导入和导出都在顶部导航条里（一对操作不该拆两处）",
+      'data-mdf-opens="mdf_panel_import"' in tpl
+      and "view/export_url" in tpl)
+check(u"导入抽屉在页面级，不在某个页签里面",
+      tpl.index('id="mdf_panel_import"')
+      > tpl.rindex('tal:condition="python:tab == \'all\'"'),
+      u"导入面板还在 tab 2 的 div 里")
+
+_backdrops = tpl.count('class="mdf-backdrop"')
+check(u"★ 全页只有一块遮罩（两块会叠加，背景更黑而且点一次关不掉）",
+      _backdrops == 1, u"实际 %d 块" % _backdrops)
+
+check(u"★ 只显示被点中的那一块（少了这条规则两块抽屉会同时铺开）",
+      "body.mdf-js .mdf-panel.mdf-panel-on { display:block; }" in tpl)
+
+_openers = _re2.findall(r'data-mdf-opens="(\w+)"', tpl)
+check(u"两个入口都按 data-mdf-opens 走：%s" % (_openers,),
+      sorted(_openers) == ["mdf_panel", "mdf_panel_import"], u"%s" % (_openers,))
+for _pid in _openers:
+    check(u"入口指向的面板 %s 真的存在" % _pid, 'id="%s"' % _pid in tpl)
+
+# 数的是真按钮，不是字符串出现次数 —— 模板里那段 JS 注释也写了这个属性名
+_closers = tpl.count('class="mdf-panel-x" data-mdf-closes="1"')
+check(u"两块抽屉各有一个关闭按钮（改用属性，不能再靠 id）",
+      _closers == 2, u"%d 个" % _closers)
+
+check(u"无 JS 时两个入口都藏起来（面板退化成页面底部区块，链接是死的）",
+      "[data-mdf-opens] { display:none; }" in tpl
+      and "body.mdf-js [data-mdf-opens] { display:inline-block; }" in tpl)
+
+check(u"抽屉 JS 提到了页面级（埋在添加字段表单里的话，页签 2 上没有 JS）",
+      tpl.index("querySelectorAll(\".mdf-panel\")")
+      > tpl.rindex('tal:condition="python:tab == \'all\'"'))
+
+check(u"导入表单带回当前页签和对象，不一律甩回 tab=all",
+      '<input type="hidden" name="tab" tal:attributes="value tab" />' in tpl)
+
+
+print()
+print("=" * 66)
 if FAILED:
     print("FAILED: %s" % ", ".join(FAILED))
     sys.exit(1)
