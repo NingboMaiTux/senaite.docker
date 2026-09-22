@@ -151,6 +151,8 @@ class SampleLabelPrintView(BrowserView):
              "title": "样品标签·大号 60x40mm (Sample Normal 60x40mm)", "selected": False},
             {"id": "INNOCARE.LabelAndReport:SampleStability_40x30mm.pt",
              "title": "样品标签·稳定性 (Sample Stability)", "selected": False},
+            {"id": "INNOCARE.LabelAndReport:SampleStability_60x40mm.pt",
+             "title": "样品标签·稳定性大号 60x40mm (Sample Stability 60x40mm)", "selected": False},
         ]
 
     def _get_templates_dir(self, prefix):

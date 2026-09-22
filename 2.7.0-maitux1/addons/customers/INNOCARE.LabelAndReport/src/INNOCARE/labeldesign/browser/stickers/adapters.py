@@ -51,4 +51,8 @@ class SampleLabelTemplates(object):
                 "id": "INNOCARE.LabelAndReport:SampleStability_40x30mm.pt",
                 "title": "样品标签·稳定性 (Sample Stability)",
             },
+            {
+                "id": "INNOCARE.LabelAndReport:SampleStability_60x40mm.pt",
+                "title": "样品标签·稳定性大号 60x40mm (Sample Stability 60x40mm)",
+            },
         ]
