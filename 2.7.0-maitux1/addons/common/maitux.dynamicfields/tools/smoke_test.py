@@ -1304,6 +1304,11 @@ class _FakeApi(object):
 _real_api = mdf_setup.api
 mdf_setup.api = _FakeApi
 
+# zopepy 里没有安全上下文，checkPermission 判不出来 —— 默认当作「有权限」
+# 来验正常路径，权限那条单独在 ⑤ 验。
+_real_can = mdf_setup.DynamicFieldsSetupView.can_manage
+mdf_setup.DynamicFieldsSetupView.can_manage = lambda self: True
+
 # ① 父类正常时：原有条目一个不少，末尾多一块
 _core_items = [object(), object()]
 mdf_setup.SetupView.setupitems = lambda self: list(_core_items)
@@ -1370,6 +1375,73 @@ for _needle in ('name="lims-setup"',
           _needle in _ov, _needle)
 check(u"引用 senaite 权限前先 include 了定义它的包（R1，实测踩过）",
       '<include package="senaite.core.permissions" />' in _ov)
+
+# ⑤ ★ 权限：磁贴必须按**目标页**的权限渲染，不是按 Setup 页的。
+#    Setup 页是 senaite.core: Manage Bika（LabClerk / LabManager / Manager，
+#    见 senaite.core rolemap.xml:673），@@dynamic-fields 是 cmf.ManagePortal
+#    （只有 Manager / Site Administrator）。不判的话 LabClerk 看得见、
+#    点进去吃 Insufficient Privileges。
+mdf_setup.DynamicFieldsSetupView.can_manage = lambda self: False
+mdf_setup.SetupView.setupitems = lambda self: list(_core_items)
+try:
+    check(u"★ 没有 ManagePortal 的用户看不到这块磁贴（点不开的入口比没有更糟）",
+          _view.setupitems() == _core_items,
+          u"%s" % (len(_view.setupitems()),))
+finally:
+    del mdf_setup.SetupView.setupitems
+    mdf_setup.DynamicFieldsSetupView.can_manage = _real_can
+
+check(u"can_manage 判的是 ManagePortal，和配置页注册的权限同一个",
+      "ManagePortal" in io.open(mdf_setup.__file__.rstrip("c"),
+                                encoding="utf-8").read())
+
+# ⑥ ★★ 模板对每一项调的每个 view 方法，本类都必须能应付
+#
+# 2026-09-22 线上事故：只读了 setupview.pt 前 50 行，以为每项只调
+# absolute_url / Title / get_icon_for，漏了第 73 行的 get_count(item)。
+# 父类的 get_count 走 api.get_portal_type(obj) -> APIError，整个 Setup 页
+# 500。这类遗漏不该靠人眼 —— 直接从 senaite.core 的模板里把调用抓出来。
+#
+# 这一条同时是「SENAITE 升级了但我们没跟」的哨兵：哪天官方模板多调一个
+# 方法，这里立刻红，而不是等线上 500。
+_core_pt = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(
+        _CoreSetupView.__module__ and
+        sys.modules[_CoreSetupView.__module__].__file__))),
+    "controlpanel", "templates", "setupview.pt")
+if not os.path.exists(_core_pt):
+    _core_pt = os.path.join(os.path.dirname(os.path.abspath(
+        sys.modules[_CoreSetupView.__module__].__file__)),
+        "templates", "setupview.pt")
+
+check(u"找得到 senaite.core 的 setupview.pt", os.path.exists(_core_pt), _core_pt)
+if os.path.exists(_core_pt):
+    _pt_src = io.open(_core_pt, encoding="utf-8").read()
+    # 抓 view.xxx(item ...) —— 只认作用在循环变量 item 上的
+    _called_on_item = sorted(set(
+        _re2.findall(r"view\.(\w+)\(\s*item\b", _pt_src)))
+    check(u"模板对每一项调的方法抓出来了", bool(_called_on_item),
+          u"%s" % (_called_on_item,))
+    _tile_obj = mdf_setup._Tile(u"/x", u"X")
+    _unhandled = []
+    for _m in _called_on_item:
+        _fn = getattr(mdf_setup.DynamicFieldsSetupView, _m, None)
+        if _fn is None:
+            _unhandled.append(u"%s（本类没有）" % _m)
+            continue
+        try:
+            _fn(_view, _tile_obj)
+        except Exception as _exc:
+            _unhandled.append(u"%s（%s: %s）"
+                              % (_m, _exc.__class__.__name__, _exc))
+    check(u"★★ 模板对每一项调的 %d 个方法，本类拿假磁贴全都不炸：%s"
+          % (len(_called_on_item), u", ".join(_called_on_item)),
+          not _unhandled, u"炸了: %s" % (u"; ".join(_unhandled),))
+    # item/xxx 这种路径取值（absolute_url / Title）也要有
+    _paths = sorted(set(_re2.findall(r"item/(\w+)", _pt_src)))
+    _missing_attr = [p for p in _paths if not hasattr(_tile_obj, p)]
+    check(u"模板用到的 item/%s 假磁贴都提供了" % u", item/".join(_paths),
+          not _missing_attr, u"缺: %s" % (_missing_attr,))
 
 mdf_setup.api = _real_api
 
