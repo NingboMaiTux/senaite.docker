@@ -7,9 +7,11 @@
 
   <metal:content fill-slot="content-core">
     <tal:block tal:define="batches python:view.get_batches();
-                           errors python:request.get('consume_errors', [])">
+                           errors python:request.get('consume_errors', []);
+                           signature_required python:view.requires_signature(batches)">
       <div class="mb-3">
-        <h1 i18n:translate="">Consume Stock Batches</h1>
+        <h1 i18n:translate="" tal:condition="python:not signature_required">Consume Stock Batches</h1>
+        <h1 i18n:translate="" tal:condition="signature_required">Request Stock Usage</h1>
       </div>
 
       <form method="post" tal:attributes="action string:${context/absolute_url}/@@stockbatch_consume">
@@ -22,6 +24,13 @@
           </div>
         </tal:block>
 
+        <tal:block tal:condition="signature_required">
+          <div class="alert alert-warning">
+            <strong i18n:translate="">These items require an approval workflow</strong>
+            <div i18n:translate="">At least one selected batch belongs to a stock item that requires approval. The stock cannot be consumed directly: submitting this form raises a usage request that goes to a reviewer. The stock is deducted only after a different person reviews and signs the request.</div>
+          </div>
+        </tal:block>
+
         <table class="table table-sm table-striped">
           <thead>
             <tr>
@@ -31,11 +40,12 @@
               <th class="text-right" i18n:translate="">Target Quantity</th>
               <th class="text-right" i18n:translate="">Quantity</th>
               <th i18n:translate="">Remarks</th>
+              <th i18n:translate="">Approval</th>
             </tr>
           </thead>
           <tbody>
             <tal:block tal:condition="python:not batches">
-              <tr><td colspan="6" i18n:translate="">No items selected</td></tr>
+              <tr><td colspan="7" i18n:translate="">No items selected</td></tr>
             </tal:block>
             <tal:block tal:repeat="batch batches">
               <tal:block tal:define="info python:view.get_display_info(batch);
@@ -62,16 +72,50 @@
                                            value python:request.form.get('remarks.{}'.format(uid), '')"
                            class="form-control form-control-sm" />
                   </td>
+                  <td>
+                    <span class="badge badge-warning"
+                          i18n:translate=""
+                          tal:condition="python:info.get('requires_signature')">Required</span>
+                    <span class="text-muted" tal:condition="python:not info.get('requires_signature')">-</span>
+                  </td>
                 </tr>
               </tal:block>
             </tal:block>
           </tbody>
         </table>
 
+        <!-- 申请模式：填写领用用途，提交后进入电子签名 -->
+        <tal:block tal:condition="signature_required">
+          <div class="card mb-3">
+            <div class="card-header" i18n:translate="">Usage Request</div>
+            <div class="card-body">
+              <div class="form-group">
+                <label for="usage-purpose">
+                  <span i18n:translate="">Purpose</span>
+                  <span class="text-danger">*</span>
+                </label>
+                <textarea id="usage-purpose"
+                          class="form-control form-control-sm"
+                          name="purpose"
+                          rows="3"
+                          required="required"
+                          tal:content="python:view.get_posted_purpose()"></textarea>
+                <small class="form-text text-muted" i18n:translate="">Why this stock is requested. The reviewer will see this text together with the requested quantities.</small>
+              </div>
+              <div class="alert alert-info mb-0" i18n:translate="">After submitting, the request goes to the reviewer queue as pending review. The stock is deducted only after a different person reviews and signs it.</div>
+            </div>
+          </div>
+        </tal:block>
+
         <div class="mt-3">
           <a tal:attributes="href context/absolute_url"
              class="btn btn-outline-secondary" i18n:translate="">Cancel</a>
-          <button type="submit" name="form.button.submit" class="btn btn-primary" i18n:translate="">Save</button>
+          <button type="submit" name="form.button.submit" class="btn btn-primary"
+                  i18n:translate=""
+                  tal:condition="signature_required">Submit Request</button>
+          <button type="submit" name="form.button.submit" class="btn btn-primary"
+                  i18n:translate=""
+                  tal:condition="python:not signature_required">Save</button>
         </div>
       </form>
     </tal:block>

@@ -31,7 +31,7 @@
             <tr tal:repeat="item python:view.tasks">
               <td><a tal:attributes="href item/plan_url" tal:content="item/plan_title">Plan</a></td>
               <td tal:content="item/task_title">Task</td>
-              <td tal:content="item/status">Status</td>
+              <td tal:content="item/status_title">Status</td>
             </tr>
           </tbody>
         </table>
@@ -44,7 +44,7 @@
                     tal:attributes="value s/uid"
                     tal:content="s/title">SAMPLE-1</option>
           </select>
-                    <small class="form-text text-muted" i18n:translate="">
+          <small class="form-text text-muted" i18n:translate="">
             Only the most recent samples are listed. A search dialog can be added later.
           </small>
         </div>

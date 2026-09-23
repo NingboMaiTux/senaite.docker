@@ -1,8 +1,8 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: maitux.stability\n"
-"POT-Creation-Date: 2026-08-20 00:00+0000\n"
-"PO-Revision-Date: 2026-08-20 00:00+0000\n"
+"POT-Creation-Date: 2026-09-21 00:00+0000\n"
+"PO-Revision-Date: 2026-09-21 00:00+0000\n"
 "Last-Translator: Admin <admin@example.com>\n"
 "Language-Team: zh-cn <admin@example.com>\n"
 "MIME-Version: 1.0\n"
@@ -14,20 +14,117 @@ msgstr ""
 "Preferred-Encodings: utf-8 latin1\n"
 "Domain: maitux.stability\n"
 
-msgid "(None)"
-msgstr "（无）"
+
+msgid "Stability Studies"
+msgstr "稳定性研究"
+
+msgid "Storage Conditions"
+msgstr "贮存条件"
+
+msgid "Packaging Specifications"
+msgstr "包装规格"
+
+msgid "Stability Plan Templates"
+msgstr "稳定性方案模板"
+
+msgid "Stability Plans"
+msgstr "稳定性方案"
+
+msgid "Task Board"
+msgstr "任务看板"
+
+msgid "Stability Task Board"
+msgstr "任务看板"
+
+msgid "Plan"
+msgstr "方案"
+
+msgid "Task"
+msgstr "任务"
+
+msgid "Sample"
+msgstr "样品"
+
+msgid "Stock Batch"
+msgstr "库存批次"
+
+msgid "Timepoint (Months)"
+msgstr "时间点（月）"
+
+msgid "Window (Days)"
+msgstr "窗口期（天）"
+
+msgid "Target Date"
+msgstr "目标日期"
+
+msgid "Window Start"
+msgstr "窗口开始"
+
+msgid "Window End"
+msgstr "窗口结束"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Add"
+msgstr "新增"
+
+msgid "Title"
+msgstr "标题"
+
+msgid "Description"
+msgstr "说明"
+
+msgid "State"
+msgstr "状态"
 
 msgid "Active"
 msgstr "启用"
 
-msgid "Add row"
-msgstr "新增行"
+msgid "Inactive"
+msgstr "停用"
 
-msgid "Analysis Profile"
-msgstr "检验组合"
+msgid "All"
+msgstr "全部"
+
+msgid "Copy Plan"
+msgstr "复制计划"
+
+msgid "Copy"
+msgstr "副本"
+
+msgid "Create a new stability plan by copying the selected plan"
+msgstr "复制选中的稳定性方案，生成一个新的方案"
+
+msgid "Please select one stability plan to copy"
+msgstr "请先选择一个要复制的稳定性方案"
+
+msgid "The selected stability plan was not found"
+msgstr "未找到选中的稳定性方案"
+
+msgid "The selected plan has no plan template and cannot be copied"
+msgstr "选中的方案没有关联方案模板，无法复制"
+
+msgid "The form was pre-filled with the data of the selected plan. Please review the values and save."
+msgstr "表单已按选中的方案预填，请确认内容后保存。"
+
+msgid "Article of the copied plan: {0}. Leave this field empty to keep this file."
+msgstr "被复制方案的附件：{0}。留空则沿用该附件。"
+
+msgid "No article was found in the copied plan. You can upload a file here if needed."
+msgstr "被复制方案没有附件，如有需要可在此上传。"
+
+msgid "Plan details were copied from the selected plan: {0} row(s)."
+msgstr "已从选中的方案复制 {0} 条计划明细。"
+
+msgid "Name"
+msgstr "名称"
 
 msgid "Analysis Specification"
 msgstr "检验标准"
+
+msgid "Analysis Profile"
+msgstr "分析套餐"
 
 msgid "Article"
 msgstr "附件"
@@ -35,101 +132,26 @@ msgstr "附件"
 msgid "Batch"
 msgstr "批次"
 
-msgid "Cancel"
-msgstr "取消"
-
-msgid "Cannot create sample in this environment."
-msgstr "当前环境无法创建样品。"
-
-msgid "Client"
-msgstr "客户"
-
-msgid "Client not found."
-msgstr "未找到客户。"
-
 msgid "Completed"
 msgstr "已完成"
 
-msgid "Contact"
-msgstr "联系人"
+msgid "Pending Placement"
+msgstr "待放置"
 
-msgid "Create"
-msgstr "创建"
-
-msgid "Create Plan"
-msgstr "创建计划"
-
-msgid "Create Sample"
-msgstr "创建样品"
-
-msgid "Create a stability plan from the selected template"
-msgstr "根据所选模板创建稳定性计划"
-
-msgid "Created {0} sample(s)."
-msgstr "已创建 {0} 个样品。"
-
-msgid "Default Stability Study"
-msgstr "默认稳定性研究"
-
-msgid "Description"
-msgstr "说明"
-
-msgid "Expired"
-msgstr "已过期"
-
-msgid "Failed to update Stability Plan details."
-msgstr "更新稳定性计划明细失败。"
-
-msgid "Horizontal"
-msgstr "水平"
-
-msgid "In Progress"
-msgstr "进行中"
-
-msgid "Inactive"
-msgstr "停用"
-
-msgid "Inspection Quantity"
-msgstr "检验数量"
+msgid "Upright"
+msgstr "正放"
 
 msgid "Inverted"
 msgstr "倒置"
 
-msgid "Link Existing Sample"
-msgstr "关联已有样品"
+msgid "Horizontal"
+msgstr "水平放置"
 
-msgid "Linked sample for {0} plan detail row(s)."
-msgstr "已为 {0} 行计划明细关联样品。"
-
-msgid "Name"
-msgstr "名称"
-
-msgid "No analyses were created for this sample. Please check the selected Specification/Profile."
-msgstr "此样品未创建任何分析。请检查所选的检验标准/检验组合。"
-
-msgid "No items selected."
-msgstr "未选择条目。"
-
-msgid "No pending tasks selected."
-msgstr "未选择待处理任务。"
-
-msgid "No plan details selected."
-msgstr "未选择计划明细。"
-
-msgid "No plans found for selected tasks."
-msgstr "所选任务未找到对应计划。"
-
-msgid "No task data available"
-msgstr "暂无任务数据"
-
-msgid "No template article was found. You can upload a file here if needed."
-msgstr "未找到模板附件。如有需要可在此上传文件。"
+msgid "Inspection Quantity"
+msgstr "检验数量"
 
 msgid "Notes"
 msgstr "备注"
-
-msgid "Only the most recent samples are listed. A search dialog can be added later."
-msgstr "仅列出最近的样品，后续可加入搜索对话框进行选择。"
 
 msgid "Orientation"
 msgstr "放置方向"
@@ -137,17 +159,161 @@ msgstr "放置方向"
 msgid "Packaging Specification"
 msgstr "包装规格"
 
-msgid "Pending Placement"
-msgstr "待放置"
-
-msgid "Plan"
-msgstr "计划"
-
 msgid "Plan Details"
-msgstr "计划明细"
+msgstr "方案明细"
 
 msgid "Plan Template"
-msgstr "计划模板"
+msgstr "方案模板"
+
+msgid "Sequence"
+msgstr "序号"
+
+msgid "Stability Study Name"
+msgstr "稳定性研究名称"
+
+msgid "Stability Study Plan ID"
+msgstr "稳定性研究方案编号"
+
+msgid "Start Time (T0)"
+msgstr "开始时间（T0）"
+
+msgid "Storage Condition"
+msgstr "贮存条件"
+
+msgid "Storage Quantity - Reserve"
+msgstr "贮存数量 - 备样"
+
+msgid "Storage Quantity - Sampling"
+msgstr "贮存数量 - 取样"
+
+msgid "Storage Quantity - Total"
+msgstr "贮存数量 - 合计"
+
+msgid "Study Name"
+msgstr "研究名称"
+
+msgid "Unit"
+msgstr "单位"
+
+msgid "Please select either an Analysis Specification or an Analysis Profile."
+msgstr "请选择检验标准或分析套餐（二者选其一）。"
+
+msgid "Please select one Analysis Specification or one Analysis Profile."
+msgstr "请选择一种检验标准或分析套餐（二者只能填一个）。"
+
+msgid "Create Plan"
+msgstr "创建计划"
+
+msgid "Create a stability plan from the selected template"
+msgstr "按选中的方案模板创建稳定性方案"
+
+msgid "Please select one template before creating a plan"
+msgstr "请先选择一个方案模板再创建计划"
+
+msgid "The selected template was not found"
+msgstr "未找到选中的方案模板"
+
+msgid "In Progress"
+msgstr "进行中"
+
+msgid "Expired"
+msgstr "已过期"
+
+msgid "Timepoint Tasks"
+msgstr "时间点任务"
+
+msgid "No task data available"
+msgstr "暂无任务数据"
+
+msgid "TP {0} ({1} Months)"
+msgstr "TP {0}（{1} 个月）"
+
+msgid "Search"
+msgstr "搜索"
+
+msgid "Search Plan"
+msgstr "搜索方案"
+
+msgid "Status filters"
+msgstr "状态筛选"
+
+msgid "Sample Placement"
+msgstr "样品放置"
+
+msgid "Link Existing Sample"
+msgstr "关联已有样品"
+
+msgid "Create Sample"
+msgstr "创建样品"
+
+msgid "Select Sample"
+msgstr "选择样品"
+
+msgid "Select a Stock Batch..."
+msgstr "请选择库存批次..."
+
+msgid "Select…"
+msgstr "请选择…"
+
+msgid "Spec/Profile"
+msgstr "检验标准/分析套餐"
+
+msgid "(None)"
+msgstr "（无）"
+
+msgid "Sample Type"
+msgstr "样品类型"
+
+msgid "Client"
+msgstr "客户"
+
+msgid "Contact"
+msgstr "联系人"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Create"
+msgstr "创建"
+
+msgid "No plan details selected."
+msgstr "未选中方案明细。"
+
+msgid "No pending tasks selected."
+msgstr "未选中待放置的任务。"
+
+msgid "Selected pending tasks are listed below. Choose a Stock Batch for each task and save."
+msgstr "下面是选中的待放置任务，请为每个任务选择库存批次后保存。"
+
+msgid "Selecting a client refreshes the contact list."
+msgstr "选择客户后会自动刷新联系人列表。"
+
+msgid "Only the most recent samples are listed. A search dialog can be added later."
+msgstr "只列出最近的样品，后续可以加搜索框弹窗选择。"
+
+msgid "Please select at least one task."
+msgstr "请至少选择一个任务。"
+
+msgid "Sample Placement can only be applied to Pending Placement tasks."
+msgstr "只有“待放置”的任务才能执行样品放置。"
+
+msgid "No items selected."
+msgstr "未选中任何条目。"
+
+msgid "No plans found for selected tasks."
+msgstr "未找到所选任务对应的方案。"
+
+msgid "Please select pending tasks first."
+msgstr "请先选择待放置的任务。"
+
+msgid "Please select a Stock Batch for each selected task."
+msgstr "请为每个选中的任务选择库存批次。"
+
+msgid "Please select an existing sample first."
+msgstr "请先选择一个已有样品。"
 
 msgid "Please select a Client."
 msgstr "请选择客户。"
@@ -158,206 +324,59 @@ msgstr "请选择联系人。"
 msgid "Please select a Sample Type."
 msgstr "请选择样品类型。"
 
-msgid "Please select a Stock Batch for each selected task."
-msgstr "请为每个选中任务选择一个库存批次。"
+msgid "Client not found."
+msgstr "未找到客户。"
 
-msgid "Please select an existing sample first."
-msgstr "请先选择已有样品。"
+msgid "Cannot create sample in this environment."
+msgstr "当前环境无法创建样品。"
 
-msgid "Please select at least one task."
-msgstr "请至少选择一个任务。"
+msgid "Created {0} sample(s)."
+msgstr "已创建 {0} 个样品。"
 
-msgid "Please select either an Analysis Specification or an Analysis Profile."
-msgstr "请选择检验标准或检验组合中的一项。"
+msgid "Linked sample for {0} plan detail row(s)."
+msgstr "已为 {0} 条方案明细关联样品。"
 
-msgid "Please select one Analysis Specification or one Analysis Profile."
-msgstr "请选择一项检验标准或一项检验组合。"
-
-msgid "Please select one template before creating a plan"
-msgstr "请先选择一个模板再创建计划"
-
-msgid "Please select pending tasks first."
-msgstr "请先选择待处理任务。"
-
-msgid "Sample"
-msgstr "样品"
-
-msgid "Sample Placement"
-msgstr "样品放置"
-
-msgid "Sample Placement can only be applied to Pending Placement tasks."
-msgstr "样品放置仅适用于待放置状态的任务。"
-
-msgid "Sample Type"
-msgstr "样品类型"
-
-msgid "Save"
-msgstr "保存"
-
-msgid "Search"
-msgstr "搜索"
-
-msgid "Select Sample"
-msgstr "选择样品"
-
-msgid "Select a Stock Batch..."
-msgstr "选择库存批次..."
-
-msgid "Select..."
-msgstr "选择..."
-
-msgid "Selected pending tasks are listed below. Choose a Stock Batch for each task and save."
-msgstr "以下为选中的待处理任务。请为每个任务选择库存批次并保存。"
-
-msgid "Selecting a client will refresh the contact list."
-msgstr "选择客户后会自动刷新联系人列表。"
-
-msgid "Sequence"
-msgstr "序号"
-
-msgid "Spec/Profile"
-msgstr "标准/组合"
-
-msgid "Stability Studies"
-msgstr "稳定性研究"
-
-msgid "Stability Study Name"
-msgstr "稳定性研究名称"
-
-msgid "Stability Study Plan ID"
-msgstr "稳定性研究计划编号"
-
-msgid "Stability Task Board"
-msgstr "稳定性任务看板"
-
-msgid "StabilityPlans content type is not installed. Please reinstall/upgrade the maitux.stability add-on."
-msgstr "StabilityPlans 内容类型未安装。请重新安装/升级 maitux.stability 插件。"
-
-msgid "Start Time (T0)"
-msgstr "起始时间（T0）"
-
-msgid "Status"
-msgstr "状态"
-
-msgid "Stock Batch"
-msgstr "库存批次"
-
-msgid "Storage Condition"
-msgstr "储存条件"
-
-msgid "Storage Quantity - Reserve"
-msgstr "存放数量 - 预留"
-
-msgid "Storage Quantity - Sampling"
-msgstr "存放数量 - 取样"
-
-msgid "Storage Quantity - Total"
-msgstr "存放数量 - 合计"
-
-msgid "Study Name"
-msgstr "研究名称"
-
-msgid "Sync done. Created: {0}, Updated: {1}, Deleted: {2}."
-msgstr "同步完成。创建：{0}，更新：{1}，删除：{2}。"
-
-msgid "Sync feature is not available."
-msgstr "同步功能不可用。"
-
-msgid "Target Date"
-msgstr "目标日期"
-
-msgid "Task"
-msgstr "任务"
-
-msgid "The selected template was not found"
-msgstr "未找到所选模板"
-
-msgid "Timepoint (Months)"
-msgstr "时间点（月）"
-
-msgid "Timepoint Tasks"
-msgstr "时间点任务"
-
-msgid "Title"
-msgstr "标题"
-
-msgid "Unit"
-msgstr "单位"
+msgid "Failed to update Stability Plan details."
+msgstr "更新稳定性方案明细失败。"
 
 msgid "Updated {0} task(s) to In Progress."
 msgstr "已将 {0} 个任务更新为进行中。"
 
-msgid "Upright"
-msgstr "正立"
+msgid "Sync done. Created: {0}, Updated: {1}, Deleted: {2}."
+msgstr "同步完成。新增：{0}，更新：{1}，删除：{2}。"
 
-msgid "Window (Days)"
-msgstr "窗口期（天）"
+msgid "Sync feature is not available."
+msgstr "同步功能不可用。"
 
-msgid "Window End"
-msgstr "窗口结束"
+msgid "No analyses were created for this sample. Please check the selected Specification/Profile."
+msgstr "该样品未生成任何检验项目，请检查所选的检验标准/分析套餐。"
 
-msgid "Window Start"
-msgstr "窗口开始"
+msgid "You do not have permission to place samples."
+msgstr "您没有执行样品放置的权限。"
 
-msgid "You do not have permission to create samples."
-msgstr "您没有创建样品的权限。"
+msgid "You do not have permission to sync plan tasks."
+msgstr "您没有同步方案任务的权限。"
 
 msgid "You do not have permission to link samples."
 msgstr "您没有关联样品的权限。"
 
-msgid "You do not have permission to place samples."
-msgstr "您没有放置样品的权限。"
+msgid "You do not have permission to create samples."
+msgstr "您没有创建样品的权限。"
 
-msgid "You do not have permission to sync plan tasks."
-msgstr "您没有同步计划任务的权限。"
+msgid "StabilityPlans content type is not installed. Please reinstall/upgrade the maitux.stability add-on."
+msgstr "未安装 StabilityPlans 内容类型，请重新安装或升级 maitux.stability 插件。"
 
-msgid "listing_packagingspecifications_title"
-msgstr "包装规格"
+msgid "Current template article: {0}. Leave this field empty to keep the template file."
+msgstr "方案模板的附件：{0}。留空则沿用模板附件。"
 
-msgid "listing_stability_action_add"
-msgstr "新增"
+msgid "No template article was found. You can upload a file here if needed."
+msgstr "方案模板没有附件，如有需要可在此上传。"
 
-msgid "listing_stability_action_task_board"
-msgstr "任务看板"
+msgid "Add row"
+msgstr "新增行"
 
-msgid "listing_stability_column_description"
-msgstr "说明"
+msgid "Basic Information"
+msgstr "基本信息"
 
-msgid "listing_stability_column_state"
-msgstr "状态"
-
-msgid "listing_stability_column_title"
-msgstr "标题"
-
-msgid "listing_stability_status_all"
-msgstr "全部"
-
-msgid "listing_stability_status_completed"
-msgstr "已完成"
-
-msgid "listing_stability_status_in_progress"
-msgstr "进行中"
-
-msgid "listing_stability_status_pending_placement"
-msgstr "待放置"
-
-msgid "listing_stabilityplans_title"
-msgstr "稳定性计划"
-
-msgid "listing_stabilityplantemplates_title"
-msgstr "稳定性计划模板"
-
-msgid "listing_state_active"
-msgstr "启用"
-
-msgid "listing_state_all"
-msgstr "全部"
-
-msgid "listing_state_inactive"
-msgstr "停用"
-
-msgid "listing_storageconditions_title"
-msgstr "储存条件"
-
-msgid "task_title_tp_months"
-msgstr "TP {0}（{1} 个月）"
+msgid "Select..."
+msgstr "请选择……"

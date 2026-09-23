@@ -1,6 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 from plone.supermodel import model
 from senaite.core.content.base import Container
+from maitux.stock.title import TranslatableTitleMixin
 from senaite.core.interfaces import IHideActionsMenu
 from zope.interface import implementer
 
@@ -12,6 +13,6 @@ class IStockFolderSchema(model.Schema):
 
 
 @implementer(IStockFolder, IStockFolderSchema, IHideActionsMenu)
-class StockFolder(Container):
+class StockFolder(TranslatableTitleMixin, Container):
     pass
 

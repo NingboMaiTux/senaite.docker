@@ -1,0 +1,153 @@
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal"
+      i18n:domain="maitux.stock"
+      metal:use-macro="context/main_template/macros/master">
+
+  <metal:content fill-slot="content-core">
+    <tal:block tal:define="lines python:view.get_lines();
+                           trail python:view.get_signature_trail();
+                           blockers python:view.approve_blockers()">
+      <div class="mb-3">
+        <h1 tal:content="python:view.get_request_id()">SUR-00001</h1>
+        <div class="text-muted" tal:content="python:view.state_title()">draft</div>
+      </div>
+
+      <table class="table table-sm">
+        <tbody>
+          <tr>
+            <th style="width:12rem;" i18n:translate="">Applicant</th>
+            <td tal:content="python:view.applicant_display()">-</td>
+          </tr>
+          <tr>
+            <th i18n:translate="">Submitted On</th>
+            <td tal:content="python:view.get_request_date() or '-'">-</td>
+          </tr>
+          <tr>
+            <th i18n:translate="">Purpose</th>
+            <td tal:content="python:view.purpose_display()">-</td>
+          </tr>
+          <tr>
+            <th i18n:translate="">Reviewer</th>
+            <td tal:content="python:view.reviewer_display()">-</td>
+          </tr>
+          <tr>
+            <th i18n:translate="">Reviewed On</th>
+            <td tal:content="python:view.get_approve_date() or '-'">-</td>
+          </tr>
+          <tr tal:condition="python:view.rejection_reason()">
+            <th i18n:translate="">Rejection Reason</th>
+            <td tal:content="python:view.rejection_reason()">-</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 i18n:translate="">Requested Items</h3>
+      <table class="table table-sm table-striped">
+        <thead>
+          <tr>
+            <th i18n:translate="">Batch ID</th>
+            <th i18n:translate="">Stock</th>
+            <th class="text-right" i18n:translate="">Quantity</th>
+            <th i18n:translate="">Unit</th>
+            <th i18n:translate="">Remarks</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tal:block tal:condition="python:not lines">
+            <tr><td colspan="5" i18n:translate="">No items</td></tr>
+          </tal:block>
+          <tr tal:repeat="line lines">
+            <td>
+              <a tal:condition="python:line.get('batch_url')"
+                 tal:attributes="href python:line.get('batch_url')"
+                 tal:content="python:line.get('batch_id')">-</a>
+              <span tal:condition="python:not line.get('batch_url')"
+                    tal:content="python:line.get('batch_id')">-</span>
+            </td>
+            <td tal:content="python:line.get('stock_title')">-</td>
+            <td class="text-right" tal:content="python:line.get('quantity')">-</td>
+            <td tal:content="python:line.get('unit_title')">-</td>
+            <td tal:content="python:line.get('remarks')">-</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 i18n:translate="">Signature Trail</h3>
+      <table class="table table-sm table-striped">
+        <thead>
+          <tr>
+            <th i18n:translate="">Step</th>
+            <th i18n:translate="">Signer</th>
+            <th i18n:translate="">Countersigner</th>
+            <th i18n:translate="">Meaning</th>
+            <th i18n:translate="">Reason</th>
+            <th i18n:translate="">Signed At</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tal:block tal:condition="python:not trail">
+            <tr><td colspan="6" i18n:translate="">No signature yet</td></tr>
+          </tal:block>
+          <tr tal:repeat="row trail">
+            <td tal:content="python:view.step_title(row.get('step'))">-</td>
+            <td tal:content="python:row.get('signer_fullname') or row.get('signer')">-</td>
+            <td tal:content="python:row.get('countersigner_fullname') or row.get('countersigner') or '-'">-</td>
+            <td tal:content="python:row.get('meaning')">-</td>
+            <td tal:content="python:row.get('reason')">-</td>
+            <td tal:content="python:row.get('signed_at')">-</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <tal:block tal:condition="python:blockers">
+        <div class="alert alert-danger">
+          <strong i18n:translate="">This request cannot be approved right now</strong>
+          <div tal:repeat="blocker blockers" tal:content="python:blocker">-</div>
+        </div>
+      </tal:block>
+
+      <tal:block tal:condition="python:view.can_approve()">
+        <form method="post"
+              tal:attributes="action string:${context/absolute_url}/@@workflow_action">
+          <input tal:replace="structure context/@@authenticator/authenticator"/>
+          <input type="hidden" name="uids"
+                 tal:attributes="value python:view.context_uid()" />
+          <button type="submit" name="workflow_action_id" value="approve"
+                  class="btn btn-success" i18n:translate="">Approve and Sign</button>
+          <button type="submit" name="workflow_action_id" value="reject"
+                  class="btn btn-danger" i18n:translate="">Reject and Sign</button>
+        </form>
+      </tal:block>
+
+      <tal:block tal:condition="python:view.can_submit()">
+        <form method="post"
+              tal:attributes="action string:${context/absolute_url}/@@workflow_action">
+          <input tal:replace="structure context/@@authenticator/authenticator"/>
+          <input type="hidden" name="uids"
+                 tal:attributes="value python:view.context_uid()" />
+          <button type="submit" name="workflow_action_id" value="submit"
+                  class="btn btn-primary" i18n:translate="">Submit for Review</button>
+        </form>
+      </tal:block>
+
+      <tal:block tal:condition="python:view.can_withdraw()">
+        <form method="post" class="mt-2"
+              tal:attributes="action string:${context/absolute_url}/@@workflow_action">
+          <input tal:replace="structure context/@@authenticator/authenticator"/>
+          <input type="hidden" name="uids"
+                 tal:attributes="value python:view.context_uid()" />
+          <button type="submit" name="workflow_action_id" value="retract"
+                  class="btn btn-outline-secondary" i18n:translate="">Withdraw</button>
+        </form>
+      </tal:block>
+
+      <div class="mt-3">
+        <a class="btn btn-outline-secondary"
+           tal:attributes="href python:view.container_url()"
+           i18n:translate="">Back to list</a>
+      </div>
+    </tal:block>
+  </metal:content>
+</html>

@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 from bika.lims import api
+from maitux.stock import stockMessageFactory as _
 from bika.lims.browser.workflow import RequestContextAware
 from bika.lims.interfaces import IWorkflowActionUIDsAdapter
 from zope.interface import implements
 
-from maitux.stock import _
 from maitux.stock.browser.stockbatchactions import is_action_allowed_for_uids
+from maitux.stock.usageapproval import get_reviewable_request
 
 
 def validate_stockbatch_action(adapter, action, uids):
@@ -85,3 +86,46 @@ class WorkflowActionStockBatchPrintAdapter(RequestContextAware):
         base_url = api.get_url(self.context)
         url = "{}/@@stockbatch_print?uids={}".format(base_url, ",".join(uids))
         return self.request.response.redirect(url)
+
+
+class WorkflowActionStockBatchReviewUsageAdapter(RequestContextAware):
+    """审核领用申请：跳到对应申请单的详情页去审核。
+
+    入口在**批次这一侧**：审核人在批次列表里点"审核领用"，
+    这里负责把所选批次上"等待他审核"的申请单找出来并跳过去。
+
+    刻意不复用 validate_stockbatch_action：那个校验是基于**批次状态**的，
+    而这个动作取决于"有没有待审核的申请"，与批次状态无关。
+    """
+    implements(IWorkflowActionUIDsAdapter)
+
+    def __call__(self, action, uids):
+        if not uids:
+            return self.redirect(message=_("No items selected."), level="warning")
+
+        user = api.get_current_user()
+        user_id = user.getId() if user else u""
+
+        targets = []
+        for uid in uids:
+            batch = api.get_object_by_uid(uid, default=None)
+            if batch is None or api.get_portal_type(batch) != "StockBatch":
+                continue
+            request = get_reviewable_request(batch, user_id)
+            if request is not None and request not in targets:
+                targets.append(request)
+
+        if not targets:
+            # 没有待审核的、或待审核的是本人自己提的（不能自审）
+            return self.redirect(
+                message=_("No usage request is waiting for your review."),
+                level="warning")
+
+        if len(targets) > 1:
+            # 电子签名一次只能签一个对象（esignature 的限制），所以一次只审一条
+            return self.redirect(
+                message=_("Please select only one batch: usage requests are "
+                          "reviewed one at a time."),
+                level="warning")
+
+        return self.request.response.redirect(api.get_url(targets[0]))

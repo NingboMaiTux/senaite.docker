@@ -30,7 +30,7 @@
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         display: flex;
         flex-direction: column;
-        min-width: 0; /* 闃叉鍐呭鎾戝紑瀹瑰櫒 */
+        min-width: 0; /* keep the container from being stretched */
       }
       .stability-board-card .label {
         color: #7f8c8d;
@@ -141,7 +141,8 @@
     </div>
 
     <div class="stability-board-toolbar">
-      <div class="stability-status-filters" role="group" aria-label="Status filters">
+      <div class="stability-status-filters" role="group"
+           i18n:attributes="aria-label" aria-label="Status filters">
         <a tal:repeat="f python:view.get_status_filter_buttons()"
            tal:attributes="href f/url; class python:'btn btn-sm btn-outline-secondary %s' % ('active' if f.get('active') else '')"
            tal:content="f/title">All</a>
@@ -155,8 +156,8 @@
         <input type="text"
                class="form-control form-control-sm"
                name="plan_query"
-               placeholder="Search Plan"
                i18n:attributes="placeholder"
+               placeholder="Search Plan"
                tal:attributes="value view/plan_query"/>
         <button type="submit" class="btn btn-sm btn-outline-secondary" i18n:translate="">Search</button>
       </form>
@@ -164,7 +165,9 @@
 
     <form id="stability_task_board_form"
           method="GET"
-          tal:attributes="action string:${context/absolute_url}/@@task_board">
+          tal:attributes="action string:${context/absolute_url}/@@task_board;
+                          data-msg-select-one python:view.get_js_messages().get('select_one', '');
+                          data-msg-pending-only python:view.get_js_messages().get('pending_only', '')">
       <input type="hidden" name="status_filter" tal:attributes="value view/status_filter"/>
       <input type="hidden" name="plan_query" tal:attributes="value view/plan_query"/>
       <input type="hidden" name="sort_on" tal:attributes="value view/sort_on"/>
@@ -186,17 +189,17 @@
             <th>
               <a class="stability-sort-link"
                  tal:attributes="href python:view.get_sort_url('target_date')"
-                 tal:content="python:u'Target Date' + view.get_sort_indicator('target_date')">Target Date</a>
+                 tal:content="python:view.sort_header('target_date', 'Target Date')">Target Date</a>
             </th>
             <th>
               <a class="stability-sort-link"
                  tal:attributes="href python:view.get_sort_url('window_start')"
-                 tal:content="python:u'Window Start' + view.get_sort_indicator('window_start')">Window Start</a>
+                 tal:content="python:view.sort_header('window_start', 'Window Start')">Window Start</a>
             </th>
             <th>
               <a class="stability-sort-link"
                  tal:attributes="href python:view.get_sort_url('window_end')"
-                 tal:content="python:u'Window End' + view.get_sort_indicator('window_end')">Window End</a>
+                 tal:content="python:view.sort_header('window_end', 'Window End')">Window End</a>
             </th>
             <th i18n:translate="">Status</th>
           </tr>
@@ -266,6 +269,17 @@
     </form>
 
     <script>
+      function stabilityBoardMessages() {
+        var form = document.getElementById('stability_task_board_form');
+        if (!form) {
+          return {selectOne: '', pendingOnly: ''};
+        }
+        return {
+          selectOne: form.getAttribute('data-msg-select-one') || '',
+          pendingOnly: form.getAttribute('data-msg-pending-only') || ''
+        };
+      }
+
       function toggleAllTasks(source) {
         var checkboxes = document.getElementsByName('row_ids:list');
         for (var i = 0; i < checkboxes.length; i++) {
@@ -280,7 +294,7 @@
             return true;
           }
         }
-        alert('Please select at least one task.');
+        alert(stabilityBoardMessages().selectOne);
         return false;
       }
 
@@ -298,17 +312,18 @@
           }
         }
         if (!hasAny) {
-          alert('Please select at least one task.');
+          alert(stabilityBoardMessages().selectOne);
           return false;
         }
         if (!hasPending) {
-          alert('Sample Placement can only be applied to Pending Placement tasks.');
+          alert(stabilityBoardMessages().pendingOnly);
           return false;
         }
         return true;
       }
 
-      /* 浣跨敤鍚庣 bulk_action 鍒嗗彂璺宠浆锛岄伩鍏嶆祻瑙堝櫒涓嶆敮鎸?formaction 鎴?JS 鍔ㄦ€佹敼 action 甯︽潵鐨勫吋瀹归棶棰?*/
+      /* 使用后端 bulk_action 分发跳转，避免浏览器不支持 formaction
+         或 JS 动态改 action 带来的兼容问题。 */
     </script>
   </metal:content-core>
 </html>

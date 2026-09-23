@@ -1,6 +1,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"
       xmlns:tal="http://xml.zope.org/namespaces/tal"
       xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      i18n:domain="maitux.stock"
       xmlns:metal="http://xml.zope.org/namespaces/metal"
       metal:use-macro="context/main_template/macros/master">
 <body>
@@ -12,16 +13,16 @@
             tal:define="result python:view.results(); filters python:result['filters']">
 
   <h1 class="documentFirstHeading" tal:content="python:view.page_title()">Usage Report</h1>
-  <p class="text-muted" i18n:translate="stockusage_report_desc1">按起止时间、库存编号、批号、物料名称、供应商查询并导出使用记录（对应「对照品使用记录」交付项）。</p>
-  <p class="text-muted" i18n:translate="stockusage_report_desc2">批号一栏同时匹配「厂家批号」与「批次编号」；起止时间针对记录的操作时间，留空表示不限。</p>
-  <p class="text-muted" i18n:translate="stockusage_report_desc3">导出内容与当前查询结果完全一致。</p>
+  <p class="text-muted"  i18n:translate="stockusage_report_desc1">Filter usage records by date range, stock number, lot number, material name and supplier, then export them.</p>
+  <p class="text-muted"  i18n:translate="stockusage_report_desc2">The lot number filter matches both the manufacturer lot and the batch number. The date range applies to the operation time; leave blank for no limit.</p>
+  <p class="text-muted"  i18n:translate="stockusage_report_desc3">The exported CSV matches the current query result exactly.</p>
 
   <form method="get" class="row mb-3"
         tal:attributes="action python:view.context_url()">
 
     <div class="col-md-2 mb-2">
       <label class="small mb-1" for="date_from"
-             i18n:translate="stockusage_date_from">起始时间</label>
+              i18n:translate="stockusage_date_from">From Date</label>
       <input type="date" class="form-control form-control-sm"
              id="date_from" name="date_from"
              tal:attributes="value python:view.date_input_value('date_from')"/>
@@ -29,7 +30,7 @@
 
     <div class="col-md-2 mb-2">
       <label class="small mb-1" for="date_to"
-             i18n:translate="stockusage_date_to">截止时间</label>
+              i18n:translate="stockusage_date_to">To Date</label>
       <input type="date" class="form-control form-control-sm"
              id="date_to" name="date_to"
              tal:attributes="value python:view.date_input_value('date_to')"/>
@@ -37,7 +38,7 @@
 
     <div class="col-md-2 mb-2">
       <label class="small mb-1" for="stock_number"
-             i18n:translate="stockusage_stock_number_only">库存编号</label>
+              i18n:translate="stockusage_stock_number_only">Stock Number</label>
       <input type="text" class="form-control form-control-sm"
              id="stock_number" name="stock_number" placeholder="RM-001"
              tal:attributes="value python:filters.get('stock_number')"/>
@@ -45,7 +46,7 @@
 
     <div class="col-md-2 mb-2">
       <label class="small mb-1" for="batch_number"
-             i18n:translate="stockusage_batch_number_only">批号 / 批次编号</label>
+              i18n:translate="stockusage_batch_number_only">Lot / Batch No.</label>
       <input type="text" class="form-control form-control-sm"
              id="batch_number" name="batch_number" placeholder="123456"
              tal:attributes="value python:filters.get('batch_number')"/>
@@ -53,7 +54,7 @@
 
     <div class="col-md-2 mb-2">
       <label class="small mb-1" for="material_name"
-             i18n:translate="stockusage_material_name_only">物料名称</label>
+              i18n:translate="stockusage_material_name_only">Material Name</label>
       <input type="text" class="form-control form-control-sm"
              id="material_name" name="material_name" placeholder="fuzzy match"
              tal:attributes="value python:filters.get('material_name')"/>
@@ -61,9 +62,9 @@
 
     <div class="col-md-2 mb-2">
       <label class="small mb-1" for="supplier_uid"
-             i18n:translate="stockusage_supplier_only">供应商</label>
+              i18n:translate="stockusage_supplier_only">Supplier</label>
       <select class="form-control form-control-sm" id="supplier_uid" name="supplier_uid">
-        <option value="" i18n:translate="stockusage_all">全部</option>
+        <option value=""  i18n:translate="stockusage_all">All</option>
         <option tal:repeat="option python:view.supplier_options()"
                 tal:attributes="value python:option['uid'];
                                 selected python:'selected' if option['uid'] == filters.get('supplier_uid') else None"
@@ -73,9 +74,9 @@
 
     <div class="col-md-2 mb-2">
       <label class="small mb-1" for="stock_type_uid"
-             i18n:translate="stockusage_stock_type_only">库存类型</label>
+              i18n:translate="stockusage_stock_type_only">Stock Type</label>
       <select class="form-control form-control-sm" id="stock_type_uid" name="stock_type_uid">
-        <option value="" i18n:translate="stockusage_all">全部</option>
+        <option value=""  i18n:translate="stockusage_all">All</option>
         <option tal:repeat="option python:view.stock_type_options()"
                 tal:attributes="value python:option['uid'];
                                 selected python:'selected' if option['uid'] == filters.get('stock_type_uid') else None"
@@ -85,7 +86,7 @@
 
     <div class="col-md-2 mb-2">
       <label class="small mb-1" for="page_size"
-             i18n:translate="stockusage_page_size">每页条数</label>
+              i18n:translate="stockusage_page_size">Page Size</label>
       <input type="number" class="form-control form-control-sm" min="1" max="500"
              id="page_size" name="page_size"
              tal:attributes="value python:view.page_size()"/>
@@ -93,13 +94,13 @@
 
     <div class="col-md-12 mb-2">
       <button type="submit" class="btn btn-sm btn-primary mr-2"
-              name="search" value="1" i18n:translate="stockusage_search">查询</button>
+              name="search" value="1"  i18n:translate="stockusage_search">Search</button>
       <a class="btn btn-sm btn-outline-secondary mr-2"
-         i18n:translate="stockusage_reset"
-         tal:attributes="href python:view.context_url()">重置</a>
+          i18n:translate="stockusage_reset"
+         tal:attributes="href python:view.context_url()">Reset</a>
       <a class="btn btn-sm btn-success"
-         i18n:translate="stockusage_export_csv"
-         tal:attributes="href python:view.export_url()">导出 CSV（按当前查询条件）</a>
+          i18n:translate="stockusage_export_csv"
+         tal:attributes="href python:view.export_url()">Export CSV (current query)</a>
     </div>
   </form>
 
@@ -111,7 +112,7 @@
        tal:content="python:view.summary_text(result['summary'], result['page'], result['pages'])">-</div>
 
   <div class="alert alert-warning" tal:condition="python:not result['rows']"
-       i18n:translate="stockusage_report_no_rows">没有匹配的使用记录，请调整查询条件。</div>
+        i18n:translate="stockusage_report_no_rows">No matching usage records. Please adjust the filters.</div>
 
   <div class="table-responsive" tal:condition="python:result['rows']">
     <table class="table table-sm table-striped">

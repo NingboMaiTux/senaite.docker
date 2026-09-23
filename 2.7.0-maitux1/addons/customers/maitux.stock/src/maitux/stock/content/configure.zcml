@@ -1,4 +1,4 @@
-﻿<configure
+<configure
     xmlns="http://namespaces.zope.org/zope"
     i18n_domain="maitux.stock">
 
@@ -84,6 +84,20 @@
     <require
         permission="zope2.View"
         interface="maitux.stock.interfaces.IStockBatch"
+        />
+  </class>
+
+  <class class=".stockusagerequests.StockUsageRequests">
+    <require
+        permission="zope2.View"
+        interface="zope.interface.Interface"
+        />
+  </class>
+
+  <class class=".stockusagerequest.StockUsageRequest">
+    <require
+        permission="zope2.View"
+        interface="maitux.stock.interfaces.IStockUsageRequest"
         />
   </class>
 

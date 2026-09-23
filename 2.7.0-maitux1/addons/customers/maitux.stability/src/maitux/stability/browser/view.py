@@ -12,6 +12,7 @@ except Exception:
 
 from bika.lims import api
 from bika.lims.decorators import returns_json
+from maitux.stability.i18n import translate_stability
 from bika.lims.api.security import check_permission as has_permission
 from bika.lims.utils import get_link
 from bika.lims.browser.workflow import RequestContextAware
@@ -40,8 +41,11 @@ from zope.component import getMultiAdapter
 from zope.interface import implements
 from zope.publisher.interfaces.browser import IBrowserPage
 
-from maitux.stability import _
 from maitux.stability.permissions import AddStabilityPlanTemplate
+from maitux.stability.plan_copy import can_copy_plan
+from maitux.stability.plan_copy import get_plan_by_uid
+from maitux.stability.plan_copy import build_copy_data
+from maitux.stability.plan_copy import COPY_SOURCE_PARAM
 
 
 TABLE_DEFINITIONS = (
@@ -230,6 +234,33 @@ class StabilityPlanAddFormFromTemplate(SenaiteDefaultAddForm):
             set_default("unit", unit)
 
 
+def _detail_status_title(status):
+    """计划明细状态的显示文案（按当前语言翻译）。
+
+    中文注释：状态值（``pending_placement`` / ``active`` / ``completed``）是
+    数据，**不能**直接渲染给用户；显示文案必须走本包翻译，否则中文站会漏英文。
+    """
+    mapping = {
+        "pending_placement": translate_stability(u"Pending Placement"),
+        "active": translate_stability(u"In Progress"),
+        "completed": translate_stability(u"Completed"),
+    }
+    return mapping.get(status, status or u"")
+
+
+def _task_title(seq, months):
+    """时间点任务标题：``TP 1 (3 Months)`` -> ``TP 1（3 个月）``。
+
+    整句作为一个 msgid，翻译后再做 ``format`` 填充 —— 这样语序与量词都由
+    译文决定（中文写"个月"），不会出现"TP 1 (3 个月 Months)"这类拼接错误。
+    """
+    pattern = translate_stability(u"TP {0} ({1} Months)")
+    try:
+        return pattern.format(seq, months)
+    except Exception:
+        return u"TP {0} ({1} Months)".format(seq, months)
+
+
 class PlanTemplateDefaultsView(BrowserView):
     @returns_json
     def __call__(self):
@@ -281,7 +312,7 @@ def _get_or_create_plans_container(request=None):
             if request is not None:
                 try:
                     portal.plone_utils.addPortalMessage(
-                        _(u"StabilityPlans content type is not installed. Please reinstall/upgrade the maitux.stability add-on."),
+                        translate_stability(u"StabilityPlans content type is not installed. Please reinstall/upgrade the maitux.stability add-on."),
                         "error",
                     )
                 except Exception:
@@ -300,7 +331,7 @@ def _get_or_create_plans_container(request=None):
                 container=module,
                 type="StabilityPlans",
                 id=_canonical_id("stability_plans"),
-                title=_(u"listing_stabilityplans_title", default=u"Stability Plans"),
+                title=u"Stability Plans",
             )
     return plans
 
@@ -337,25 +368,25 @@ class BaseStabilityFolderView(ListingView):
         }
 
         self.context_actions = {
-            _(u"listing_stability_action_add", default=u"Add"): {
+            translate_stability(u"Add"): {
                 "url": "++add++%s" % self.add_type,
                 "permission": self.add_permission,
                 "icon": "senaite_theme/icon/plus",
             }
         }
 
-        self.title = translate(self.title_text)
+        self.title = translate_stability(self.title_text)
         self.columns = collections.OrderedDict((
             ("Title", {
-                "title": _(u"listing_stability_column_title", default=u"Title"),
+                "title": translate_stability(u"Title"),
                 "index": "sortable_title",
             }),
             ("Description", {
-                "title": _(u"listing_stability_column_description", default=u"Description"),
+                "title": translate_stability(u"Description"),
                 "toggle": True,
             }),
             ("state_title", {
-                "title": _(u"listing_stability_column_state", default=u"State"),
+                "title": translate_stability(u"State"),
                 "index": "review_state",
                 "toggle": True,
             }),
@@ -364,19 +395,19 @@ class BaseStabilityFolderView(ListingView):
         self.review_states = [
             {
                 "id": "default",
-                "title": _(u"listing_state_active", default=u"Active"),
+                "title": translate_stability(u"Active"),
                 "contentFilter": {"is_active": True},
                 "transitions": [{"id": "deactivate"}],
                 "columns": self.columns.keys(),
             }, {
                 "id": "inactive",
-                "title": _(u"listing_state_inactive", default=u"Inactive"),
+                "title": translate_stability(u"Inactive"),
                 "contentFilter": {"is_active": False},
                 "transitions": [{"id": "activate"}],
                 "columns": self.columns.keys(),
             }, {
                 "id": "all",
-                "title": _(u"listing_state_all", default=u"All"),
+                "title": translate_stability(u"All"),
                 "contentFilter": {},
                 "columns": self.columns.keys(),
             },
@@ -396,29 +427,20 @@ class BaseStabilityFolderView(ListingView):
 class StorageConditionsView(BaseStabilityFolderView):
     portal_type = "StorageCondition"
     add_type = "StorageCondition"
-    title_text = _(
-        u"listing_storageconditions_title",
-        default=u"Storage Conditions",
-    )
+    title_text = u"Storage Conditions"
 
 
 class PackagingSpecificationsView(BaseStabilityFolderView):
     portal_type = "PackagingSpecification"
     add_type = "PackagingSpecification"
-    title_text = _(
-        u"listing_packagingspecifications_title",
-        default=u"Packaging Specifications",
-    )
+    title_text = u"Packaging Specifications"
 
 
 class StabilityPlanTemplatesView(BaseStabilityFolderView):
     portal_type = "StabilityPlanTemplate"
     add_type = "StabilityPlanTemplate"
     add_permission = AddStabilityPlanTemplate
-    title_text = _(
-        u"listing_stabilityplantemplates_title",
-        default=u"Stability Plan Templates",
-    )
+    title_text = u"Stability Plan Templates"
 
     def __init__(self, context, request):
         super(StabilityPlanTemplatesView, self).__init__(context, request)
@@ -435,10 +457,10 @@ class StabilityPlanTemplatesView(BaseStabilityFolderView):
     def custom_transition_create_plan(self):
         return {
             "id": "create_plan",
-            "title": _(u"Create Plan"),
+            "title": translate_stability(u"Create Plan"),
             "url": "workflow_action?action=create_plan",
             "css_class": "btn btn-outline-primary",
-            "help": _(u"Create a stability plan from the selected template"),
+            "help": translate_stability(u"Create a stability plan from the selected template"),
         }
 
 
@@ -461,14 +483,14 @@ class WorkflowActionCreatePlanAdapter(RequestContextAware):
     def __call__(self, action, uids):
         if not uids or len(uids) != 1:
             return self.redirect(
-                message=_(u"Please select one template before creating a plan"),
+                message=translate_stability(u"Please select one template before creating a plan"),
                 level="warning",
             )
 
         template = api.get_object_by_uid(uids[0])
         if template is None:
             return self.redirect(
-                message=_(u"The selected template was not found"),
+                message=translate_stability(u"The selected template was not found"),
                 level="error",
             )
 
@@ -493,25 +515,25 @@ class StabilityPlansView(ListingView):
         }
 
         self.context_actions = {
-            _(u"listing_stability_action_task_board", default=u"Task Board"): {
+            translate_stability(u"Task Board"): {
                 "url": "@@task_board",
                 "permission": "zope2.View",
                 "icon": "senaite_theme/icon/file",
             },
         }
 
-        self.title = translate(_(u"listing_stabilityplans_title", default=u"Stability Plans"))
+        self.title = translate_stability(u"Stability Plans")
         self.columns = collections.OrderedDict((
             ("Title", {
-                "title": _(u"listing_stability_column_title", default=u"Title"),
+                "title": translate_stability(u"Title"),
                 "index": "sortable_title",
             }),
             ("start_time", {
-                "title": _(u"Start Time (T0)"),
+                "title": translate_stability(u"Start Time (T0)"),
                 "toggle": True,
             }),
             ("total_quantity", {
-                "title": _(u"Storage Quantity - Total"),
+                "title": translate_stability(u"Storage Quantity - Total"),
                 "toggle": True,
             }),
         ))
@@ -519,11 +541,43 @@ class StabilityPlansView(ListingView):
         self.review_states = [
             {
                 "id": "default",
-                "title": _(u"listing_state_all", default=u"All"),
+                "title": translate_stability(u"All"),
                 "contentFilter": {},
                 "columns": self.columns.keys(),
             },
         ]
+
+        self.init_custom_transitions()
+
+    def init_custom_transitions(self):
+        """给每个状态页签挂上「复制计划」按钮。
+
+        **这里刻意不做权限判断**：列表视图是在一个非最终用户的安全上下文里构造的
+        （实测 ``check_permission`` / ``portal_membership.checkPermission`` 都返回
+        False，用户 id 为 None），按权限决定要不要挂按钮会让功能静默消失。
+        权限改由新建表单（``++add++StabilityPlan``）在点击后统一校验，
+        这与同页「创建计划」按钮的做法保持一致。
+        """
+        transition = self.custom_transition_copy_plan
+        for state in self.review_states:
+            custom = state.get("custom_transitions", [])
+            if transition not in custom:
+                custom.append(transition)
+            state["custom_transitions"] = custom
+
+    @property
+    def custom_transition_copy_plan(self):
+        return {
+            "id": "copy_plan",
+            "title": translate_stability(u"Copy Plan"),
+            # 服务端只认 workflow_action_id（bika.lims.browser.workflow 的
+            # get_action() 读的是 workflow_action_id / workflow_action）；
+            # 列表 JS 点击时也会按 id 再带一次，两条路径都能命中。
+            "url": "workflow_action?workflow_action_id=copy_plan",
+            "css_class": "btn btn-outline-primary",
+            "help": translate_stability(
+                u"Create a new stability plan by copying the selected plan"),
+        }
 
     def folderitem(self, obj, item, index):
         item = super(StabilityPlansView, self).folderitem(obj, item, index)
@@ -536,6 +590,66 @@ class StabilityPlansView(ListingView):
         item["start_time"] = getattr(obj, "start_time", "") or ""
         item["total_quantity"] = getattr(obj, "total_quantity", "") or ""
         return item
+
+
+class PlanCopyDefaultsView(BrowserView):
+    """返回被复制方案的预填数据，供新建计划表单前端预填。
+
+    与 ``PlanTemplateDefaultsView`` 同一套路（参数同为 ``uid``）：
+    后端只负责给出"干净"的数据（明细状态重置、样品/库存批清空），
+    前端负责填进表单控件。
+    """
+
+    @returns_json
+    def __call__(self):
+        plan = get_plan_by_uid(self.request.get("uid"))
+        if plan is None:
+            return {}
+        return build_copy_data(plan)
+
+
+class WorkflowActionCopyPlanAdapter(RequestContextAware):
+    """列表页「复制计划」按钮的适配器：跳到新建表单并带上复制来源。"""
+
+    implements(IWorkflowActionUIDsAdapter)
+
+    def __call__(self, action, uids):
+        if not uids or len(uids) != 1:
+            return self.redirect(
+                message=translate_stability(
+                    u"Please select one stability plan to copy"),
+                level="warning",
+            )
+
+        plan = api.get_object_by_uid(uids[0])
+        if plan is None or api.get_portal_type(plan) != "StabilityPlan":
+            return self.redirect(
+                message=translate_stability(
+                    u"The selected stability plan was not found"),
+                level="error",
+            )
+
+        if not can_copy_plan(plan):
+            # 方案模板是新建表单的必填且隐藏字段，缺模板时表单存不下去。
+            return self.redirect(
+                message=translate_stability(
+                    u"The selected plan has no plan template and cannot be copied"),
+                level="error",
+            )
+
+        container = api.get_parent(plan)
+        url = "{0}/++add++StabilityPlan?{1}={2}".format(
+            api.get_url(container),
+            COPY_SOURCE_PARAM,
+            _as_url_value(api.get_uid(plan)),
+        )
+        return self.redirect(
+            redirect_url=url,
+            message=translate_stability(
+                u"The form was pre-filled with the data of the selected plan. "
+                u"Please review the values and save."),
+            level="info",
+        )
 
 
 class StabilityTaskBoardView(BrowserView):
@@ -567,7 +681,7 @@ class StabilityTaskBoardView(BrowserView):
 
             if not row_ids:
                 ploneapi.portal.show_message(
-                    message=_(u"Please select at least one task."),
+                    message=translate_stability(u"Please select at least one task."),
                     request=self.request,
                     type="warning",
                 )
@@ -583,7 +697,7 @@ class StabilityTaskBoardView(BrowserView):
             view_name = action_to_view.get(bulk_action)
             if view_name:
                 if bulk_action == "sample_placement":
-                    # 鏍峰搧鏀剧疆鍙厑璁稿 Pending Placement 鐨勮鎵ц锛堝墠绔湁鏍￠獙锛岃繖閲屽仛鏈嶅姟绔厹搴曪級
+                    # 样品放置只允许对 Pending Placement 的行执行（前端有校验，这里做服务端兜底）
                     all_rows = self._get_rows()
                     by_id = dict((r.get("row_id"), r) for r in all_rows if r.get("row_id"))
                     has_pending = any(
@@ -592,7 +706,7 @@ class StabilityTaskBoardView(BrowserView):
                     )
                     if not has_pending:
                         ploneapi.portal.show_message(
-                            message=_(u"Sample Placement can only be applied to Pending Placement tasks."),
+                            message=translate_stability(u"Sample Placement can only be applied to Pending Placement tasks."),
                             request=self.request,
                             type="warning",
                         )
@@ -622,7 +736,7 @@ class StabilityTaskBoardView(BrowserView):
         return self.template()
 
     def can_place_samples(self):
-        # 鍏煎涓嶅悓鐜鐨勬潈闄愬懡鍚嶏紝閬垮厤鎸夐挳琚闅愯棌
+        # 兼容不同环境的权限命名，避免按钮被误隐藏
         if has_permission("Modify portal content", self.context):
             return True
         if has_permission("cmf.ModifyPortalContent", self.context):
@@ -687,11 +801,12 @@ class StabilityTaskBoardView(BrowserView):
         return "{0}?{1}".format(base_url, urlencode(query))
 
     def get_status_filter_options(self):
+        # 中文注释：键与状态值一一对应，文案一律走本包翻译（英文站=英文 msgid）。
         return [
-            ("all", _(u"listing_stability_status_all", default=u"All")),
-            ("pending_placement", _(u"listing_stability_status_pending_placement", default=u"Pending Placement")),
-            ("active", _(u"listing_stability_status_in_progress", default=u"In Progress")),
-            ("completed", _(u"listing_stability_status_completed", default=u"Completed")),
+            ("all", translate_stability(u"All")),
+            ("pending_placement", translate_stability(u"Pending Placement")),
+            ("active", translate_stability(u"In Progress")),
+            ("completed", translate_stability(u"Completed")),
         ]
 
     def get_status_filter_buttons(self):
@@ -709,6 +824,18 @@ class StabilityTaskBoardView(BrowserView):
                 "active": key == self.status_filter,
             })
         return buttons
+
+    def get_js_messages(self):
+        """看板前端 JS 里要弹的提示文案（同样必须按语言翻译）。
+
+        中文注释：模板里用 ``data-msg-*`` 传给 JS，避免把译文直接拼进
+        ``alert('...')`` —— 译文里可能带引号，拼接会破坏脚本。
+        """
+        return {
+            "select_one": translate_stability(u"Please select at least one task."),
+            "pending_only": translate_stability(
+                u"Sample Placement can only be applied to Pending Placement tasks."),
+        }
 
     def _filter_rows(self, rows, status_filter):
         if status_filter == "all":
@@ -752,6 +879,16 @@ class StabilityTaskBoardView(BrowserView):
         if self.sort_on != sort_on:
             return u""
         return self.sort_order == "asc" and u" ^" or u" v"
+
+    def sort_header(self, sort_on, label):
+        """表头文案（带排序箭头）。
+
+        中文注释：这几个表头是 ``tal:content`` 用 Python 表达式渲染的，
+        ``i18n:translate`` 对它不生效，所以必须在这里显式翻译，
+        否则中文站会显示英文表头。
+        """
+        return u"{}{}".format(translate_stability(label),
+                             self.get_sort_indicator(sort_on))
 
     def _build_row_id(self, plan_uid, seq):
         """统一生成任务看板行标识。"""
@@ -828,12 +965,8 @@ class StabilityTaskBoardView(BrowserView):
         return value and api.safe_unicode(value) or ""
 
     def _status_title(self, status):
-        mapping = {
-            "pending_placement": _(u"listing_stability_status_pending_placement", default=u"Pending Placement"),
-            "active": _(u"listing_stability_status_in_progress", default=u"In Progress"),
-            "completed": _(u"listing_stability_status_completed", default=u"Completed"),
-        }
-        return mapping.get(status, status or u"")
+        # 中文注释：状态文案必须翻译，否则中文站的任务看板会显示英文。
+        return _detail_status_title(status)
 
     def _get_rows(self):
         context = self.context
@@ -903,7 +1036,7 @@ class StabilityTaskBoardView(BrowserView):
                 window_start = None
                 window_end = None
                 if start_time:
-                    # 鏃堕棿鐐规寜鏈堣绠?(1鏈?30澶?锛岀獥鍙ｆ湡鎸夊ぉ璁＄畻
+                    # 时间点按月计算（1 月 = 30 天），窗口期按天计算
                     target_date = start_time + timedelta(days=months * 30)
                     if window_days:
                         window_start = target_date - timedelta(days=window_days)
@@ -918,14 +1051,11 @@ class StabilityTaskBoardView(BrowserView):
                 is_overdue = bool(target_dt and status != "completed" and target_dt < now)
 
                 rows.append({
-                    # row_id 鐢ㄤ簬鏍峰搧鏀剧疆椤靛畾浣嶈鍒掑唴鐨勮锛坧lan_uid::seq锛?                    "row_id": "{0}::{1}".format(plan_uid, seq),
+                    "row_id": "{0}::{1}".format(plan_uid, seq),
                     "plan_uid": plan_uid,
                     "plan_url": plan_url,
                     "plan_title": plan_title,
-                    "task_title": translate(_(
-                        u"task_title_tp_months",
-                        default=u"TP {0} ({1} Months)",
-                    )).format(seq, months),
+                    "task_title": _task_title(seq, months),
                     "sample_uid": sample_uid,
                     "sample_id": sample_id,
                     "sample_url": sample_url,
@@ -970,14 +1100,14 @@ class WorkflowActionSamplePlacementAdapter(RequestContextAware):
     def __call__(self, action, uids):
         if not has_permission("Modify portal content", self.context):
             return self.redirect(
-                message=_(u"You do not have permission to place samples."),
+                message=translate_stability(u"You do not have permission to place samples."),
                 level="error",
             )
 
         selected_uids = [uid for uid in (uids or []) if api.is_uid(uid)]
         if not selected_uids:
             return self.redirect(
-                message=_(u"Please select pending tasks first."),
+                message=translate_stability(u"Please select pending tasks first."),
                 level="warning",
             )
 
@@ -994,14 +1124,14 @@ class WorkflowActionSyncPlanTasksAdapter(RequestContextAware):
         # 权限校验：只有有编辑权限的人才能做同步。
         if not has_permission("Modify portal content", self.context):
             return self.redirect(
-                message=_(u"You do not have permission to sync plan tasks."),
+                message=translate_stability(u"You do not have permission to sync plan tasks."),
                 level="error",
             )
 
         selected_uids = [uid for uid in (uids or []) if api.is_uid(uid)]
         if not selected_uids:
             return self.redirect(
-                message=_(u"No items selected."),
+                message=translate_stability(u"No items selected."),
                 level="warning",
             )
 
@@ -1018,7 +1148,7 @@ class WorkflowActionSyncPlanTasksAdapter(RequestContextAware):
 
         if not plans:
             return self.redirect(
-                message=_(u"No plans found for selected tasks."),
+                message=translate_stability(u"No plans found for selected tasks."),
                 level="warning",
             )
 
@@ -1029,7 +1159,7 @@ class WorkflowActionSyncPlanTasksAdapter(RequestContextAware):
 
         if sync_plan_timepoint_tasks is None:
             return self.redirect(
-                message=_(u"Sync feature is not available."),
+                message=translate_stability(u"Sync feature is not available."),
                 level="error",
             )
 
@@ -1043,7 +1173,7 @@ class WorkflowActionSyncPlanTasksAdapter(RequestContextAware):
             total_deleted += d
 
         return self.redirect(
-            message=_(u"Sync done. Created: {0}, Updated: {1}, Deleted: {2}.")
+            message=translate_stability(u"Sync done. Created: {0}, Updated: {1}, Deleted: {2}.")
                     .format(total_created, total_updated, total_deleted),
             level="info",
         )
@@ -1055,7 +1185,7 @@ class SamplePlacementView(BrowserView):
     def __call__(self):
         if not has_permission("Modify portal content", self.context):
             ploneapi.portal.show_message(
-                message=_(u"You do not have permission to place samples."),
+                message=translate_stability(u"You do not have permission to place samples."),
                 request=self.request,
                 type="error",
             )
@@ -1078,7 +1208,7 @@ class SamplePlacementView(BrowserView):
         return "{0}/@@task_board".format(api.get_url(self.context))
 
     def get_selected_row_ids(self):
-        # 鏉ヨ嚜鐪嬫澘鐨?row_id 鍒楄〃锛屾牸寮忥細plan_uid::seq
+        # 来自看板的 row_id 列表，格式：plan_uid::seq
         value = self.request.get("row_ids", self.request.form.get("row_ids", []))
         if not isinstance(value, (list, tuple)):
             value = [value]
@@ -1138,7 +1268,7 @@ class SamplePlacementView(BrowserView):
                 "row_id": rid,
                 "plan_title": api.get_title(plan) or "",
                 "plan_url": api.get_url(plan),
-                "task_title": u"TP {0} ({1} Months)".format(seq, months),
+                "task_title": _task_title(seq, months),
                 "timepoint_months": months,
                 "window_days": window_days,
                 "stock_batch_uid": stock_batch_uid,
@@ -1195,7 +1325,7 @@ class SamplePlacementView(BrowserView):
     def handle_save(self):
         if not self.tasks:
             ploneapi.portal.show_message(
-                message=_(u"No pending tasks selected."),
+                message=translate_stability(u"No pending tasks selected."),
                 request=self.request,
                 type="warning",
             )
@@ -1218,7 +1348,7 @@ class SamplePlacementView(BrowserView):
 
         if missing or invalid or len(per_row) != len(self.tasks):
             ploneapi.portal.show_message(
-                message=_(u"Please select a Stock Batch for each selected task."),
+                message=translate_stability(u"Please select a Stock Batch for each selected task."),
                 request=self.request,
                 type="error",
             )
@@ -1265,7 +1395,7 @@ class SamplePlacementView(BrowserView):
                 details[seq - 1] = new_row
                 updated += 1
 
-                # 鍚屾鍒板凡鐢熸垚鐨勬椂闂寸偣浠诲姟锛堝鏋滃瓨鍦級
+                # 同步到已生成的时间点任务（如果存在）
                 try:
                     for child in plan.objectValues():
                         if api.get_portal_type(child) != "StabilityTimepointTask":
@@ -1286,7 +1416,7 @@ class SamplePlacementView(BrowserView):
                 except Exception:
                     pass
 
-            # 鍐欏洖璁″垝
+            # 写回计划
             try:
                 plan.plan_details = details
                 plan.reindexObject()
@@ -1294,7 +1424,7 @@ class SamplePlacementView(BrowserView):
                 pass
 
         ploneapi.portal.show_message(
-            message=_(u"Updated {0} task(s) to In Progress.").format(updated),
+            message=translate_stability(u"Updated {0} task(s) to In Progress.").format(updated),
             request=self.request,
             type="info",
         )
@@ -1308,7 +1438,7 @@ class LinkSampleView(BrowserView):
         # 需要编辑权限才能关联样品。
         if not has_permission("Modify portal content", self.context):
             ploneapi.portal.show_message(
-                message=_(u"You do not have permission to link samples."),
+                message=translate_stability(u"You do not have permission to link samples."),
                 request=self.request,
                 type="error",
             )
@@ -1376,13 +1506,15 @@ class LinkSampleView(BrowserView):
                 continue
 
             months = _normalize_months(row.get("timepoint_days", 0))
+            status = row.get("detail_status") or "pending_placement"
 
             data.append({
                 "row_id": rid,
                 "plan_title": api.get_title(plan) or "",
                 "plan_url": api.get_url(plan),
-                "task_title": u"TP {0} ({1} Months)".format(seq, months),
-                "status": row.get("detail_status") or "pending_placement",
+                "task_title": _task_title(seq, months),
+                "status": status,
+                "status_title": _detail_status_title(status),
             })
         return data
 
@@ -1416,7 +1548,7 @@ class LinkSampleView(BrowserView):
         sample_uid = self.get_selected_sample_uid()
         if not api.is_uid(sample_uid):
             ploneapi.portal.show_message(
-                message=_(u"Please select an existing sample first."),
+                message=translate_stability(u"Please select an existing sample first."),
                 request=self.request,
                 type="error",
             )
@@ -1448,7 +1580,7 @@ class LinkSampleView(BrowserView):
                 if not isinstance(row, dict):
                     continue
                 new_row = dict(row)
-                # 鍐欏洖鍏宠仈鐨勬牱鍝乁ID
+                # 写回关联的样品 UID
                 new_row["analysis_request"] = [sample_uid]
                 details[seq - 1] = new_row
                 updated += 1
@@ -1458,14 +1590,14 @@ class LinkSampleView(BrowserView):
                 plan.reindexObject()
             except Exception:
                 ploneapi.portal.show_message(
-                    message=_(u"Failed to update Stability Plan details."),
+                    message=translate_stability(u"Failed to update Stability Plan details."),
                     request=self.request,
                     type="error",
                 )
                 return self.template()
 
         ploneapi.portal.show_message(
-            message=_(u"Linked sample for {0} plan detail row(s).").format(updated),
+            message=translate_stability(u"Linked sample for {0} plan detail row(s).").format(updated),
             request=self.request,
             type="info",
         )
@@ -1478,7 +1610,7 @@ class CreateSampleView(BrowserView):
     def __call__(self):
         if not has_permission("Modify portal content", self.context):
             ploneapi.portal.show_message(
-                message=_(u"You do not have permission to create samples."),
+                message=translate_stability(u"You do not have permission to create samples."),
                 request=self.request,
                 type="error",
             )
@@ -1573,7 +1705,7 @@ class CreateSampleView(BrowserView):
                 "analysis_profile": profile_uid,
                 "batch_uid": batch_uid,
                 "batch_title": batch_title,
-                "task_title": u"TP {0} ({1} Months)".format(seq, months),
+                "task_title": _task_title(seq, months),
             })
         return data
 
@@ -1641,33 +1773,33 @@ class CreateSampleView(BrowserView):
 
         if not api.is_uid(client_uid):
             ploneapi.portal.show_message(
-                message=_(u"Please select a Client."),
+                message=translate_stability(u"Please select a Client."),
                 request=self.request,
                 type="error",
             )
             return self.template()
         if not api.is_uid(contact_uid):
             ploneapi.portal.show_message(
-                message=_(u"Please select a Contact."),
+                message=translate_stability(u"Please select a Contact."),
                 request=self.request,
                 type="error",
             )
             return self.template()
         if not api.is_uid(sampletype_uid):
             ploneapi.portal.show_message(
-                message=_(u"Please select a Sample Type."),
+                message=translate_stability(u"Please select a Sample Type."),
                 request=self.request,
                 type="error",
             )
             return self.template()
         if not date_sampled:
-            # DateSampled 鏄?AR 鍒涘缓鐨勫繀濉瓧娈典箣涓€
+            # DateSampled 是 AR 创建的必填字段之一
             date_sampled = DateTime().strftime("%Y-%m-%d")
 
         client = api.get_object_by_uid(client_uid)
         if client is None:
             ploneapi.portal.show_message(
-                message=_(u"Client not found."),
+                message=translate_stability(u"Client not found."),
                 request=self.request,
                 type="error",
             )
@@ -1680,7 +1812,7 @@ class CreateSampleView(BrowserView):
 
         if create_analysisrequest is None:
             ploneapi.portal.show_message(
-                message=_(u"Cannot create sample in this environment."),
+                message=translate_stability(u"Cannot create sample in this environment."),
                 request=self.request,
                 type="error",
             )
@@ -1780,7 +1912,7 @@ class CreateSampleView(BrowserView):
                     analysis_objects = []
                 if not analysis_objects:
                     ploneapi.portal.show_message(
-                        message=_(u"No analyses were created for this sample. Please check the selected Specification/Profile."),
+                        message=translate_stability(u"No analyses were created for this sample. Please check the selected Specification/Profile."),
                         request=self.request,
                         type="warning",
                     )
@@ -1798,7 +1930,7 @@ class CreateSampleView(BrowserView):
                 pass
 
         ploneapi.portal.show_message(
-            message=_(u"Created {0} sample(s).").format(created),
+            message=translate_stability(u"Created {0} sample(s).").format(created),
             request=self.request,
             type="info",
         )

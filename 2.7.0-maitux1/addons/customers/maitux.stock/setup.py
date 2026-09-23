@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from setuptools import setup, find_packages
 
 setup(
@@ -12,6 +13,8 @@ setup(
     install_requires=[
         'setuptools',
         'senaite.core',
+        # 领用双人复核复用 maitux.esignature 的认证与签名留痕服务
+        'maitux.esignature',
     ],
     entry_points="""
     [z3c.autoinclude.plugin]

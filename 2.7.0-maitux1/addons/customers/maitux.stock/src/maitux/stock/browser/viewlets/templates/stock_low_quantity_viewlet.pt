@@ -1,6 +1,6 @@
-<div tal:omit-tag=""
-     xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+<div xmlns:i18n="http://xml.zope.org/namespaces/i18n"
      i18n:domain="maitux.stock"
+     tal:omit-tag=""
      tal:define="items python:view._items"
      tal:condition="python:items">
   <div id="portal-alert">
@@ -8,9 +8,13 @@
       <button type="button" class="close" data-dismiss="alert" aria-label="Close">
         <span aria-hidden="true">&times;</span>
       </button>
-      <p class="title">
+      <p class="title" tal:condition="python:len(items) == 1">
         <span tal:content="python:len(items)"/>
-        <span i18n:translate="">batches are low on quantity:</span>
+        <span i18n:translate="">batch is low in quantity:</span>
+      </p>
+      <p class="title" tal:condition="python:len(items) > 1">
+        <span tal:content="python:len(items)"/>
+        <span i18n:translate="">batches are low in quantity:</span>
       </p>
       <p>
         <tal:links tal:repeat="i items">
