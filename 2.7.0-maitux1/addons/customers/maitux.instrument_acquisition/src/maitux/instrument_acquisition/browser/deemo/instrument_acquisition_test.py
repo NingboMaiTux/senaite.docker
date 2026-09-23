@@ -23,6 +23,10 @@ from plone.protect.interfaces import IDisableCSRFProtection
 from senaite.core.catalog.indexer.attachment import extract_text_from_file
 from zope.interface import alsoProvides
 
+from maitux.instrument_acquisition.services import pdf_text
+from maitux.instrument_acquisition.services import report_import
+from maitux.instrument_acquisition.services import script_runner
+
 try:
     from distutils.spawn import find_executable
 except Exception:
@@ -152,6 +156,21 @@ def _run_js_parser(js_source, text):
             os.unlink(tmp.name)
         except Exception:
             pass
+
+
+def _run_template_parser(template, text, extraction=None):
+    """按模板脚本后缀分发解析：`.py` 进程内解析，`.js` 兼容旧 node 通道"""
+    source = _get_js_source(template)
+    if script_runner.template_script_kind(template) == "py":
+        if not isinstance(extraction, dict):
+            extraction = {
+                u"method": u"text-only",
+                u"note": u"no coordinate extraction available",
+                u"text": text or u"",
+                u"pages": [],
+            }
+        return script_runner.run_py_parser(source, extraction)
+    return _run_js_parser(source, text)
 
 
 def _get_template_by_uid(uid):
@@ -289,40 +308,68 @@ def _extract_pdf_text_with_pdftotext(data, filename):
             pass
 
 
-def _extract_pdf_text(upload):
+def _extract_pdf_payload(upload):
+    """抽取 PDF：返回 `(success, message, text, filename, extraction)`
+
+    `extraction` 仅在**坐标抽取成功**时是 dict（`method == "python"`），
+    供 Python 解析脚本使用；其余兜底路径返回 None。
+    """
     filename, content_type, data = _read_upload(upload)
     if not data:
-        return False, u"No PDF content uploaded", u"", filename or u""
+        return False, u"No PDF content uploaded", u"", filename or u"", None
 
     blob = _UploadedBlob(data, content_type or "application/pdf", filename or "uploaded.pdf")
-    # 优先使用 pdftotext -layout，尽量让不同环境输出一致，
-    # 这样 JS 解析脚本可以稳定按“同一行包含多列”的格式处理。
+
+    # ★ 优先走**纯 Python 坐标抽取**（`services/pdf_text`）。
+    # Empower 这类报告是"逐格文本 + 坐标"画的，抽取产物必须是带坐标的单元格，
+    # 下游才能把数字归到 RT / Area / ... 列上；pdftotext 给的版式文本做不到。
+    try:
+        extraction = pdf_text.extract_pdf(data, blob.filename)
+    except Exception as exc:  # 抽取异常绝不阻断：退到下面的老路径
+        extraction = {"method": "none", "note": u"%s" % exc, "text": u"",
+                      "pages": []}
+    if extraction.get("method") == "python" and (extraction.get("text") or u"").strip():
+        message = u"PDF text extracted via coordinate extraction (%d page(s))" % len(
+            extraction.get("pages") or [])
+        if extraction.get("note"):
+            message = u"{}; {}".format(message, extraction["note"])
+        return True, message, extraction["text"], blob.filename, extraction
+
+    # 兜底：pdftotext -layout（装了 poppler 才可用），再退 portal_transforms。
     layout_text, layout_error = _extract_pdf_text_with_pdftotext(
         data, blob.filename)
     if layout_text:
         return (
             True,
-            u"PDF text extracted successfully via pdftotext -layout",
+            u"PDF text extracted via pdftotext -layout (coordinate extraction gave nothing)",
             layout_text,
             blob.filename,
+            None,
         )
 
-    # 如果系统没有 pdftotext，或者执行失败，再回退到 portal_transforms。
     text = extract_text_from_file(blob)
     if text:
-        return True, u"PDF text extracted successfully via portal_transforms", text, blob.filename
+        return (True, u"PDF text extracted via portal_transforms", text,
+                blob.filename, None)
 
     message = (
         u"PDF text extraction returned no content. "
-        u"pdftotext -layout and portal_transforms both gave empty output"
+        u"coordinate extraction, pdftotext -layout and portal_transforms all failed"
     )
+    if extraction.get("note"):
+        message = u"{}; coordinate extraction: {}".format(
+            message, extraction["note"])
     if layout_error:
-        message = u"{}; pdftotext failed: {}".format(
-            message, layout_error)
+        message = u"{}; pdftotext failed: {}".format(message, layout_error)
     else:
-        message = u"{}; make sure the PDF contains selectable text".format(
-            message)
-    return False, message, u"", blob.filename
+        message = u"{}; make sure the PDF contains selectable text".format(message)
+    return False, message, u"", blob.filename, None
+
+
+def _extract_pdf_text(upload):
+    """抽取 PDF 文本：`_extract_pdf_payload` 的兼容包装（返回前 4 项）"""
+    success, message, text, filename, _extraction = _extract_pdf_payload(upload)
+    return success, message, text, filename
 
 
 _SAMPLE_PORTAL_TYPES = ("AnalysisRequest",)
@@ -936,19 +983,37 @@ class InstrumentAcquisitionPDFParse(BrowserView):
             })
 
         text = _ensure_text(self.request.get("text", u""))
-        if not text:
+        kind = script_runner.template_script_kind(template)
+
+        # ★ `.py` 脚本要的是**带坐标的单元格**，所以这里对上传的 PDF 重新抽取一次；
+        # 前端只需在解析请求里一并带上 pdf_file（表单里文件仍然在）。
+        extraction = None
+        if kind == "py":
+            pdf_file = self.request.form.get("pdf_file")
+            if pdf_file:
+                filename, _content_type, data = _read_upload(pdf_file)
+                if data:
+                    try:
+                        extraction = pdf_text.extract_pdf(
+                            data, filename or u"uploaded.pdf")
+                    except Exception:
+                        extraction = None
+        if not text and not extraction:
             return _json_response(self.request, {
                 "success": False,
-                "message": "Missing extracted text",
+                "message": "Missing extracted text (and no PDF attached for "
+                           "coordinate extraction)",
                 "parsed": u"",
+                "script_kind": kind,
             })
 
-        js_source = _get_js_source(template)
-        parsed = _run_js_parser(js_source, text)
+        parsed = _run_template_parser(template, text, extraction)
         return _json_response(self.request, {
             "success": True,
-            "message": "Text parsed with template script",
+            "message": "Parsed with template script ({})".format(
+                kind or "none"),
             "parsed": parsed,
+            "script_kind": kind,
             "template_title": api.get_title(template),
         })
 
@@ -973,6 +1038,27 @@ class InstrumentAcquisitionPDFWrite(BrowserView):
             return _json_response(self.request, {
                 "success": False,
                 "message": u"Parsed JSON is invalid: {}".format(_ensure_text(exc)),
+            })
+
+        # ★ 报告解析产物（injections / grouped）→ 走报告落位：
+        # 先 dry-run 出 diff，前端确认后再带 confirm=1 回来真正写入。
+        if report_import.is_report_payload(parsed):
+            confirm = _ensure_text(
+                self.request.get("confirm", u"")).lower() in (
+                    u"1", u"true", u"yes", u"on")
+            # ★ 现值与本次**不同**的目标位默认不写（防静默覆盖人工改过的值）；
+            #   页面上的「Allow overwrite」勾选后才带 overwrite=1 允许覆盖。
+            overwrite = _ensure_text(
+                self.request.get("overwrite", u"")).lower() in (
+                    u"1", u"true", u"yes", u"on")
+            success, message, details = report_import.run(
+                parsed, confirm=confirm, allow_overwrite=overwrite,
+                # ★ 报告 PDF 强制留档：页面上带了文件就一并挂上去
+                attachment=pdf_file, attachment_title=pdf_filename)
+            return _json_response(self.request, {
+                "success": success,
+                "message": message,
+                "details": details,
             })
 
         success, message, details = _write_parsed_results_to_sample(

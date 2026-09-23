@@ -61,9 +61,13 @@
         <div class="row">
           <div class="col-md-12">
             <button class="btn btn-primary" id="btn-extract">1. Extract Text</button>
-            <button class="btn btn-success" id="btn-parse" style="margin-left: 8px;">2. Parse With JS</button>
+            <button class="btn btn-success" id="btn-parse" style="margin-left: 8px;">2. Parse With Script</button>
             <button class="btn btn-warning" id="btn-write" style="margin-left: 8px;">3. Write To System</button>
             <button class="btn btn-default" id="btn-clear" style="margin-left: 8px;">Clear</button>
+            <label style="margin-left: 15px; font-weight: normal;">
+              <input type="checkbox" id="allow-overwrite" />
+              Allow overwrite (target(s) whose current value differs)
+            </label>
           </div>
         </div>
 
@@ -208,35 +212,45 @@
         $('#btn-parse').click(function() {
             var uid = $('#template-uid').val();
             var text = $('#extracted-text').val();
+            var fileInput = $('#pdf-file')[0];
+            var hasFile = fileInput && fileInput.files && fileInput.files.length;
             if (!uid) {
                 alert('Please select a template');
                 return;
             }
-            if (!text) {
+            if (!text && !hasFile) {
                 alert('Please extract text first');
                 return;
             }
 
-            log('Parsing extracted text with JS template...', 'info');
+            log('Parsing with template script (.py uses coordinates, PDF attached)...', 'info');
+            var formData = new FormData();
+            formData.append('uid', uid);
+            formData.append('text', text || '');
+            if (hasFile) {
+                formData.append('pdf_file', fileInput.files[0]);
+            }
+            if (authenticator) {
+                formData.append('_authenticator', authenticator);
+            }
             $.ajax({
                 url: parseUrl,
                 method: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
                 dataType: 'json',
-                data: {
-                    uid: uid,
-                    text: text,
-                    _authenticator: authenticator
-                },
                 success: function(resp) {
                     if (resp.success) {
                         $('#parsed-text').val(resp.parsed || '');
-                        log('Parsed with template: ' + (resp.template_title || uid), 'success');
+                        log('Parsed (' + (resp.script_kind || 'none') + ') with template: ' +
+                            (resp.template_title || uid), 'success');
                     } else {
-                        log(resp.message || 'JS parse failed', 'error');
+                        log(resp.message || 'Parse failed', 'error');
                     }
                 },
                 error: function() {
-                    log('JS parse request failed', 'error');
+                    log('Parse request failed', 'error');
                 }
             });
         });
@@ -248,6 +262,62 @@
             $('#pdf-file').val('');
         });
 
+        function postParsed(parsed, confirmWrite) {
+            var fileInput = $('#pdf-file')[0];
+            var formData = new FormData();
+            formData.append('parsed', parsed);
+            if (confirmWrite) {
+                formData.append('confirm', '1');
+                // 现值与本次不同的目标位默认不写；勾了才允许覆盖
+                if ($('#allow-overwrite').prop('checked')) {
+                    formData.append('overwrite', '1');
+                }
+            }
+            if (fileInput && fileInput.files && fileInput.files.length) {
+                formData.append('pdf_file', fileInput.files[0]);
+            }
+            if (authenticator) {
+                formData.append('_authenticator', authenticator);
+            }
+            return $.ajax({
+                url: writeUrl,
+                method: 'POST',
+                data: formData,
+                processData: false,
+                contentType: false,
+                dataType: 'json'
+            });
+        }
+
+        function logReportDiff(details) {
+            log('WorkSheet: ' + (details.worksheet_id || '?') +
+                ' (' + (details.worksheet_title || '') + ')', 'info');
+            $.each(details.diff || [], function(_, row) {
+                var status = String(row.status || '');
+                var text = (row.analysis_keyword || '?') + '.' +
+                    (row.interim_keyword || '?') +
+                    '  [' + status + ']  current=' + (row.current || '(empty)') +
+                    '  new=' + (row.next || '');
+                if (status === 'DIFF' && row.same_ignoring_spaces) {
+                    text += '   (formatting only)';
+                }
+                if (row.hint) {
+                    text += '   hint=' + row.hint;
+                }
+                var type = 'info';
+                if (status === 'MATCH' || status === 'WRITTEN') {
+                    type = 'success';
+                } else if (status.indexOf('MISSING') === 0 ||
+                           status === 'WRITE_ERROR') {
+                    type = 'error';
+                }
+                log(text, type);
+            });
+            $.each(details.warnings || [], function(_, item) {
+                log('warn: ' + item, 'info');
+            });
+        }
+
         $('#btn-write').click(function() {
             var parsed = $('#parsed-text').val();
             if (!parsed) {
@@ -256,42 +326,81 @@
             }
 
             log('Writing parsed JSON into system...', 'info');
-            var fileInput = $('#pdf-file')[0];
-            var formData = new FormData();
-            formData.append('parsed', parsed);
-            if (fileInput && fileInput.files && fileInput.files.length) {
-                formData.append('pdf_file', fileInput.files[0]);
-            }
-            if (authenticator) {
-                formData.append('_authenticator', authenticator);
-            }
-            $.ajax({
-                url: writeUrl,
-                method: 'POST',
-                data: formData,
-                processData: false,
-                contentType: false,
-                dataType: 'json',
-                success: function(resp) {
-                    var details = resp.details || {};
-                    var samples = details.samples || [];
-                    if (resp.success) {
-                        log(resp.message || 'Parsed JSON written successfully', 'success');
-                        $.each(samples, function(_, sample) {
-                            logSampleDetails(sample);
-                        });
-                    } else {
-                        log(resp.message || 'Write to system failed', 'error');
-                        $.each(samples, function(_, sample) {
-                            logSampleDetails(sample);
-                        });
-                    }
-                },
-                error: function() {
-                    log('Write to system request failed', 'error');
+            postParsed(parsed, false).done(function(resp) {
+                var details = resp.details || {};
+                log('response mode=' + (details.mode || '(none)') +
+                    ', success=' + resp.success, 'info');
+                try {
+                    runWriteBranch(parsed, resp, details);
+                } catch (err) {
+                    log('frontend handler error: ' + err, 'error');
+                    log('details=' + JSON.stringify(details).slice(0, 1500), 'info');
                 }
+            }).fail(function(xhr) {
+                log('Write request failed (HTTP ' + (xhr && xhr.status) +
+                    ') ' + ((xhr && xhr.responseText) || '').slice(0, 300),
+                    'error');
             });
         });
+
+        function runWriteBranch(parsed, resp, details) {
+            var rows = details.diff || [];
+            var samples = details.samples || [];
+            var rendered = false;
+
+            // 报告形态但无法落位（缺 WorkSheet ID / 无目标位等）
+            if (details.mode === 'plan') {
+                log(resp.message || 'report import could not be planned', 'error');
+                logReportDiff(details);
+                rendered = true;
+            } else if (details.mode === 'dry-run') {
+                // 报告形态：第一次只 dry-run，确认后再写
+                log(resp.message || 'dry-run', resp.success ? 'info' : 'error');
+                logReportDiff(details);
+                rendered = true;
+                var skipped = details.skipped_overwrite || 0;
+                if (!details.writable && !skipped) {
+                    return;
+                }
+                var prompt = 'dry-run: ' + (details.writable || 0) +
+                    ' target(s) writable';
+                if (skipped) {
+                    prompt += ', ' + skipped +
+                        ' skipped because the current value differs' +
+                        ' (tick "Allow overwrite" to include them)';
+                }
+                if (!window.confirm(prompt + '. Write now?')) {
+                    log('Cancelled. Nothing was written.', 'info');
+                    return;
+                }
+                log('Confirmed. Writing...', 'info');
+                postParsed(parsed, true).done(function(resp2) {
+                    var details2 = (resp2 && resp2.details) || {};
+                    log(resp2.message || '', resp2.success ? 'success' : 'error');
+                    logReportDiff(details2);
+                }).fail(function(xhr) {
+                    log('Write request failed (HTTP ' + (xhr && xhr.status) + ')',
+                        'error');
+                });
+            } else {
+                // 通道 A（samples 形态）或其它
+                if (resp.success) {
+                    log(resp.message || 'Parsed JSON written successfully', 'success');
+                } else {
+                    log(resp.message || 'Write to system failed', 'error');
+                }
+                $.each(samples, function(_, sample) {
+                    logSampleDetails(sample);
+                });
+                rendered = !!samples.length;
+            }
+
+            // ★ 兜底：什么都没渲染出来时，直接把原始响应打出来（绝不静默）
+            if (!rendered && !rows.length) {
+                log('no detail rendered, raw response: ' +
+                    JSON.stringify(resp).slice(0, 1500), 'error');
+            }
+        }
     })(jQuery);
 /* ]]> */
     </script>

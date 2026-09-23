@@ -188,8 +188,12 @@ LIMS 点「开始采集」只是标记会话监听并通知采集端连接仪器
 
 ### 4. 读数解析与写回
 
-- 解析脚本：模板字段 `script_file` 上传 `.js` 脚本，入站数据经 JS 解析出
+- 解析脚本：模板字段 `script_file` 上传脚本，入站数据经脚本解析出
   `parsed{value,unit}`
+  - `.js`：node 子进程执行 `parse(text)`，入参是**抽取出的文本**
+  - `.py`：LIMS 进程内执行 `parse(payload)`，入参是**带坐标的抽取结果**
+    （`services/pdf_text.extract_pdf()` 产物，PDF 报告用这条；
+    见 `services/script_runner.py` 与现成脚本 `parsers/empower_report_parser.py`）
 - 目标位：由 interim 标记决定 —— `role=name`（名称，单值）、
   `role=weight`（重量，可多个；`result_type=list` 时支持数组多行），
   target_key 格式 `{analysis_uid}:{keyword}[:{seq}]`
@@ -197,6 +201,31 @@ LIMS 点「开始采集」只是标记会话监听并通知采集端连接仪器
   （`services/acquisition.py::parse_and_write_report` 复用同一套逻辑）
 - 写回：读数分配到目标位后写入 Worksheet 的 Interim Field；支持
   `add_target_row` / `remove_target_row` 增删数组行
+- **报告导入落位**（Empower PDF → 目标位）：目标位配置**在
+  `/lims/setup/keyword_glossary` 页面上维护**（`maitux.glossary` 的
+  `acq_*` 十二列：报告导入目标位 / 来源 SampleName / 取值规则 / 写法 / 期望长度 /
+  第 N 针 / 取前 N 峰 / 目标 RT / 峰序号清单 / 行键列 / 行槽位 / 排除 RT），
+  由 `services/report_targets.py` 读取并校验、`services/report_import.py` 落位：
+  - **先 dry-run 出 diff**（`confirm` 缺省只比对、不写），确认后才带 `confirm=1` 写入；
+  - 页面没勾选任何行 → **不落位**并明确告警（代码里没有内嵌目标位，页面是唯一权威）；
+  - 配置非法（取值规则不在受控词表等）→ **点名跳过**该行，不静默；
+  - 报告给出的长度与「期望长度」不符 → 跳过该目标位（防"单针报告覆盖完整数组"）；
+  - 数值写法按页面「写法」列格式化（如分离度必须保留 1 位小数，`"5.0"` 不能写成 `"5"`）；
+  - **名称类取值**（`peaks.name`，唯一一条字符串规则）：取该针全部峰的峰名、按峰序；
+    报告里 Peak Name **空白**（未命名杂质）→ 落位写「未知杂质」
+    （`report_targets.UNKNOWN_IMPURITY`），且**必须占位**、不能跳过 ——
+    峰级数组按峰序一一对应，少一个值就会让槽位长度校验拒绝整段、
+    或让「期望长度」闸门整行跳过；
+  - **峰级"多列同行"字段（`imp_chrom` / `imp_repeat` / `imp_stability_rt` /
+    `imp_degradation` / `imp_qc_stability`）按槽位落位**：「来源 SampleName」与
+    「行槽位」是两个**按位置一一对应的等长清单**（一行配置写多个槽位），
+    落位时用「行键列」（`g_sample_id` / `imp_deg_id` / `imp_qc_point`）定出该槽位的
+    **连续块**再原位替换；块长不符 / 槽位不存在 / 清单不等长 → **点名跳过**
+    （绝不会按顺序兜底），一个槽位都没落上时状态为 `SLOT_SKIPPED`（**不报 `MATCH`**）；
+  - 「排除 RT」用于复现**站点自己的报告阈值口径**（同一针在不同分析里站点存的峰表
+    不同，如 `imp_chrom` 少 RT 47.48、`imp_degradation` 少 RT 10.12）。
+  M0 映射表（设计与验收依据）见 `doc/仪器采集/DCU-映射表.md`，
+  Step 3 的完整实测证据见 `doc/仪器采集/DCU-仪器采集-实施操作指引.md`「Step 3 实测记录」。
 
 ### 5. HTTP 转发（可选，模板级开关）
 
@@ -229,7 +258,7 @@ SENAITE 后台「仪器 → 解析模板」新建/编辑：
 | IP Address | 仪器 TCP 地址（天平地址 IP） | 采集中必填 |
 | 采集端接口地址 (Agent API URL) | 本地采集端 HTTP 地址，如 `http://192.168.1.5:8090`（与天平 IP/端口分离） | 远端模式必填 |
 | 采集端 Token | 采集端鉴权凭证，一个中转站一个 Token；多台仪器共用可填相同值 | 远端模式必填 |
-| Parser Script File | 解析脚本（.js），把原始行解析成 `{value, unit}` | 按需 |
+| Parser Script File | 解析脚本（`.js` / `.py`）：`.js` 走 node 子进程 `parse(text)`；`.py` 进程内 `parse(payload)`（带坐标，PDF 报告用） | 按需 |
 | Enable HTTP Forward | 是否把解析数据转发到第三方 HTTP 接口 | 否 |
 | Forward URL / Method / Headers / Timeout | 转发目标与参数 | 转发时填 |
 
