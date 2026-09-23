@@ -58,6 +58,9 @@ class SourceExperimentViewlet(ViewletBase):
             "project": self.project_title(),
             "experiment_url": self.experiment_url(),
             "sample_url": self.sample_url(),
+            "reg_compound_number": self._get("RegCompoundNumber"),
+            "reg_batch_number": self._get("RegBatchNumber"),
+            "reg_batch_url": self._get("RegBatchURL"),
         }
 
     def render(self):

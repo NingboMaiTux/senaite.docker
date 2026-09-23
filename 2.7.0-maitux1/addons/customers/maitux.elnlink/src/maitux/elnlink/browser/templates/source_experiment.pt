@@ -38,6 +38,17 @@
         <th class="text-muted pr-3" i18n:translate="">Project</th>
         <td tal:content="d/project">KRAS G12D Inhibitor Discovery</td>
       </tr>
+      <tr tal:condition="d/reg_batch_number">
+        <th class="text-muted pr-3" i18n:translate="">Registration</th>
+        <td>
+          <a tal:condition="d/reg_batch_url" tal:attributes="href d/reg_batch_url" target="_blank" rel="noopener"
+             tal:content="d/reg_batch_number">INC-00001234-B001</a>
+          <span tal:condition="not:d/reg_batch_url" tal:content="d/reg_batch_number">INC-00001234-B001</span>
+          <span class="text-muted" tal:condition="d/reg_compound_number">
+            (<span tal:replace="d/reg_compound_number">INC-00001234</span>)
+          </span>
+        </td>
+      </tr>
     </table>
   </div>
 </div>

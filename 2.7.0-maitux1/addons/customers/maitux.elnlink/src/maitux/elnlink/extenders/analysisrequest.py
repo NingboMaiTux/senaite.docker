@@ -30,6 +30,14 @@ ELN_FIELDS = (
     ("ELNDepartment", u"ELN Department"),
     ("ELNProjectCode", u"ELN Project Code"),
     ("ELNSampleURL", u"ELN Sample URL"),
+    # MaiRegistration V1.1 section 6: the registered compound / batch this
+    # sample tests — stable ids plus the numbers people read. MaiLIMS keeps
+    # the reference only; the registry stays the compound authority.
+    ("RegCompoundId", u"Registration Compound ID"),
+    ("RegCompoundNumber", u"Registration Number"),
+    ("RegBatchId", u"Registration Batch ID"),
+    ("RegBatchNumber", u"Registration Batch Number"),
+    ("RegBatchURL", u"Registration Batch URL"),
 )
 
 
