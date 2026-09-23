@@ -1,0 +1,36 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:genericsetup="http://namespaces.zope.org/genericsetup"
+    i18n_domain="maitux.worksheetfilter">
+
+  <!-- GenericSetup profiles. These must be registered from *this* package:
+  `directory` is resolved relative to the package the directive is read from,
+  so declaring them in profiles/configure.zcml would point the profile at
+  profiles/profiles/default, which does not exist. The profile would then
+  carry no import steps at all. -->
+  <genericsetup:registerProfile
+      name="default"
+      title="MAITUX Worksheet Creation Filter"
+      description="Makes the Worksheet Template restrict which analyses enter
+                   a newly created worksheet"
+      directory="profiles/default"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <genericsetup:registerProfile
+      name="uninstall"
+      title="MAITUX Worksheet Creation Filter (uninstall)"
+      description="Remove the MAITUX Worksheet creation filter"
+      directory="profiles/uninstall"
+      provides="Products.GenericSetup.interfaces.EXTENSION"
+      />
+
+  <!-- 显式 include：本包 ZCML 引用了 senaite.core 的权限，而 senaite.core 的
+       configure.zcml 不保证先于本包加载；缺这一行启动时会报
+       ComponentLookupError: (IPermission, 'senaite.core.permissions...')，整站起不来。
+       同目录的 maitux.worksheet / maitux.esignature 早就这么写了。 -->
+  <include package="senaite.core.permissions" />
+
+  <include package=".upgrades" />
+
+</configure>

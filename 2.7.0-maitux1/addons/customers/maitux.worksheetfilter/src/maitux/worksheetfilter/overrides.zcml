@@ -1,0 +1,27 @@
+<configure
+    xmlns="http://namespaces.zope.org/zope"
+    xmlns:browser="http://namespaces.zope.org/browser"
+    i18n_domain="maitux.worksheetfilter">
+
+  <!-- Override the stock "Create worksheet" modal.
+
+  senaite.core registers this page with for="*" and
+  layer="senaite.core.interfaces.ISenaiteCore" (browser/modals/configure.zcml).
+  Name, for, permission and layer must match exactly, and the registration
+  must live in overrides.zcml: a plain configure.zcml would be a
+  duplicate-registration conflict rather than an override.
+
+  The subclass changes only how the analyses to be added are selected; the
+  modal's template, the analyst/template dropdowns and the redirect after a
+  successful creation are all inherited, so they follow senaite.core as it
+  changes.
+  -->
+  <browser:page
+      name="create_worksheet_modal"
+      for="*"
+      class=".browser.views.WorksheetCreateFilterModal"
+      permission="senaite.core.permissions.EditWorksheet"
+      layer="senaite.core.interfaces.ISenaiteCore"
+      />
+
+</configure>
