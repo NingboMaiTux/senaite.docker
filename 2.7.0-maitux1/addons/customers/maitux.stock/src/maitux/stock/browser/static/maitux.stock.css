@@ -1,0 +1,31 @@
+/* MAITUX 库存批次：有效期提醒的行底色。
+ *
+ * 类名由 maitux.stock.expiryreminder 生成，追加到列表行的 state_class 上
+ * （见 browser/stockbatches.py 的 folderitem）：
+ *   row-expiry-reminder -> 已进入"到期前 N 天"窗口（黄）
+ *   row-expiry-expired  -> 已过期（红）
+ *
+ * 中文注释：这份样式**必须随 addon 发布**。历史上它被临时追加到
+ * senaite.core 的 senaite.core.css bundle 里，而 senaite.core 在
+ * docker 部署中是直接从 GitHub 上的 fork 构建的 —— addon 装了但样式
+ * 不在，行颜色会静默失效。现在由 viewlets/styling.py 注入本文件。
+ *
+ * 选择器需要 !important：senaite.app.listing 的表格斑马纹和状态色
+ * 都在我们之后加载，优先级相同的情况下会盖掉底色。
+ */
+.contentstable tr.row-expiry-reminder > td,
+.contentstable tr.row-expiry-reminder > th {
+  background-color: #fff3cd !important;
+}
+.contentstable tr.row-expiry-reminder > td:first-child,
+.contentstable tr.row-expiry-reminder > th:first-child {
+  box-shadow: inset 4px 0 0 #ffc107;
+}
+.contentstable tr.row-expiry-expired > td,
+.contentstable tr.row-expiry-expired > th {
+  background-color: #f8d7da !important;
+}
+.contentstable tr.row-expiry-expired > td:first-child,
+.contentstable tr.row-expiry-expired > th:first-child {
+  box-shadow: inset 4px 0 0 #dc3545;
+}

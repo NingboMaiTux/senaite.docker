@@ -8,8 +8,6 @@ _PATCHED = False
 _UNICODE_PATCHED = False
 
 
-# 中文注释：审计目录全文索引器在「被引用对象标题含中文」时的 UnicodeDecodeError
-# 修复（senaite.core 的 Py2 缺陷），详见函数文档。
 def patch_auditlog_searchable_text_unicode():
     """修复审计目录全文索引器在「被引用对象标题含中文」时的 UnicodeDecodeError。
 
@@ -67,9 +65,6 @@ def patch_auditlog_searchable_text_unicode():
                     "for unicode safety")
     except Exception:
         pass
-
-
-
 
 
 def patch_allowed_transitions_for_many():

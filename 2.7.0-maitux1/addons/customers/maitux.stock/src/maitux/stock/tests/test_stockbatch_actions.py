@@ -1,14 +1,33 @@
 # -*- coding: utf-8 -*-
-import importlib.util
 import os
 import sys
 import types
 import unittest
 
+class Namespace(object):
+    """Python 2.7 下替代 types.SimpleNamespace 的最小实现。"""
+
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+def load_module_from_path(file_path, name):
+    """按路径加载模块，兼容 Python 2.7（imp）与 3.x（importlib.util）。"""
+    try:
+        import importlib.util
+    except ImportError:
+        import imp
+        return imp.load_source(name, file_path)
+
+    spec = importlib.util.spec_from_file_location(name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 
 def load_stockbatchactions_module():
     """加载 stockbatchactions 模块，并替换外部依赖。"""
-    api_module = types.SimpleNamespace(
+    api_module = Namespace(
         safe_unicode=lambda value: u"" if value is None else u"{}".format(value),
         is_object=lambda obj: bool(obj) and getattr(obj, "is_object", True),
         is_uid=lambda value: bool(value),
@@ -35,14 +54,17 @@ def load_stockbatchactions_module():
         lambda batch, now=None: bool(getattr(batch, "is_due_for_expiry", False))
     )
     sys.modules["maitux"] = types.ModuleType("maitux")
-    sys.modules["maitux.stock"] = types.ModuleType("maitux.stock")
+    stock_module = types.ModuleType("maitux.stock")
+    # 中文注释：真环境里 `MessageFactory` 产出的是 zope.i18nmessageid.Message
+    # —— 它是 unicode 子类，文本就是 msgid，所以 `_(u"Destroy") == u"Destroy"`。
+    # 桩按同样的语义返回 msgid，测试里对标题文本的断言保持有效。
+    stock_module.stockMessageFactory = lambda msgid, **kwargs: msgid
+    sys.modules["maitux.stock"] = stock_module
     sys.modules["maitux.stock.stockbatchexpiry"] = expiry_module
 
     file_path = os.path.abspath(os.path.join(
         os.path.dirname(__file__), "..", "browser", "stockbatchactions.py"))
-    spec = importlib.util.spec_from_file_location("test_stockbatchactions_module", file_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module_from_path(file_path, "test_stockbatchactions_module")
     return module
 
 

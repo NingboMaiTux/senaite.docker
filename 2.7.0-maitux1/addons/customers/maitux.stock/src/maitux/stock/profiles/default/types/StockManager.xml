@@ -4,7 +4,7 @@
         xmlns:i18n="http://xml.zope.org/namespaces/i18n"
         purge="True">
 
-  <property name="title" i18n:translate="">Stockinventory</property>
+  <property name="title" i18n:translate="">Stock Inventory</property>
   <property name="description" i18n:translate="">Stock management</property>
 
   <property name="icon_expr">string:${portal_url}/++plone++senaite.core.static/assets/icons/setup.svg</property>
@@ -38,6 +38,7 @@
 
   <property name="behaviors">
     <element value="plone.app.dexterity.behaviors.metadata.IBasic"/>
+    <element value="bika.lims.interfaces.IMultiCatalogBehavior"/>
     <element value="plone.app.referenceablebehavior.referenceable.IReferenceable" />
   </property>
 

@@ -38,6 +38,8 @@ from decimal import Decimal
 from bika.lims import api
 from senaite.core.api import dtime
 
+from maitux.stock.i18n import translate_stock
+
 # ---------------------------------------------------------------- 常量
 
 STOCK_MANAGER_PORTAL_TYPE = "StockManager"
@@ -57,24 +59,43 @@ WORKSHEET_CATALOG_ID = "senaite_catalog_worksheet"
 # Worksheet 上由 maitux.worksheetfields 行为提供的库存批次字段名
 WORKSHEET_STOCK_BATCHES_FIELD = "stock_batches"
 
-# 操作类型 -> 中文标签（与 stockbatchview.py 保持一致，另补 create/expire）
+# 操作类型 -> 英文 msgid（渲染时按当前语言翻译，见 get_operation_label）
+#
+# 中文注释：除了规范值（consume/return/...），**历史/演示数据里存的是中文**
+# （例如 u"入库"、u"领用"），所以这里也把中文别名映射到同一批 msgid，
+# 否则英文站会在"操作类型"列里看到中文。
 OPERATION_LABELS = {
-    u"create": u"创建",
-    u"consume": u"领用",
-    u"expire": u"过期",
-    u"return": u"归还",
-    u"destroy": u"销毁",
-    u"split": u"分装",
-    u"adjust": u"调整",
-    u"stocktake": u"盘存",
+    u"create": u"Created",
+    u"consume": u"Consumed",
+    u"expire": u"Expired",
+    u"return": u"Returned",
+    u"destroy": u"Destroyed",
+    u"split": u"Split",
+    u"adjust": u"Adjusted",
+    u"stocktake": u"Stock take",
+    # 中文别名（历史数据）
+    u"入库": u"Created",
+    u"创建": u"Created",
+    u"领用": u"Consumed",
+    u"过期": u"Expired",
+    u"归还": u"Returned",
+    u"销毁": u"Destroyed",
+    u"分装": u"Split",
+    u"调整": u"Adjusted",
+    u"盘存": u"Stock take",
 }
 
-# 批次状态展示用中文标签
+# 批次状态 -> 英文 msgid（渲染时按当前语言翻译）
 STATUS_LABELS = {
-    u"active": u"可用",
-    u"expired": u"已过期",
-    u"inactive": u"停用",
-    u"destroyed": u"已销毁",
+    u"active": u"Available",
+    u"expired": u"Expired",
+    u"inactive": u"Inactive",
+    u"destroyed": u"Destroyed",
+    # 中文别名（历史数据）
+    u"可用": u"Available",
+    u"已过期": u"Expired",
+    u"停用": u"Inactive",
+    u"已销毁": u"Destroyed",
 }
 
 MAX_PAGE_SIZE = 500
@@ -82,15 +103,15 @@ DEFAULT_PAGE_SIZE = 50
 
 
 def get_operation_label(operation_type):
-    """返回操作类型的中文标签，未知类型原样返回。"""
+    """返回操作类型标签（按当前语言翻译），未知类型原样返回。"""
     value = api.safe_unicode(operation_type or u"").strip()
-    return OPERATION_LABELS.get(value, value)
+    return translate_stock(OPERATION_LABELS.get(value, value))
 
 
 def get_status_label(status):
-    """返回批次状态的中文标签，未知状态原样返回。"""
+    """返回批次状态标签（按当前语言翻译），未知状态原样返回。"""
     value = api.safe_unicode(status or u"").strip()
-    return STATUS_LABELS.get(value, value)
+    return translate_stock(STATUS_LABELS.get(value, value))
 
 
 # ---------------------------------------------------------------- 基础工具

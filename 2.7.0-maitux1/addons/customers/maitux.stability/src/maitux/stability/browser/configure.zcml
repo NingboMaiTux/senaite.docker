@@ -1,4 +1,4 @@
-﻿<configure
+<configure
     xmlns="http://namespaces.zope.org/zope"
     xmlns:browser="http://namespaces.zope.org/browser">
 
@@ -79,6 +79,14 @@
       for="maitux.stability.interfaces.IStabilityPlans"
       name="plan_template_defaults"
       class=".view.PlanTemplateDefaultsView"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"/>
+
+  <!-- 「复制计划」新建表单的预填数据（与 plan_template_defaults 同一套路） -->
+  <browser:page
+      for="maitux.stability.interfaces.IStabilityPlans"
+      name="plan_copy_defaults"
+      class=".view.PlanCopyDefaultsView"
       permission="zope2.View"
       layer="senaite.core.interfaces.ISenaiteCore"/>
 

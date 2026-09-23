@@ -11,5 +11,17 @@
       permission="zope2.View"
       />
 
+  <!-- 中文注释：addon 自带的样式表（有效期提醒的行底色）由这个 viewlet 注入
+       <head>。注册在 IHtmlHead 而不是批次列表视图上：批次表格可能出现在搜索、
+       看板等其它页面上，只挂列表视图会漏掉。 -->
+  <browser:viewlet
+      for="*"
+      name="maitux.stock.styling"
+      class="maitux.stock.browser.viewlets.styling.StockStylingViewlet"
+      manager="plone.app.layout.viewlets.interfaces.IHtmlHead"
+      template="templates/stock_styling.pt"
+      permission="zope2.View"
+      />
+
 </configure>
 

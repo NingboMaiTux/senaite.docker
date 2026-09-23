@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from decimal import Decimal
 
+from maitux.stock import stockMessageFactory as _
 from bika.lims.interfaces import IDeactivable
 from plone.autoform import directives
 from plone.supermodel import model
@@ -15,7 +16,6 @@ from z3c.form.widget import FieldWidget
 from zope import schema
 from zope.interface import implementer
 
-from maitux.stock import _
 from maitux.stock.interfaces import IStock
 from maitux.stock.z3cform.widgets.datetimeseconds import DatetimeSecondsWidget
 
@@ -124,10 +124,47 @@ class IStockSchema(model.Schema):
         default=Decimal("0.00"),
     )
 
+    # 中文注释：以下字段的文案都走**本包域**（`_` = stockMessageFactory）——
+    # 编辑表单的字段标题/描述是按 schema 里的 Message 自带域去查目录的，
+    # 用 bikaMessageFactory（bika.lims 域）查不到本包目录，中文站会显示英文。
     directives.widget("expiry_date", StockExpiryDateWidgetFactory)
     expiry_date = DatetimeField(
-        title=_(u"Expiry Date"),
+        title=_(u"Batch Default Expiry Date"),
+        description=_(
+            u"Default expiry date proposed when creating a new batch of this "
+            u"stock. It is only a convenience default: the expiry date is "
+            u"stored per batch and the batch value always wins (expiry "
+            u"reminders and usage reports read the batch expiry)."
+        ),
         required=False,
+    )
+
+    # 中文注释：到期提醒天数（配置在物料上，作用于该物料的所有批次）。
+    # 批次列表里：已过期 -> 红色行；进入"到期前 N 天"窗口 -> 黄色行。
+    # 0 = 关闭提醒（只标已过期）。判定与着色见 maitux/stock/expiryreminder.py。
+    expiry_reminder_days = schema.Int(
+        title=_(u"Expiry Reminder (days before expiry)"),
+        description=_(
+            u"Number of days before a batch expiry date at which the stock "
+            u"batch listing starts highlighting the row in yellow. Expired "
+            u"batches are always highlighted in red. Use 0 to disable the "
+            u"reminder."
+        ),
+        required=False,
+        default=30,
+        min=0,
+        max=3650,
+    )
+
+    consume_requires_countersign = schema.Bool(
+        title=_(u"Consume Requires Two-Person E-Signature"),
+        description=_(
+            u"When enabled, consuming any batch of this stock requires two "
+            u"different operators to sign electronically on the same page "
+            u"before the stock is deducted."
+        ),
+        required=False,
+        default=False,
     )
 
 

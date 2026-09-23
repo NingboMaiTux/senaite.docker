@@ -12,7 +12,7 @@
                            locations python:view.get_locations();
                            errors python:request.get('split_errors', [])">
       <div class="mb-3">
-        <h1 i18n:translate="">Split Stock Batch</h1>
+        <h1 i18n:translate="">Split Stock Batches</h1>
       </div>
 
       <tal:block tal:condition="python:not src">

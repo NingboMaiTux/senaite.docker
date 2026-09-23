@@ -2,12 +2,12 @@
 import collections
 
 from bika.lims import api
+from maitux.stock import stockMessageFactory as _
 from bika.lims.utils import get_link
 from senaite.app.listing import ListingView
 from senaite.core.api import dtime
 from senaite.core.i18n import translate
-
-from maitux.stock import _
+from maitux.stock.i18n import translate_stock
 
 
 class StockPurchaseOrdersView(ListingView):
@@ -26,34 +26,31 @@ class StockPurchaseOrdersView(ListingView):
         }
 
         self.context_actions = {
-            _(u"listing_purchaseorders_action_add", default=u"Add"): {
+            _(u"Add"): {
                 "url": "++add++StockPurchaseOrder",
                 "permission": "cmf.AddPortalContent",
                 "icon": "senaite_theme/icon/plus",
             }
         }
 
-        self.title = translate(_(
-            u"listing_purchaseorders_title",
-            default=u"Purchase Orders"
-        ))
+        self.title = translate_stock(u"Purchase Orders")
         self.show_select_column = True
 
         self.columns = collections.OrderedDict((
             ("purchase_order_number", {
-                "title": _(u"listing_purchaseorders_column_number", default=u"Order No."),
+                "title": _(u"Order No."),
                 "toggle": True,
             }),
             ("purchaser", {
-                "title": _(u"listing_purchaseorders_column_purchaser", default=u"Purchaser"),
+                "title": _(u"Purchaser"),
                 "toggle": True,
             }),
             ("order_date", {
-                "title": _(u"listing_purchaseorders_column_date", default=u"Order Date"),
+                "title": _(u"Order Date"),
                 "toggle": True,
             }),
             ("status", {
-                "title": _(u"listing_purchaseorders_column_status", default=u"Status"),
+                "title": _(u"Status"),
                 "toggle": True,
             }),
         ))
@@ -61,7 +58,7 @@ class StockPurchaseOrdersView(ListingView):
         self.review_states = [
             {
                 "id": "default",
-                "title": _(u"listing_state_all", default=u"All"),
+                "title": _(u"All"),
                 "contentFilter": {},
                 "columns": self.columns.keys(),
             },

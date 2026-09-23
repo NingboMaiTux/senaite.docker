@@ -2,12 +2,12 @@
 import collections
 
 from bika.lims import api
+from maitux.stock import stockMessageFactory as _
 from bika.lims.utils import get_link
 from senaite.app.listing import ListingView
 from senaite.core.catalog import SETUP_CATALOG
 from senaite.core.i18n import translate
-
-from maitux.stock import _
+from maitux.stock.i18n import translate_stock
 
 
 class StockUnitsView(ListingView):
@@ -26,26 +26,23 @@ class StockUnitsView(ListingView):
         }
 
         self.context_actions = {
-            _(u"listing_stockunits_action_add", default=u"Add"): {
+            _(u"Add"): {
                 "url": "++add++StockUnit",
                 "permission": "cmf.AddPortalContent",
                 "icon": "senaite_theme/icon/plus",
             }
         }
 
-        self.title = translate(_(
-            u"listing_stockunits_title",
-            default=u"Stock Units"
-        ))
+        self.title = translate_stock(u"Units")
         self.show_select_column = True
 
         self.columns = collections.OrderedDict((
             ("Title", {
-                "title": _(u"listing_stockunits_column_title", default=u"Title"),
+                "title": _(u"Title"),
                 "index": "sortable_title",
             }),
             ("Description", {
-                "title": _(u"listing_stockunits_column_description", default=u"Description"),
+                "title": _(u"Description"),
                 "toggle": True,
             }),
         ))
@@ -53,17 +50,17 @@ class StockUnitsView(ListingView):
         self.review_states = [
             {
                 "id": "default",
-                "title": _(u"listing_state_active", default=u"Active"),
+                "title": _(u"Active"),
                 "contentFilter": {"is_active": True},
                 "columns": self.columns.keys(),
             }, {
                 "id": "inactive",
-                "title": _(u"listing_state_inactive", default=u"Inactive"),
+                "title": _(u"Inactive"),
                 "contentFilter": {"is_active": False},
                 "columns": self.columns.keys(),
             }, {
                 "id": "all",
-                "title": _(u"listing_state_all", default=u"All"),
+                "title": _(u"All"),
                 "contentFilter": {},
                 "columns": self.columns.keys(),
             },

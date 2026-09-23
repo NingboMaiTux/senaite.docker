@@ -3,6 +3,17 @@
     xmlns:browser="http://namespaces.zope.org/browser"
     i18n_domain="maitux.stock">
 
+  <!-- 中文注释：addon 自带的静态资源目录。
+       访问地址：<portal>/++resource++maitux.stock/<文件名>
+       目前只放有效期提醒的行底色样式，由 viewlets/styling.py 注入 <head>。
+       用 browser:resourceDirectory（++resource++）而不是 plone:static：
+       后者要配合 plone.resource 注册表，而 SENAITE 的模板只渲染它自己那份
+       bundle 列表，addon 新注册的 bundle 不会出现在页面上。 -->
+  <browser:resourceDirectory
+      name="maitux.stock"
+      directory="static"
+      />
+
   <!-- Folder Listing View -->
   <browser:page
       for="*"
@@ -103,6 +114,29 @@
       name="stockbatch_consume"
       class="maitux.stock.browser.stockbatchconsume.StockBatchConsumeView"
       template="stockbatchconsume.pt"
+      permission="zope2.View"
+      />
+
+  <!-- 领用申请单：审批队列 + 详情页 -->
+  <browser:page
+      for="maitux.stock.interfaces.IStockUsageRequests"
+      name="stock_usage_requests"
+      class="maitux.stock.browser.stockusagerequest.StockUsageRequestsView"
+      permission="zope2.View"
+      />
+
+  <browser:page
+      for="maitux.stock.interfaces.IStockUsageRequests"
+      name="folder_view"
+      class="maitux.stock.browser.stockusagerequest.StockUsageRequestsView"
+      permission="zope2.View"
+      />
+
+  <browser:page
+      for="maitux.stock.interfaces.IStockUsageRequest"
+      name="view"
+      class="maitux.stock.browser.stockusagerequest.StockUsageRequestView"
+      template="stockusagerequest_view.pt"
       permission="zope2.View"
       />
 
