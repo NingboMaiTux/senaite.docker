@@ -600,7 +600,9 @@ def test_dedup_readme(p, r):
     text = open(readme, "rb").read().decode("utf-8")
     for name in ("DISTINCT_SEQlist", "GROUP_REPORT_TOPlist", "DISTINCT_RSD",
                  "DISTINCT_RANGE", "DISTINCT_MAX", "DISTINCT_MIN",
-                 "DISTINCT_AVG", "DISTINCT_COUNT", "LOOKUP2"):
+                 "DISTINCT_AVG", "DISTINCT_COUNT", "LOOKUP2",
+                 # 1.17.0 (修约位数随值传递 S4 / S5)
+                 "GROUP_AVG_TOPlist", "EARLIEST_TIME"):
         r.check("README documents %s" % name, name in text, True)
     r.check("README 写明序号列是用来数个数的",
             u"有几个" in text or u"个数" in text, True)

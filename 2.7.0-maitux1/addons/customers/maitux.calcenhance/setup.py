@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from setuptools import setup, find_packages
 
-version = "1.16.0"
+version = "1.17.0"
 
 setup(
     name="maitux.calcenhance",
