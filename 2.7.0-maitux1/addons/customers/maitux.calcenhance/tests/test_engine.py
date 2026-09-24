@@ -305,8 +305,11 @@ def test_count_values_rows(p, r):
 #                     _MIN / _AVG / _COUNT on the array table, LOOKUP2 on
 #                     BOTH -- the scalar table therefore goes 31 -> 32,
 #                     the first time it has moved since the rounding hoist)
-EXPECTED_SAFE_ENTRIES = 97
-EXPECTED_SCALAR_ENTRIES = 32
+#              -> 98 (修约位数随值传递 S1: _Fixed on BOTH tables -- not a
+#                     formula function, it is what repr(_Fixed) spells, so
+#                     an inlined rounded column evals back; scalar 32 -> 33)
+EXPECTED_SAFE_ENTRIES = 98
+EXPECTED_SCALAR_ENTRIES = 33
 
 
 def test_registry_totals(p, r):
@@ -2153,6 +2156,172 @@ def test_xagg_coalesce_no_new_code(p, r):
                 name in safe, True)
 
 
+def test_fixed_s1(p, r):
+    """修约位数随值传递 S1: the rounding family returns a _Fixed.
+
+    Criteria ①-⑨ of the S1 slice in
+    Docs/Cal增加/maitux.calcenhance-修约位数随值传递-Backlog.md; the ②.2 /
+    ②.3 tables are 修约与显示口径.md §2.2 / §2.3 cell for cell.
+    """
+    import copy
+    import json
+    import pickle
+
+    F = p._Fixed
+
+    # ① the three text spellings agree
+    for value, digits, want in ((1609.0, 0, "1609"), (3.1, 3, "3.100")):
+        x = F(value, digits)
+        r.check("① str(_Fixed(%r,%d))" % (value, digits), str(x), want)
+        r.check("① unicode(_Fixed(%r,%d))" % (value, digits),
+                unicode(x), unicode(want))
+        r.check("① u'%%s' %% _Fixed(%r,%d)" % (value, digits),
+                u"%s" % x, unicode(want))
+
+    # ② still a float, never text -- the array engine classifies on this
+    x = F(3.1, 3)
+    r.check("② isinstance float", isinstance(x, float), True)
+    r.check("② not basestring", isinstance(x, (str, unicode)), False)
+
+    # ③ arithmetic gives a PLAIN float: the places do not spread
+    r.check("③ _Fixed / 2 is float", type(x / 2) is float, True)
+    r.check("③ _Fixed * 100 is float", type(x * 100) is float, True)
+    r.check("③ _Fixed + _Fixed is float", type(x + x) is float, True)
+
+    # ④ numeric comparison and ordering
+    r.check("④ 3.100 > 5.0 is False", x > 5.0, False)
+    ordered = sorted([F(10.0, 1), F(9.0, 1)])
+    r.check("④ sorted numerically", [float(v) for v in ordered], [9.0, 10.0])
+
+    # ⑤ deepcopy / pickle round trips keep digits and do not raise
+    for label, dup in (("deepcopy", lambda v: copy.deepcopy(v)),
+                       ("pickle", lambda v: pickle.loads(pickle.dumps(v))),
+                       ("pickle-2", lambda v: pickle.loads(
+                           pickle.dumps(v, 2)))):
+        try:
+            y = dup(x)
+            r.check("⑤ %s keeps type" % label, type(y) is F, True)
+            r.check("⑤ %s keeps digits" % label, y.digits, 3)
+            r.check("⑤ %s keeps text" % label, str(y), "3.100")
+        except Exception as err:
+            r.check("⑤ %s raised" % label, repr(err), None)
+    r.check("⑤ deepcopy of an interim dict holding one",
+            str(copy.deepcopy({"value": [x]})["value"][0]), "3.100")
+
+    # ⑥ 口径 §2.2: digits=0 never shows ".0"
+    half_up, half_even = p._round_half_up, p._round_half_even
+    table_0 = [
+        (1609, "1609", "1609"), (1609.0, "1609", "1609"),
+        (u"1609", "1609", "1609"), (1609.4, "1609", "1609"),
+        (1609.5, "1610", "1610"), (2.5, "3", "2"), (3.5, "4", "4"),
+    ]
+    for value, want_up, want_even in table_0:
+        r.check("⑥ ROUND(%r,0)" % (value,), str(half_up(value, 0)), want_up)
+        r.check("⑥ ROUND_EVEN(%r,0)" % (value,),
+                str(half_even(value, 0)), want_even)
+
+    # ⑦ 口径 §2.3: digits=3 keeps trailing zeros
+    table_3 = [
+        (3.1, "3.100"), (3.100, "3.100"), (u"3.100", "3.100"),
+        (3.0, "3.000"), (0.04, "0.040"),
+    ]
+    for value, want in table_3:
+        r.check("⑦ ROUND(%r,3)" % (value,), str(half_up(value, 3)), want)
+        r.check("⑦ ROUND_EVEN(%r,3)" % (value,),
+                str(half_even(value, 3)), want)
+    r.check("⑦ ROUND_UP(1.601,1)", str(p._round_up(1.601, 1)), "1.7")
+    r.check("⑦ ROUND_DOWN(1.69,2)", str(p._round_down(1.69, 2)), "1.69")
+    r.check("⑦ ROUND_DOWN(1.6,2)", str(p._round_down(1.6, 2)), "1.60")
+
+    # ⑧ the placeholder is not wrapped
+    got = half_even(u"---", 3)
+    r.check("⑧ ROUND_EVEN('---',3) is the placeholder", got, u"---")
+    r.check("⑧ ... and not a _Fixed", isinstance(got, F), False)
+    r.check("⑧ list maps element-wise",
+            [str(v) for v in half_even([3.1, u"---"], 3)],
+            ["3.100", "---"])
+
+    # ⑨ S1 must not change array storage: json still writes the float
+    r.check("⑨ json.dumps unchanged", json.dumps([F(1609.0, 0)]), "[1609.0]")
+
+    # repr() must round-trip through the array engine's eval, and must not
+    # be an int literal (Py2 `1609/2` would be integer division).
+    back = eval(repr([F(1609.0, 0), F(3.1, 3)]), {"_Fixed": F})
+    r.check("repr round-trips digits", [str(v) for v in back],
+            ["1609", "3.100"])
+    r.check("repr is not an int literal", eval(repr(F(1609.0, 0)),
+                                               {"_Fixed": F}) / 2, 804.5)
+
+    # Negative digits round to tens but still print as an integer
+    r.check("ROUND(1609,-1)", str(half_up(1609, -1)), "1610")
+
+
+def test_fixed_s1_scalar_engine(p, r):
+    """S1 ⑩ (rewritten): the SCALAR engine stores the fixed-point text.
+
+    "Scalar is free" (Backlog S1): _stringify_result ends in str(result),
+    and str(_Fixed) is already the fixed-point text.  lims-dev has no
+    scalar ROUND field with digits != 1 (42 Calculations checked on
+    2026-09-24), so this is where the claim is actually observed.
+    """
+    install_engine_stubs()
+    _, analyses = build_sample([{
+        "as_id": "AS1", "service_kw": "s1scalar",
+        "fields": [
+            {"keyword": "x", "result_type": "", "value": u"1609.4"},
+            {"keyword": "y", "result_type": "", "value": u"3.1"},
+            {"keyword": "r0", "result_type": "calculated",
+             "formula": u"ROUND_EVEN([x], 0)"},
+            {"keyword": "r3", "result_type": "calculated",
+             "formula": u"ROUND_EVEN([y], 3)"},
+            {"keyword": "half", "result_type": "calculated",
+             "formula": u"[r3] / 2"},
+        ]}])
+    out = evaluate(p, analyses, ("AS1",))
+    r.check("⑩ scalar ROUND_EVEN(1609.4,0) stored", out.get("AS1.r0"),
+            "1609")
+    r.check("⑩ scalar ROUND_EVEN(3.1,3) stored", out.get("AS1.r3"),
+            "3.100")
+    # read back as a plain float: arithmetic on it is ordinary
+    r.check("⑩ downstream of a rounded scalar is ordinary",
+            out.get("AS1.half"), "1.55")
+
+
+def test_fixed_s1_through_the_engine(p, r):
+    """S1: a rounded column feeding another ARRAY formula still evaluates.
+
+    The array path inlines columns with repr(), so _Fixed has to be
+    resolvable in _SAFE or the downstream column becomes "---".
+    """
+    import json
+
+    install_engine_stubs()
+    _, analyses = build_sample([{
+        "as_id": "AS1", "service_kw": "s1fixed",
+        "fields": [
+            {"keyword": "g_area", "result_type": "list",
+             "value": json.dumps([u"100.04", u"200.06", u"300"])},
+            {"keyword": "g_grp", "result_type": "list",
+             "value": json.dumps([u"A", u"A", u"B"])},
+            {"keyword": "rnd", "result_type": "calculatedlist",
+             "formula": u"ROUND_EVEN([g_area], 1)"},
+            {"keyword": "grp_sum", "result_type": "calculatedlist",
+             "formula": u"GROUP_SUMlist([rnd], [g_grp])"},
+        ]}])
+    out = evaluate(p, analyses, ("AS1",))
+    got = dict((k.split(".", 1)[1], json.loads(v))
+               for k, v in out.items() if v)
+    # S1 leaves array STORAGE alone (S2 changes it): the stored text is
+    # still the JSON floats it always was.
+    r.check("engine: S1 array storage unchanged", out.get("AS1.rnd"),
+            "[100.0, 200.1, 300.0]")
+    r.check("engine: rounded column stored",
+            [float(v) for v in got.get("rnd", [])], [100.0, 200.1, 300.0])
+    r.check("engine: downstream array formula not blanked",
+            [round(float(v), 6) for v in got.get("grp_sum", [])],
+            [300.1, 300.1, 300.0])
+
+
 def main():
     p = load_patches()
     print("IMPORT OK  (no Zope instance started)")
@@ -2182,6 +2351,9 @@ def main():
     test_s7_registration(p, r)
     test_round_up(p, r)
     test_round_down(p, r)
+    test_fixed_s1(p, r)
+    test_fixed_s1_scalar_engine(p, r)
+    test_fixed_s1_through_the_engine(p, r)
     test_baseline_bylist(p, r)
     test_baseline_registration(p, r)
     test_baseline_through_the_engine(p, r)

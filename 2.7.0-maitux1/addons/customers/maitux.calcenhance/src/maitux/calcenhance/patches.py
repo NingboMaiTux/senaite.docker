@@ -2280,6 +2280,68 @@ def _num_or_none(v):
         return None
 
 
+class _Fixed(float):
+    """A float that remembers how many decimals it was rounded to.
+
+    The rounding family used to end in `float(d)`: at that moment
+    Decimal('3.100') held both the value and the number of places, and
+    float() kept only the value.  Everything downstream -- `1609.0` where
+    ROUND(x, 0) was asked for, `3.1` where ROUND_EVEN(x, 3) was asked for --
+    followed from that one discard (修约与显示口径.md §2).
+
+    A float SUBCLASS, not a Decimal and not a string (需求与方案 §2.1):
+
+      - Decimal / float raises TypeError on Py2, so `[a]/[b]*100` would
+        break on every rounded input;
+      - a string compares wrongly: on Py2 '3.100' > 5.0 is always True and
+        sorted(['10.0', '9.0']) comes out reversed, so `ROUND(x,1) > limit`
+        would silently give the wrong answer;
+      - a float subclass is `isinstance(x, float)`, so arithmetic,
+        comparison, sorting and every numeric check keep working, and the
+        result of any arithmetic is a PLAIN float -- the places do not
+        spread.  A rounded value used in a further calculation gets its
+        places from the next ROUND, not from this one.
+
+    str() / unicode() / u"%s" give the fixed-point text ("1609", "3.100").
+    repr() deliberately does NOT: the array engine inlines whole columns
+    into the formula text with repr() and eval()s it, and a bare "1609"
+    there is an int literal -- `1609/2` would become Py2 integer division.
+    repr() therefore spells a constructor call that the array engine's
+    _SAFE resolves back into a _Fixed, and for a plain-float column the
+    inlined text is exactly what it was before.
+
+    __reduce__ / __getnewargs__ are not optional: with __slots__ and no
+    state hook, deepcopy and pickle both raise TypeError, and
+    safe_format_interim deep-copies interim fields -- that would be a 500
+    on save, not a display glitch (需求与方案 §4.2).
+    """
+    __slots__ = ("digits",)
+
+    # "%.*f" refuses very large precisions on Py2; nothing rounds to more
+    # than a handful of places, so this only has to keep __str__ total.
+    _MAX_DIGITS = 15
+
+    def __new__(cls, value, digits):
+        obj = float.__new__(cls, value)
+        obj.digits = min(max(int(digits), 0), cls._MAX_DIGITS)
+        return obj
+
+    def __str__(self):
+        return "%.*f" % (self.digits, self)
+
+    def __unicode__(self):
+        return unicode(self.__str__())
+
+    def __repr__(self):
+        return "_Fixed(%s, %d)" % (float.__repr__(self), self.digits)
+
+    def __reduce__(self):
+        return (_Fixed, (float(self), self.digits))
+
+    def __getnewargs__(self):
+        return (float(self), self.digits)
+
+
 def _dec_quantize(val, digits, rounding):
     """Quantize to `digits` decimals with an explicit rounding mode.
 
@@ -2314,7 +2376,7 @@ def _round_half_up(val, digits=0):
         return [_round_half_up(v, digits) for v in val]
     from decimal import ROUND_HALF_UP
     d = _dec_quantize(val, digits, ROUND_HALF_UP)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _round_half_even(val, digits=0):
@@ -2326,7 +2388,7 @@ def _round_half_even(val, digits=0):
         return [_round_half_even(v, digits) for v in val]
     from decimal import ROUND_HALF_EVEN
     d = _dec_quantize(val, digits, ROUND_HALF_EVEN)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _round_up(val, digits=0):
@@ -2358,7 +2420,7 @@ def _round_up(val, digits=0):
         return [_round_up(v, digits) for v in val]
     from decimal import ROUND_UP
     d = _dec_quantize(val, digits, ROUND_UP)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _round_down(val, digits=0):
@@ -2387,7 +2449,7 @@ def _round_down(val, digits=0):
         return [_round_down(v, digits) for v in val]
     from decimal import ROUND_DOWN
     d = _dec_quantize(val, digits, ROUND_DOWN)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _format_digits(val, digits=0):
@@ -5459,6 +5521,8 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
             "ROUND_UP": _round_up,
             "ROUND_DOWN": _round_down,
             "FORMAT": _format_digits,
+            # repr(_Fixed) spells this constructor; see _Fixed.
+            "_Fixed": _Fixed,
         }}
 
         # Step 4b: bind the remaining [keyword] references (averaged value_map)
@@ -8074,6 +8138,10 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "ROUND_UP": _round_up,
         "ROUND_DOWN": _round_down,
         "FORMAT": _format_digits,
+        # Columns are inlined with repr(), and repr(_Fixed) spells this
+        # constructor -- without it a rounded column feeding another
+        # array formula raises NameError and reads "---".  See _Fixed.
+        "_Fixed": _Fixed,
         "INDEX_BY": _index_by,
         # Named in _ARRAY_FN_RE explicitly: it returns a whole column, and
         # the name does not end in _ROWS, so nothing else would route it to
