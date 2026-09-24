@@ -642,23 +642,23 @@ def test_literal_lookup_sources_unchanged(p, r):
 def test_dependent_lookup_branch_wired(p, r):
     """S4: the conservative branch is actually in the dependency scan.
 
-    _dependent_sibling_analyses needs live Analysis objects, so it cannot be
-    called here; what can be checked is that it reads both predicates.  The
-    behavioural half -- edit the source, watch the downstream change -- is
-    S6, on a real Analysis Service.
+    The scan is _TreeIndex (built once per settle; it replaced the per-step
+    _dependent_sibling_analyses).  It needs live Analysis objects to do
+    anything useful, so what is checked here is that it reads both
+    predicates; the behavioural half is test_settle.py and, on a real
+    Analysis Service, S6.
     """
-    code = p._dependent_sibling_analyses.__code__
-    for name in ("_extract_lookup_sources", "_lookup_has_dynamic_source",
-                 "_is_cross_referenceable_source"):
+    code = p._TreeIndex.__init__.__code__
+    for name in ("_extract_lookup_sources", "_lookup_has_dynamic_source"):
         r.check("dependency scan calls %s" % name, name in code.co_names, True)
 
-    # The dynamic branch must be gated on this analysis being a possible
+    # The dynamic branch must be gated on a cross-referenceable change of the
     # source; ungated, every unrelated edit would drag dynamic-source
     # siblings through a recalculation.
-    src = open(p.__source_path__, "rb").read().decode("utf-8")
+    readers = p._TreeIndex.readers.__code__
     r.check("dynamic branch is gated",
-            u"may_be_dynamic_source\n" in src
-            or u"may_be_dynamic_source" in src, True)
+            "xref_changed" in readers.co_varnames
+            and "_dynamic" in readers.co_names, True)
 
 
 # Nine recovery values: mean 100.0, sample SD 1.3693064.
