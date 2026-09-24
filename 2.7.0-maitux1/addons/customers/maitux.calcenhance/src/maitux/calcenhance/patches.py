@@ -5274,6 +5274,104 @@ def _evaluate_interims_ordered(self):
         _eval_depth_local.in_driver = False
 
 
+# ==============================================================================
+# FUNCTION MANIFEST SELF-CHECK (functions.json, 1.18.0) — report, never block
+# ==============================================================================
+#
+# functions.json 登记了两张函数表（标量引擎 safe_globals / 列表引擎 _SAFE）
+# 里的每一个名字。宿主侧 calcfuncs.py --check 与 tests/test_function_manifest.py
+# 都是**文本解析** patches.py；这里是唯一拿**真表**比的一处：两个 _evaluate_*
+# 把表建好之后调一次，每进程每张表只比一次。
+#
+# 只报不拦：不一致打一条 ERROR（grep `function manifest mismatch`），一致打一条
+# INFO（`function manifest ok`），读不到清单打一条 WARN，自检自己崩了打
+# traceback —— 哪种情况都**原样返回**，
+# 调用方照常求值，任何计算结果都不受影响。
+#
+# 清单路径与 calcfuncs.py 同约定：CALCENHANCE_MANIFEST 覆盖，缺省是本文件同目录。
+
+_FM_NOT_FUNCTIONS = frozenset(["True", "False", "None"])
+_fm_lock = threading.Lock()
+_fm_state = {"loaded": False, "functions": None, "checked": set()}
+
+
+def _fm_names(names):
+    # Py2: json 读出来的键是 unicode，表里的键是 str —— 日志一律拼 utf-8 str。
+    return ", ".join(
+        n.encode("utf-8") if isinstance(n, unicode) else n
+        for n in sorted(names)) or "-"
+
+
+def _fm_logger():
+    try:
+        from bika.lims import logger
+        if logger is not None:
+            return logger
+    except ImportError:
+        pass
+    import logging
+    return logging.getLogger("maitux.calcenhance")
+
+
+def _fm_load(logger):
+    """Read functions.json once per process; None when it cannot be read."""
+    import os
+    path = os.environ.get("CALCENHANCE_MANIFEST") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "functions.json")
+    try:
+        with open(path, "rb") as f:
+            functions = json.load(f)["functions"]
+        if not isinstance(functions, dict):
+            raise ValueError("'functions' is not an object")
+        return functions
+    except Exception as err:
+        logger.warn(
+            "maitux: function manifest unreadable, self-check skipped "
+            "(calculation unaffected): %s: %s" % (
+                path, _fm_names([repr(err)])))
+        return None
+
+
+def _manifest_selfcheck(table, builtins):
+    """Compare a live eval table with functions.json, once per process.
+
+    table:    "scalar" (safe_globals) or "list" (_SAFE)
+    builtins: that table's "__builtins__" dict, fully built
+    """
+    if table in _fm_state["checked"]:
+        return
+    logger = _fm_logger()
+    try:
+        with _fm_lock:
+            if table in _fm_state["checked"]:
+                return
+            _fm_state["checked"].add(table)
+            if not _fm_state["loaded"]:
+                _fm_state["loaded"] = True
+                _fm_state["functions"] = _fm_load(logger)
+            functions = _fm_state["functions"]
+        if functions is None:
+            return
+        want = set(name for name, entry in functions.items()
+                   if table in (entry or {}).get("tables", ()))
+        have = set(builtins) - _FM_NOT_FUNCTIONS
+        if want != have:
+            logger.error(
+                "maitux: function manifest mismatch [%s table]: "
+                "in engine, not in functions.json: %s; "
+                "in functions.json, not in engine: %s" % (
+                    table, _fm_names(have - want), _fm_names(want - have)))
+        else:
+            # 一致也留一行：日志里「没有 mismatch」分不清是一致还是根本没比。
+            logger.info("maitux: function manifest ok [%s table]: %d names"
+                        % (table, len(have)))
+    except Exception:
+        import traceback
+        logger.error(
+            "maitux: function manifest self-check crashed [%s table] "
+            "(calculation unaffected): %s" % (table, traceback.format_exc()))
+
+
 def _evaluate_calculated_interims(self, only=None, chain=True):
     """Re-evaluate all Calculated-type interim fields in dependency order.
 
@@ -5639,6 +5737,7 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
             # repr(_Fixed) spells this constructor; see _Fixed.
             "_Fixed": _Fixed,
         }}
+        _manifest_selfcheck("scalar", safe_globals["__builtins__"])
 
         # Step 4b: bind the remaining [keyword] references (averaged value_map)
         expr, variables = _bind_formula_values(expr, _TOKEN_RE, value_map.get)
@@ -8461,6 +8560,7 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "INTERCEPT_CI_LOW_ROWS": _intercept_ci_low_rows,
         "INTERCEPT_CI_HIGH_ROWS": _intercept_ci_high_rows,
     }}
+    _manifest_selfcheck("list", _SAFE["__builtins__"])
 
     def _eval_expr(formula, values):
         """Evaluate formula with a flat value dict.
