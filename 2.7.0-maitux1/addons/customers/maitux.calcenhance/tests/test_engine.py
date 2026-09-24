@@ -308,7 +308,9 @@ def test_count_values_rows(p, r):
 #              -> 98 (修约位数随值传递 S1: _Fixed on BOTH tables -- not a
 #                     formula function, it is what repr(_Fixed) spells, so
 #                     an inlined rounded column evals back; scalar 32 -> 33)
-EXPECTED_SAFE_ENTRIES = 98
+#              -> 99 (S4: GROUP_AVG_TOPlist -- array table only, it is a
+#                     GROUP_*list; 有关物质 20260923 裁决 Q1 / §6-③)
+EXPECTED_SAFE_ENTRIES = 99
 EXPECTED_SCALAR_ENTRIES = 33
 
 

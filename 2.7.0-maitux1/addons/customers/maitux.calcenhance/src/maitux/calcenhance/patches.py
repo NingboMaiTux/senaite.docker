@@ -6442,6 +6442,64 @@ def _evaluate_calculatedlist_interims(self, only=None):
             out.append(_PLACEHOLDER if chosen is None else chosen[1])
         return out
 
+    def _group_avg_toplist(values, reports, *key_arrays):
+        """同组只取**最高档那几针**求平均，广播到该组每一行。
+
+            GROUP_AVG_TOPlist([imp_pct_num], [imp_report], [imp_pct_group])
+            GROUP_AVG_TOPlist([imp_pct_num], [imp_report],
+                              [imp_name], [imp_pct_group])
+
+        平均单杂的口径（有关物质 20260923 裁决 Q1 勾 A）：同一个杂质的几针里，
+        有报告值 ≥报告限的 → 只平均这几针；否则有 ≥积分限（「＜x%」）的 →
+        只平均这几针；全是 ND → 全部针参与。平均的是 `values`（未修约的检测
+        杂质原值），平均完再由外层 ROUND 修约。
+
+            报告值  0.06 / 0.05 / ＜0.05% / ＜0.05% / ND / ND
+            → 只平均前两针的检测杂质
+
+        **分档与 GROUP_REPORT_TOPlist 是同一份**：档次来自 _report_rank，组键
+        来自 _distinct_first_rows —— 「哪一档最高」与报告值那一列取出来的是
+        同一档，两列不可能各说各的。边界 `≥` 不在这里判：报告值那一列是
+        RESULT_STATUS 出的，等于报告限的那针在那里就已经是数字（第 3 档）。
+
+        GROUP_AVGlist 做不了这件事：它平均整组所有针，最高档之外的针把平均
+        拉低，而且拉低多少取决于 ND 针的检测杂质恰好是几 —— 算出一个看着
+        合理的错数。
+
+        - 一组里没有任何一针认得出档次（全空 / 全 '---'）→ 该组 '---'
+        - 选中的针里 `values` 一个数值都没有 → 该组 '---'（不是 0）
+        - 「全是 ND → 全部针参与」按字面：该组**每一行**都参与，包括报告值
+          缺失的那几行；它们的 `values` 若也不是数，照常被跳过
+
+        数组路径函数，与 GROUP_*list 一样**单独占一个字段**。
+        """
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        values = list(values)
+        count = len(values)
+        if not isinstance(reports, (list, tuple)):
+            reports = [reports] * count
+        reports = list(reports) + [None] * (count - len(reports))
+        row_keys, _ = _distinct_first_rows(key_arrays, count)
+
+        top = {}
+        for index, key in enumerate(row_keys):
+            band = _report_rank(reports[index])[0]
+            if band > top.get(key, 0):
+                top[key] = band
+        members = {}
+        for index, key in enumerate(row_keys):
+            band = top.get(key, 0)
+            if band == 0:
+                continue
+            if band == 1 or _report_rank(reports[index])[0] == band:
+                members.setdefault(key, []).append(values[index])
+        means = {}
+        for key, cells in members.items():
+            nums = _nums_only(cells)
+            means[key] = sum(nums) / len(nums) if nums else _PLACEHOLDER
+        return [means.get(key, _PLACEHOLDER) for key in row_keys]
+
     def _distinct_values(fn_label, values, key_array):
         """每个键只留一个数值，按首次出现顺序。
 
@@ -8189,6 +8247,8 @@ def _evaluate_calculatedlist_interims(self, only=None):
         # —— 直接对广播列求 RSD 会把离散度稀释，而且看不出来。
         "DISTINCT_SEQlist": _distinct_seqlist,
         "GROUP_REPORT_TOPlist": _group_report_toplist,
+        # Rides the GROUP_\w+ entry in _ARRAY_FN_RE; no regex change.
+        "GROUP_AVG_TOPlist": _group_avg_toplist,
         "DISTINCT_RSD": _distinct_rsd,
         "DISTINCT_RANGE": _distinct_range,
         "DISTINCT_MAX": _distinct_max,
