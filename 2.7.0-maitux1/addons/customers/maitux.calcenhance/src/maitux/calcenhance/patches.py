@@ -1249,8 +1249,14 @@ def _patch_set_interim_value():
             self.setInterimFields(interims)
             # --- End original save logic ---
 
-            # Re-evaluate every computed interim, in definition order
-            _evaluate_interims_ordered(self)
+            # The patched Analysis.setInterimFields evaluates this analysis
+            # and settles the sample tree by itself -- or, inside a listing
+            # save, defers both to the one settle at the end of the request.
+            # Evaluating again here would undo that deferral field by field,
+            # which is the per-field cost the batch exists to remove.  Only a
+            # class whose setInterimFields is not ours still needs it here.
+            if not getattr(self.setInterimFields, "_maitux_settles", False):
+                _evaluate_interims_ordered(self)
         finally:
             _fail_suppress_pop()
             _report_eval_failures(self)
@@ -1459,15 +1465,17 @@ def _patch_set_interim_fields():
     original = Analysis.__dict__["setInterimFields"]
 
     def patched_setInterimFields(self, interims):
-        # Snapshot current cross-referenceable field values, so we can detect
-        # changes and propagate LOOKUP re-evaluation to dependent siblings.
-        before = {}
-        try:
-            for _i in self.getInterimFields():
-                if _i.get("cross_referenceable"):
-                    before[_i.get("keyword")] = _i.get("value")
-        except Exception:
-            before = {}
+        # The evaluation engines store what they computed through this very
+        # method.  Such a write is part of an evaluation somebody else is
+        # driving -- the ordered driver, and above it the settle loop, which
+        # compares this analysis before and after and propagates from there
+        # -- so it only stores.  It used to propagate from right here, i.e.
+        # before the analysis had finished computing; see _settle.
+        nested = getattr(_eval_depth_local, "in_driver", False)
+
+        # What the other analyses can read off this one, before the write:
+        # the settle loop propagates only from what actually changed.
+        before = None if nested else _published_map(self)
 
         # Restore the stored value of locked interims.  This is the batch
         # write path and is also what the native Submit adapter feeds from the
@@ -1488,43 +1496,25 @@ def _patch_set_interim_fields():
         # 写入让已收集的兄弟数据过期（传播会在求值中途改写兄弟）。
         _ccr_cache_invalidate()
 
-        # Evaluate calculated interims, bounded against non-convergence
-        # (see _MAX_EVAL_DEPTH).
-        _depth = getattr(_eval_depth_local, "depth", 0)
-        if _depth >= _MAX_EVAL_DEPTH:
-            from bika.lims import logger as _depth_logger
-            _depth_logger.warn(
-                "maitux.calcenhance: interim evaluation did not converge "
-                "after %d passes on %s -- stopping.  A locked computed "
-                "interim whose stored value differs from the computed one "
-                "will do this." % (_depth, getattr(self, "id", "?")))
-        else:
-            _eval_depth_local.depth = _depth + 1
-            try:
-                _evaluate_interims_ordered(self)
-            finally:
-                _eval_depth_local.depth = _depth
+        if nested:
+            return
 
-        # If any cross-referenceable field actually changed, re-evaluate the
-        # sibling analyses whose LOOKUP() references this AS.
-        cross_ref_changed = False
-        for i in interims:
-            if not i.get("cross_referenceable"):
-                continue
-            if not _same_value(before.get(i.get("keyword")),
-                               i.get("value")):
-                cross_ref_changed = True
-                break
+        # Inside a listing save: store now, evaluate and propagate once at
+        # the end of the request (_apply_save_queue).
+        batch = _save_batch()
+        if batch is not None:
+            batch.note(self, before)
+            return
 
-        _local = _get_propagation_local()
-        is_top = getattr(_local, "visited", None) is None
+        # A write on its own: evaluate this analysis and bring everything
+        # that reads it, directly or not, to the fixed point.
         try:
-            if cross_ref_changed:
-                _propagate_lookup_recalc(self)
+            _settle([(self, before)])
         finally:
-            if is_top:
-                _finish_propagation()
-                _report_eval_failures(self)
+            _report_eval_failures(self)
+
+    # Read by patched_setInterimValue: this setter evaluates by itself.
+    patched_setInterimFields._maitux_settles = True
 
     setattr(Analysis, "setInterimFields", patched_setInterimFields)
     _s = __import__("sys")
@@ -1576,6 +1566,13 @@ def _patch_calculate_result():
             return False
 
     def patched_calculateResult(self, override=False, cascade=False):
+        # Inside a listing save the data manager calls this after every
+        # field, from interims that have not been evaluated yet.  The settle
+        # at the end of the save computes it once from settled ones
+        # (_apply_save_queue), so the per-field calls are skipped.
+        batch = _save_batch()
+        if batch is not None and batch.holds(self):
+            return False
         try:
             formula = self.getCalculationFormula() or ""
             if formula:
@@ -2030,14 +2027,17 @@ _T_95 = {
 }
 
 
-# Re-entrancy bound for the interim evaluation chain.  Evaluation calls
-# setInterimFields again whenever a value changed, which re-enters
-# evaluation; dependency chains settle in one or two extra passes.  A value
-# that can never be stored -- a locked computed interim whose stored form
-# differs from the computed one -- keeps `changed` true on EVERY pass, and
-# the chain then recursed until the stack blew (RuntimeError: maximum
-# recursion depth exceeded), which made the object impossible to create.
-# Bounding the depth breaks that without forbidding legitimate re-entry.
+# Re-entrancy bound.  Evaluation stores what it computed through
+# setInterimFields, which used to re-enter evaluation (and propagation) from
+# inside the write.  A value that can never be stored -- a locked computed
+# interim whose stored form differs from the computed one -- then kept
+# `changed` true on every pass and recursed until the stack blew
+# (RuntimeError: maximum recursion depth exceeded), which made the object
+# impossible to create.  Writes from inside the ordered driver now only
+# store (patched_setInterimFields), so that recursion cannot start; the
+# number lives on as the per-analysis visit bound of the settle loop
+# (_MAX_SETTLE_VISITS), which is where a value that never settles now shows
+# up -- as a logged warning.
 _MAX_EVAL_DEPTH = 8
 _eval_depth_local = threading.local()
 
@@ -3074,22 +3074,6 @@ def _lookup_has_dynamic_source(formula):
     return bool(_LOOKUP_DYNAMIC_SRC_RE.search(formula))
 
 
-def _is_cross_referenceable_source(analysis):
-    """Whether this analysis exposes anything a LOOKUP could read.
-
-    Bounds the conservative branch above.  Without it, a dynamic-source
-    formula would be treated as depending on every analysis on the sample,
-    and each unrelated edit would drag it through a recalculation.  Only
-    analyses that actually publish cross-referenceable fields can be a
-    LOOKUP source, so only those need the benefit of the doubt.
-    """
-    try:
-        return any(i.get("cross_referenceable")
-                   for i in analysis.getInterimFields())
-    except Exception:
-        return False
-
-
 def _is_dead_analysis(analysis):
     """Whether an analysis must be skipped when propagating a recalculation.
 
@@ -3098,10 +3082,9 @@ def _is_dead_analysis(analysis):
     analyses are superseded records and must keep the result they were closed
     with.  Recalculating them would rewrite history.
 
-    Note this deliberately does NOT skip submitted or verified analyses: the
-    native recalculation does not either, and skipping them would leave the
-    sample internally inconsistent (a changed reference standard with sample
-    results still derived from the old one).
+    Submitted and verified analyses are not "dead" and are not caught here;
+    the settle loop leaves them alone for a different reason, see
+    _result_editable.
     """
     try:
         from bika.lims.api.analysis import is_rejected
@@ -3114,53 +3097,6 @@ def _is_dead_analysis(analysis):
                     or is_retested(analysis))
     except Exception:
         return False
-
-
-def _dependent_sibling_analyses(analysis):
-    """Return sibling analyses whose LOOKUP() directly references this AS.
-
-    Direct references only (no transitive closure).  Handles both Calculated
-    and CalculatedList formulas, since both store the formula on the interim
-    field dict.
-
-    Scope is the whole sample tree, partitions included (see
-    _sample_tree_analyses), so editing a reference standard on one partition
-    re-evaluates the tests that LOOKUP it from another.
-    """
-    dependents = []
-    siblings = _sample_tree_analyses(analysis)
-
-    try:
-        svc = analysis.getAnalysisService()
-        own_kw = svc.getKeyword() if svc else ""
-    except Exception:
-        own_kw = ""
-    if not own_kw:
-        return dependents
-
-    # A formula that chooses its source at run time might be pointing here,
-    # and there is no way to tell from the text.  Give it the benefit of the
-    # doubt, but only if this analysis could be a LOOKUP source at all.
-    may_be_dynamic_source = _is_cross_referenceable_source(analysis)
-
-    for sibling in siblings:
-        try:
-            if sibling.UID() == analysis.UID():
-                continue
-            if _is_dead_analysis(sibling):
-                continue
-            for interim in sibling.getInterimFields():
-                formula = interim.get("formula", "") or ""
-                if not formula:
-                    continue
-                if (own_kw in _extract_lookup_sources(formula)
-                        or (may_be_dynamic_source
-                            and _lookup_has_dynamic_source(formula))):
-                    dependents.append(sibling)
-                    break
-        except Exception:
-            continue
-    return dependents
 
 
 def _interim_value_map(analysis):
@@ -3282,6 +3218,7 @@ def _patch_listing_set_field():
         return False
 
     if getattr(AjaxListingView.set_field, "_maitux_patched", False):
+        _patch_listing_set_fields_guarded()
         return True
 
     original = AjaxListingView.__dict__["set_field"]
@@ -3324,6 +3261,279 @@ def _patch_listing_set_field():
     setattr(AjaxListingView, "set_field", patched_set_field)
     _s = __import__("sys")
     _s.stderr.write("maitux: set_field patch applied OK\n")
+    _s.stderr.flush()
+    _patch_listing_set_fields_guarded()
+    return True
+
+
+def _patch_listing_set_fields_guarded():
+    try:
+        return _patch_listing_set_fields()
+    except Exception as _lsfs_err:
+        _s = __import__("sys")
+        _s.stderr.write(
+            "maitux: ajax_set_fields patch FAILED: %s -- saves stay "
+            "per-field\n" % _lsfs_err)
+        return False
+
+
+# --- One settle per listing save -------------------------------------------
+#
+# senaite.app.listing's ajax_set_fields writes a save queue field by field
+# (`for name, value in data.iteritems()` -- hash order, not the order on
+# screen), and every field went through the whole chain: evaluate the
+# analysis, propagate across the sample tree, recalculate the Result.  The
+# lab saves a whole row at a time (maitux.worksheet as_grouped.js: one
+# request per row, 7 to 11 fields), so a row paid for 7 to 11 full chains,
+# ~17-19s on lims-dev, of which all but the last were thrown away.
+#
+# Inside a save the interim writes now only store (patched_setInterimFields
+# notes the analysis in the batch), the data manager's per-field
+# calculateResult is skipped for those analyses (patched_calculateResult),
+# and one settle runs at the end.  Correctness does not depend on this: the
+# per-field path settles to the same fixed point, only slower.
+_batch_local = threading.local()
+
+
+class _SaveBatch(object):
+    """The analyses one listing save has written so far."""
+
+    def __init__(self):
+        self.order = []
+        self.objects = {}
+        self.before = {}
+
+    def note(self, analysis, before):
+        try:
+            uid = analysis.UID()
+        except Exception:
+            return
+        if uid in self.objects:
+            return
+        self.order.append(uid)
+        self.objects[uid] = analysis
+        # Published state before the FIRST write of the save: the settle
+        # loop propagates from what changed over the whole save.
+        self.before[uid] = before
+
+    def holds(self, analysis):
+        try:
+            return analysis.UID() in self.objects
+        except Exception:
+            return False
+
+
+def _save_batch():
+    return getattr(_batch_local, "batch", None)
+
+
+def _apply_save_queue(set_field, save_queue):
+    """The loop of ajax_set_fields, followed by one settle.
+
+    `set_field(obj, name, value)` is the listing view's own set_field (so
+    the permission checks of the data manager and the LOOKUP sibling
+    reporting of patched_set_field stay in the path); `save_queue` is the
+    payload's {uid: {field: value}}, iterated exactly as upstream does.
+
+    Returns the updated objects, one per UID -- the ones ajax_set_fields
+    notifies and re-renders.
+    """
+    import bika.lims.api as api
+
+    updated = {}
+
+    def _add(objs):
+        for obj in objs or []:
+            try:
+                updated.setdefault(obj.UID(), obj)
+            except Exception:
+                continue
+
+    def _write_all():
+        for uid, data in save_queue.iteritems():
+            obj = api.get_object_by_uid(uid)
+            for name, value in data.iteritems():
+                _add(set_field(obj, name, value))
+
+    if _save_batch() is not None:
+        # A save inside a save: the outer one settles.
+        _write_all()
+        return list(updated.values())
+
+    batch = _SaveBatch()
+    _batch_local.batch = batch
+    try:
+        _write_all()
+    finally:
+        _batch_local.batch = None
+    if not batch.order:
+        return list(updated.values())
+
+    seeds = [(batch.objects[uid], batch.before[uid]) for uid in batch.order]
+    _drain_propagated_siblings()
+    try:
+        _settle(seeds, recalc_seed_results=True, notify=False)
+    finally:
+        _report_eval_failures(seeds[0][0])
+    siblings = _drain_propagated_siblings()
+
+    # What the data manager did after every field, once: the seed's Result
+    # was computed inside the settle, this is the native dependency chain
+    # (Calculation formulas naming the service, getDependents()).
+    recalculated = []
+    try:
+        from senaite.core.interfaces import IDataManager
+        from zope.component import queryAdapter
+    except ImportError:
+        IDataManager = None
+    if IDataManager is not None:
+        for analysis, _ in seeds:
+            datamanager = queryAdapter(analysis, interface=IDataManager)
+            recalc = getattr(datamanager, "recalculate_results", None)
+            if callable(recalc):
+                recalculated.extend(recalc(analysis) or [])
+
+    # set_field reindexed the seeds in the middle of the save, before their
+    # computed fields were; everything else changed behind its back.
+    reindexed = set()
+    for obj in [a for a, _ in seeds] + list(siblings) + recalculated:
+        try:
+            uid = obj.UID()
+        except Exception:
+            continue
+        _add([obj])
+        if uid in reindexed:
+            continue
+        reindexed.add(uid)
+        try:
+            obj.reindexObject()
+        except Exception:
+            from bika.lims import logger as _batch_logger
+            _batch_logger.warn(
+                "maitux.calcenhance: could not reindex %s after a save"
+                % getattr(obj, "id", "?"))
+    return list(updated.values())
+
+
+# Fingerprint of the upstream ajax_set_fields body the replacement below was
+# written against: senaite.app.listing rev 1bd8490 (buildout.cfg).  A rev
+# bump that changes the body makes the patch refuse to apply -- loudly, at
+# startup -- rather than quietly replace new upstream behaviour with this old
+# copy.  Saves then stay per-field: same results, the old speed.
+_UPSTREAM_SET_FIELDS_SHA1 = "2fd1b4af3cc4554b427109510fcd00330f3c1351"
+_UPSTREAM_SET_FIELDS_NAMES = (
+    "all", "api", "contentFilter", "format", "get", "get_folderitems",
+    "get_json", "get_object_by_uid", "get_uid", "iteritems", "join",
+    "json_message", "len", "map", "notify_edited", "set", "set_field",
+    "update")
+
+
+def _innermost(func):
+    """The function under a stack of functools.wraps decorators.
+
+    Python 2's wraps does not set __wrapped__, so walk the closures.
+    """
+    for _ in range(10):
+        inner = None
+        for cell in (getattr(func, "__closure__", None) or ()):
+            try:
+                contents = cell.cell_contents
+            except ValueError:
+                continue
+            if hasattr(contents, "__code__"):
+                inner = contents
+                break
+        if inner is None:
+            return func
+        func = inner
+    return func
+
+
+def _patch_listing_set_fields():
+    """Replace ajax_set_fields with a copy whose loop is _apply_save_queue.
+
+    Only the body can carry the change: the settle has to run after the
+    loop and before notify_edited / get_folderitems, and upstream offers no
+    hook in between.  Everything else is the upstream body line for line,
+    under the same three decorators -- `inject_runtime` keeps logging
+    "Execution of 'ajax_set_fields' took Xs", which is what save timings are
+    read from.
+    """
+    import hashlib
+
+    from senaite.app.listing.ajax import AjaxListingView
+    from senaite.app.listing.decorators import inject_runtime
+    from senaite.app.listing.decorators import returns_safe_json
+    from senaite.app.listing.decorators import set_application_json_header
+
+    _s = __import__("sys")
+    current = AjaxListingView.__dict__.get("ajax_set_fields")
+    if current is None:
+        _s.stderr.write(
+            "maitux: ajax_set_fields not found on AjaxListingView, skip\n")
+        return False
+    if getattr(current, "_maitux_patched", False):
+        return True
+    body = _innermost(current).__code__
+    digest = hashlib.sha1(body.co_code).hexdigest()
+    if (digest != _UPSTREAM_SET_FIELDS_SHA1
+            or tuple(sorted(body.co_names)) != _UPSTREAM_SET_FIELDS_NAMES):
+        _s.stderr.write(
+            "maitux: ajax_set_fields patch FAILED: the upstream body is not "
+            "the one this copy was made from (sha1 %s) -- saves stay "
+            "per-field\n" % digest)
+        return False
+
+    import bika.lims.api as api
+
+    @set_application_json_header
+    @returns_safe_json
+    @inject_runtime
+    def ajax_set_fields(self):
+        """Set multiple fields
+
+        The POST Payload needs to provide the following data:
+
+        :save_queue: A mapping of {UID: {fieldname: fieldvalue, ...}}
+        """
+
+        # Get the HTTP POST JSON Payload
+        payload = self.get_json()
+
+        required = ["save_queue"]
+        if not all(map(lambda k: k in payload, required)):
+            return self.json_message("Payload needs to provide the keys {}"
+                                     .format(", ".join(required)), status=400)
+
+        save_queue = payload.get("save_queue")
+
+        # maitux.calcenhance: the upstream loop, plus one settle at the end
+        updated_objects = _apply_save_queue(self.set_field, save_queue)
+
+        if not updated_objects:
+            return self.json_message("Failed to set field of save queue '{}'"
+                                     .format(save_queue), 500)
+
+        # notify object edited
+        map(self.notify_edited, updated_objects)
+
+        # get the updated folderitems
+        updated_uids = map(api.get_uid, updated_objects)
+        self.contentFilter["UID"] = updated_uids
+        folderitems = self.get_folderitems()
+
+        # prepare the response object
+        data = {
+            "count": len(folderitems),
+            "uids": updated_uids,
+            "folderitems": folderitems,
+        }
+
+        return data
+
+    ajax_set_fields._maitux_patched = True
+    setattr(AjaxListingView, "ajax_set_fields", ajax_set_fields)
+    _s.stderr.write("maitux: ajax_set_fields patch applied OK\n")
     _s.stderr.flush()
     return True
 
@@ -4306,53 +4516,372 @@ def _patch_instrument_import_unicode_deferred(event=None):
             "maitux: deferred instrument import unicode patch failed\n")
 
 
-def _propagate_lookup_recalc(analysis):
-    """Re-evaluate siblings that LOOKUP-reference `analysis` (transitively).
+from collections import deque
 
-    A thread-local visited set (keyed by analysis UID) breaks cycles such as
-    mutually-referencing analyses (A LOOKUP B and B LOOKUP A).
+# ==============================================================================
+# SETTLE -- bring the sample tree to its fixed point after a write
+# ==============================================================================
+#
+# What went wrong before (Docs/保存性能及重新计算/证据-代码路径与实测.md §12):
+# propagation was a depth-first walk with a visited set, so every analysis
+# was evaluated at most once per write -- and the walk started from inside
+# the source's own evaluation, before the source had finished computing.  An
+# analysis reached through one upstream before another upstream had been
+# re-evaluated kept the value computed from the stale one and was never
+# visited again.  On lims-dev / AA260914015, saving seven fields of
+# imp_sys_suit left four imp_ip_stat fields off the fixed point, silently,
+# depending on nothing but the order the fields happened to be written in.
+#
+# The settle loop is a worklist instead:
+#   * an analysis is (re-)queued whenever something it reads has changed,
+#     however many times that happens, so it is always evaluated again after
+#     its LAST upstream change -- which is what makes the end state the fixed
+#     point, whatever the write order;
+#   * it propagates only from finished evaluations, comparing what the
+#     analysis publishes (cross-referenceable interims and Result) before and
+#     after -- an evaluation that changed nothing another analysis can read
+#     queues nothing;
+#   * it never touches an analysis whose results can no longer be edited
+#     (_result_editable), nor a retracted / rejected / retested one
+#     (_is_dead_analysis).
+#
+# A visit bound per analysis stops a genuine cycle (A reads B reads A with
+# values that never agree); hitting it is logged, never silent.
+_MAX_SETTLE_VISITS = _MAX_EVAL_DEPTH
+
+# Key of the Result in the maps below; a tuple cannot collide with an interim
+# keyword.
+_RESULT_KEY = ("__result__",)
+
+_settle_local = threading.local()
+
+
+def _published_map(analysis):
+    """What the other analyses on the sample can read off this one.
+
+    LOOKUP / XAGG read cross-referenceable interims only (see
+    _collect_cross_referenceable_data_uncached); a [KEYWORD] reference in an
+    interim formula reads the Result.  Propagating on anything else would
+    only buy evaluations that cannot change a thing.
     """
-    local = _get_propagation_local()
-    visited = getattr(local, "visited", None)
-    if visited is None:
-        visited = set()
-        local.visited = visited
-        visited.add(analysis.UID())
-    elif analysis.UID() in visited:
-        return
-    else:
-        visited.add(analysis.UID())
+    out = {}
+    try:
+        for interim in analysis.getInterimFields() or []:
+            keyword = interim.get("keyword")
+            if keyword and interim.get("cross_referenceable"):
+                out[keyword] = _safe_text(interim.get("value", ""))
+    except Exception:
+        pass
+    getter = getattr(analysis, "getResult", None)
+    if callable(getter):
+        try:
+            out[_RESULT_KEY] = _safe_text(getter())
+        except Exception:
+            pass
+    return out
 
-    for sibling in _dependent_sibling_analyses(analysis):
-        before_values = _interim_value_map(sibling)
-        _evaluate_interims_ordered(sibling)
-        # Writing a sibling here used to leave no audit trail at all:
-        # the snapshot is taken by the auditlog subscriber, which only
-        # runs on an event, and nothing on this path fired one.  The
-        # Audit Log tab therefore kept reporting the pre-propagation
-        # value -- actively contradicting the stored one -- with no
-        # record of who or what changed it.
-        #
-        # An Analysis is an Archetypes object, and for those the
-        # subscriber is registered on Products.Archetypes
-        # IObjectEditedEvent, NOT zope.lifecycleevent
-        # IObjectModifiedEvent (that one is bound to Dexterity
-        # content only), so IObjectEditedEvent is the event to fire.
-        if not _same_value_map(before_values,
-                               _interim_value_map(sibling)):
-            _record_propagated_sibling(sibling)
+
+def _stored_map(analysis):
+    """Every interim plus the Result -- what an audit snapshot records."""
+    out = _interim_value_map(analysis)
+    getter = getattr(analysis, "getResult", None)
+    if callable(getter):
+        try:
+            out[_RESULT_KEY] = _safe_text(getter())
+        except Exception:
+            pass
+    return out
+
+
+def _result_editable(analysis):
+    """Whether the workflow still lets anyone edit this analysis' results.
+
+    Propagation used to recalculate submitted and verified analyses too, on
+    the grounds that the native recalculation does.  It must not: a
+    to_be_verified or verified result is a signed record, and rewriting it
+    behind the reviewer's back -- no transition, no new submission -- is the
+    kind of change a compliance audit exists to catch.  Such an analysis
+    keeps the value it was submitted with; if an upstream changes after
+    that, the lab retracts and retests, which is the controlled path.
+
+    Asked of the workflow's permission mapping on the object, NOT of the
+    current user: whether a dependent gets updated must not depend on who
+    happened to press Save.  senaite_analysis_workflow grants
+    "senaite.core: Field: Edit Analysis Result" in registered / unassigned /
+    assigned and to nobody from to_be_verified on.
+    """
+    try:
+        from AccessControl.Permission import Permission
+        from senaite.core.permissions import FieldEditAnalysisResult
+    except ImportError:
+        # Only the offline test harness gets here: no Zope, no workflow.
+        return True
+    try:
+        for item in analysis.ac_inherited_permissions(1):
+            name, value = item[:2]
+            if name != FieldEditAnalysisResult:
+                continue
+            roles = Permission(name, value, analysis).getRoles()
+            # A list means "acquired from the container": the workflow has
+            # not locked this state down, so it is not a closed record.
+            if isinstance(roles, list):
+                return True
+            return bool(roles)
+    except Exception:
+        pass
+    # Cannot tell -- leave it alone.  Not writing is the safe side for a
+    # record, and the settle loop logs every analysis it left alone.
+    return False
+
+
+def _as_keyword(analysis):
+    try:
+        service = analysis.getAnalysisService()
+        return service.getKeyword() if service else ""
+    except Exception:
+        return ""
+
+
+class _TreeIndex(object):
+    """Who reads whom on one sample tree, built once per settle.
+
+    Three ways one analysis reads another:
+
+      * a literal LOOKUP / XAGG source (_extract_lookup_sources);
+      * a LOOKUP that picks its source at run time
+        (_lookup_has_dynamic_source).  Which analysis it reads cannot be told
+        from the text, so it is assumed to read every analysis that publishes
+        cross-referenceable fields -- the conservative branch, see
+        _lookup_has_dynamic_source for why that trade is not close;
+      * a [KEYWORD] in an interim formula naming another analysis' service,
+        which _evaluate_calculated_interims (step 3b) resolves to that
+        analysis' Result.  The old per-step scan did not know this one.
+
+    The old scan re-read every formula of the tree (428 on a 27-analysis
+    tree) at every propagation step; this reads them once.
+    """
+
+    def __init__(self, tree):
+        self.members = {}
+        self._by_source = {}
+        self._by_result = {}
+        self._dynamic = []
+        for analysis in tree:
             try:
-                _notify_event(_ATObjectEditedEvent(sibling))
+                uid = analysis.UID()
+                interims = analysis.getInterimFields() or []
             except Exception:
-                from bika.lims import logger as _prop_logger
-                _prop_logger.exception(
-                    "maitux.calcenhance: could not notify edit of %s"
-                    % getattr(sibling, "id", "?"))
-        _propagate_lookup_recalc(sibling)
+                continue
+            self.members[uid] = analysis
+            local = set(i.get("keyword") for i in interims)
+            sources = set()
+            refs = set()
+            dynamic = False
+            for interim in interims:
+                formula = interim.get("formula", "") or ""
+                if not formula:
+                    continue
+                sources.update(_extract_lookup_sources(formula))
+                dynamic = dynamic or _lookup_has_dynamic_source(formula)
+                refs.update(token for token in _ORDER_TOKEN_RE.findall(formula)
+                            if token not in local)
+            for keyword in sources:
+                self._by_source.setdefault(keyword, []).append(analysis)
+            for keyword in refs:
+                self._by_result.setdefault(keyword, []).append(analysis)
+            if dynamic:
+                self._dynamic.append(analysis)
+
+    def readers(self, analysis, before, after):
+        """Analyses that read something that differs between the two maps."""
+        own_kw = _as_keyword(analysis)
+        if not own_kw:
+            return []
+        keys = (set(before) | set(after)) - set([_RESULT_KEY])
+        xref_changed = any(before.get(k) != after.get(k) for k in keys)
+        result_changed = before.get(_RESULT_KEY) != after.get(_RESULT_KEY)
+        out = []
+        if xref_changed:
+            out.extend(self._by_source.get(own_kw, ()))
+            # Gated on a cross-referenceable change: without the gate every
+            # unrelated edit would drag the dynamic-source readers along.
+            out.extend(self._dynamic)
+        if result_changed:
+            out.extend(self._by_result.get(own_kw, ()))
+        return out
 
 
-def _finish_propagation():
-    _get_propagation_local().visited = None
+class _Settle(object):
+    """One run of the worklist.  See the block comment above."""
+
+    def __init__(self, recalc_seed_results):
+        self.recalc_seed_results = recalc_seed_results
+        self.queue = deque()
+        self.queued = set()
+        self.seeds = set()
+        self.before = {}        # uid -> published map to compare against
+        self.initial = {}       # uid -> stored map before its first visit
+        self.visited = []       # non-seed analyses, in first-visit order
+        self.visits = {}
+        self.indexes = {}       # member uid -> _TreeIndex
+        self.touchable = {}     # uid -> bool
+        self.skipped = []       # ids left alone: dead or no longer editable
+        self.overflow = []      # ids that hit _MAX_SETTLE_VISITS
+
+    def add_seed(self, analysis, before):
+        uid = analysis.UID()
+        self.seeds.add(uid)
+        if before is not None and uid not in self.before:
+            self.before[uid] = before
+        self._enqueue(analysis, uid)
+
+    def _enqueue(self, analysis, uid):
+        if uid in self.queued:
+            return
+        self.queued.add(uid)
+        self.queue.append(analysis)
+
+    def _index_for(self, analysis, uid):
+        index = self.indexes.get(uid)
+        if index is None:
+            index = _TreeIndex(_sample_tree_analyses(analysis))
+            for member in index.members:
+                self.indexes[member] = index
+            self.indexes[uid] = index
+        return index
+
+    def _can_touch(self, analysis, uid):
+        ok = self.touchable.get(uid)
+        if ok is None:
+            ok = (not _is_dead_analysis(analysis)
+                  and _result_editable(analysis))
+            self.touchable[uid] = ok
+            if not ok:
+                self.skipped.append(getattr(analysis, "id", "?"))
+        return ok
+
+    def run(self):
+        while self.queue:
+            analysis = self.queue.popleft()
+            uid = analysis.UID()
+            self.queued.discard(uid)
+            visits = self.visits.get(uid, 0) + 1
+            self.visits[uid] = visits
+            if visits > _MAX_SETTLE_VISITS:
+                if visits == _MAX_SETTLE_VISITS + 1:
+                    self.overflow.append(getattr(analysis, "id", "?"))
+                continue
+            before = self.before.pop(uid, None)
+            if before is None:
+                before = _published_map(analysis)
+            if uid not in self.seeds and uid not in self.initial:
+                self.initial[uid] = _stored_map(analysis)
+                self.visited.append(analysis)
+
+            _evaluate_interims_ordered(analysis)
+            if self.recalc_seed_results and uid in self.seeds:
+                # A listing save deferred the data manager's per-field
+                # calculateResult (see patched_calculateResult); the Result
+                # is computed here once, from settled interims, before
+                # anything that reads it is evaluated.
+                recalc = getattr(analysis, "calculateResult", None)
+                if callable(recalc):
+                    try:
+                        recalc(override=True)
+                    except Exception:
+                        from bika.lims import logger as _settle_logger
+                        _settle_logger.exception(
+                            "maitux.calcenhance: calculateResult failed on %s"
+                            % getattr(analysis, "id", "?"))
+
+            after = _published_map(analysis)
+            if after == before:
+                continue
+            index = self._index_for(analysis, uid)
+            for reader in index.readers(analysis, before, after):
+                try:
+                    reader_uid = reader.UID()
+                except Exception:
+                    continue
+                if reader_uid == uid:
+                    continue
+                if not self._can_touch(reader, reader_uid):
+                    continue
+                self._enqueue(reader, reader_uid)
+
+
+def _settle(seeds, recalc_seed_results=False, notify=True):
+    """Evaluate `seeds` and bring everything that reads them to the fixed point.
+
+    `seeds` is [(analysis, published map before the write)]; the map may be
+    None, in which case the current state is the baseline.
+
+    Returns the non-seed analyses whose stored values ended up different --
+    compared once, at the end, so an analysis re-evaluated three times on the
+    way gets one audit snapshot of its final state, not three of the
+    intermediate ones.  With `notify` those get their edit event here; the
+    listing save (_apply_save_queue) passes False because ajax_set_fields
+    notifies everything it re-renders anyway, and a second event would be a
+    second, identical snapshot.
+    """
+    state = getattr(_settle_local, "state", None)
+    if state is not None:
+        # A top-level write while a settle is running: hand it to the loop
+        # that is already going instead of starting a second one.
+        for analysis, before in seeds:
+            state.add_seed(analysis, before)
+        return []
+
+    state = _Settle(recalc_seed_results)
+    _settle_local.state = state
+    try:
+        for analysis, before in seeds:
+            state.add_seed(analysis, before)
+        state.run()
+    finally:
+        _settle_local.state = None
+
+    changed = []
+    for analysis in state.visited:
+        try:
+            if _stored_map(analysis) != state.initial.get(analysis.UID()):
+                changed.append(analysis)
+        except Exception:
+            continue
+    for analysis in changed:
+        _record_propagated_sibling(analysis)
+        if not notify:
+            continue
+        # Writing a sibling here used to leave no audit trail at all: the
+        # snapshot is taken by the auditlog subscriber, which only runs on an
+        # event, and nothing on this path fired one.  An Analysis is an
+        # Archetypes object, and for those the subscriber is registered on
+        # Products.Archetypes IObjectEditedEvent, NOT zope.lifecycleevent
+        # IObjectModifiedEvent (that one is bound to Dexterity content only).
+        try:
+            _notify_event(_ATObjectEditedEvent(analysis))
+        except Exception:
+            from bika.lims import logger as _prop_logger
+            _prop_logger.exception(
+                "maitux.calcenhance: could not notify edit of %s"
+                % getattr(analysis, "id", "?"))
+
+    if state.overflow or state.skipped:
+        from bika.lims import logger as _settle_logger
+        if state.overflow:
+            _settle_logger.warn(
+                "maitux.calcenhance: %s did not settle after %d evaluations "
+                "each -- the analyses read each other with values that never "
+                "agree; left as they are" % (", ".join(state.overflow),
+                                             _MAX_SETTLE_VISITS))
+        if state.skipped:
+            _settle_logger.info(
+                "maitux.calcenhance: left %d analysis(es) unchanged although "
+                "an upstream changed, because their results are no longer "
+                "editable (submitted / verified / retracted / rejected / "
+                "retested): %s" % (len(state.skipped),
+                                   ", ".join(state.skipped)))
+    return changed
 
 
 # ==============================================================================
