@@ -751,8 +751,11 @@ def test_v16_through_the_engine(p, r):
     r.check("engine: row space", got.get("imp_ip_name"), [A, B, U1])
     r.check("engine: group column, row-aligned",
             got.get("imp_ip_group"), [u"", u"", R085])
+    # 修约位数随值传递 S2: the source cell is the TEXT "0.11" and XAGG_NTH2
+    # only carries it, so it arrives as typed (口径 ④, 裁决 §6-②) -- it used
+    # to come out as the float 0.11, which would have shown "0.1" for "0.10".
     r.check("engine: the first injection by 样品编号 -- a mixed column",
-            got.get("imp_ip_p1_v1"), [0.11, p._PLACEHOLDER, u"＜0.05%"])
+            got.get("imp_ip_p1_v1"), [u"0.11", p._PLACEHOLDER, u"＜0.05%"])
     avg = got.get("imp_ip_avg") or []
     r.check("engine: mean over both operators", len(avg), 3)
     if len(avg) == 3:
