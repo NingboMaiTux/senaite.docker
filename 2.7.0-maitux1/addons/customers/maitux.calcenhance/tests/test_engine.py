@@ -310,7 +310,9 @@ def test_count_values_rows(p, r):
 #                     an inlined rounded column evals back; scalar 32 -> 33)
 #              -> 99 (S4: GROUP_AVG_TOPlist -- array table only, it is a
 #                     GROUP_*list; 有关物质 20260923 裁决 Q1 / §6-③)
-EXPECTED_SAFE_ENTRIES = 99
+#              -> 100 (S5: EARLIEST_TIME -- array table only; it is only
+#                     meaningful as TIME_ELAPSED_HOURS's base, 裁决 §6-⑤)
+EXPECTED_SAFE_ENTRIES = 100
 EXPECTED_SCALAR_ENTRIES = 33
 
 
@@ -2514,6 +2516,72 @@ def test_fixed_s1_through_the_engine(p, r):
             [300.1, 300.1, 300.0])
 
 
+def test_earliest_time_s5(p, r):
+    """S5 (修约位数随值传递 Backlog): EARLIEST_TIME as TIME_ELAPSED_HOURS's base.
+
+    供试品溶液稳定性-2/-3: hours counted from the earliest injection of the
+    segment chosen in 「稳定性来源」, not from this segment's own first row.
+    """
+    import json
+
+    install_engine_stubs()
+    formula = (u'TIME_ELAPSED_HOURS([imp_stab2_inj_time], 1, '
+               u'EARLIEST_TIME([imp_stab2_source], "imp_inj_time"))')
+
+    def run(cold_times, source=u"imp_stability_cold", own=None,
+            f=formula):
+        _, analyses = build_sample([
+            {"as_id": "COLD", "service_kw": "imp_stability_cold", "fields": [
+                {"keyword": "imp_inj_time", "result_type": "list",
+                 "value": json.dumps(cold_times),
+                 "cross_referenceable": True}]},
+            {"as_id": "RT", "service_kw": "imp_stability_rt", "fields": [
+                {"keyword": "imp_inj_time", "result_type": "list",
+                 "value": json.dumps([u"2026-05-13 08:00"]),
+                 "cross_referenceable": True}]},
+            {"as_id": "S2", "service_kw": "imp_stab_sample2", "fields": [
+                {"keyword": "imp_stab2_source", "result_type": "select",
+                 "value": source},
+                {"keyword": "imp_stab2_inj_time", "result_type": "list",
+                 "value": json.dumps(own or [u"2026-05-14 20:13",
+                                             u"2026-05-15 02:13"])},
+                {"keyword": "imp_stab2_time", "result_type": "calculatedlist",
+                 "formula": f}]},
+        ])
+        out = evaluate(p, analyses, ("COLD", "RT", "S2"))
+        return json.loads(out.get("S2.imp_stab2_time") or "null")
+
+    cold = [u"2026-05-12 20:13", u"2026-05-12 18:13", u"2026-05-13 20:13"]
+    # t0 = the COLD segment's earliest (18:13 on the 12th), not its first row
+    r.check("S5 hours from the selected segment's earliest injection",
+            run(cold), [u"50.0", u"56.0"])
+    r.check("S5 the dropdown decides: RT gives a different t0",
+            run(cold, source=u"imp_stability_rt"), [u"36.2", u"42.2"])
+    r.check("S5 literal source works the same way",
+            run(cold, f=formula.replace(u"[imp_stab2_source]",
+                                        u'"imp_stability_cold"')),
+            [u"50.0", u"56.0"])
+    # ★ no fallback: a source with no times must not become "hours since my
+    # own first row" ([0.0, 6.0]) -- that would read as perfectly ordinary
+    r.check("S5 empty source -> column '---' (no fallback to own t0)",
+            run([]), [u"---", u"---"])
+    r.check("S5 no source selected -> '---'", run(cold, source=u""),
+            [u"---", u"---"])
+    r.check("S5 slash timestamp in the source is refused, not skipped",
+            run([u"2026/05/12 18:13", u"2026-05-12 20:13"]),
+            [u"---", u"---"])
+
+    # dependency: editing the chosen segment must re-evaluate this AS
+    r.check("S5 dynamic source is a dependency",
+            p._lookup_has_dynamic_source(formula), True)
+    r.check("S5 literal source is extracted",
+            u"imp_stability_cold" in p._extract_lookup_sources(
+                u'EARLIEST_TIME("imp_stability_cold", "imp_inj_time")'),
+            True)
+    r.check("S5 registered in _SAFE", "EARLIEST_TIME" in
+            _registry_keys(p, "_SAFE"), True)
+
+
 def main():
     p = load_patches()
     print("IMPORT OK  (no Zope instance started)")
@@ -2548,6 +2616,7 @@ def main():
     test_fixed_s2_helpers(p, r)
     test_fixed_s2_through_the_engine(p, r)
     test_fixed_s2_cross_as(p, r)
+    test_earliest_time_s5(p, r)
     test_fixed_s1_through_the_engine(p, r)
     test_baseline_bylist(p, r)
     test_baseline_registration(p, r)

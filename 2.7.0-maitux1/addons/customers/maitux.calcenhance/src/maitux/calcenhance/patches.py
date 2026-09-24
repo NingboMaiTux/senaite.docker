@@ -3175,13 +3175,19 @@ import re as _lookup_re
 # dependency-free: the downstream value would be computed once and then never
 # refreshed when the source changes (the stale-value failure v1.5.0 fixed for
 # LOOKUP).  No log line, no '---' -- just an old number.
-_LOOKUP_SRC_RE = _lookup_re.compile(r'''LOOKUP2?\s*\(\s*["']([^"']+)["']''')
+#
+# EARLIEST_TIME reads another AS the same way (source first), so it rides
+# both regexes: without that, editing the selected stability segment's
+# injection times would leave the hours column measured from the old t0.
+_LOOKUP_SRC_RE = _lookup_re.compile(
+    r'''(?:LOOKUP2?|EARLIEST_TIME)\s*\(\s*["']([^"']+)["']''')
 
 # LOOKUP whose source service is a [keyword] reference rather than a literal,
 # e.g. LOOKUP([imp_src_as], "imp_correction_factor", "imp_name", [imp_name]).
 # The value only exists at evaluation time, so _LOOKUP_SRC_RE -- which reads
 # quoted literals -- finds nothing and the formula looks dependency-free.
-_LOOKUP_DYNAMIC_SRC_RE = _lookup_re.compile(r'LOOKUP2?\s*\(\s*\[')
+_LOOKUP_DYNAMIC_SRC_RE = _lookup_re.compile(
+    r'(?:LOOKUP2?|EARLIEST_TIME)\s*\(\s*\[')
 
 # Cross-AS aggregation (XAGG_*) reads its source AS from string-literal
 # arguments too, but unlike LOOKUP the source is not a fixed position:
@@ -7631,6 +7637,86 @@ def _evaluate_calculatedlist_interims(self, only=None):
                    else "the earliest row"))
         return out
 
+    def _earliest_time(source_kw, field_kw):
+        """The earliest timestamp in another AS's column, as that AS stores it.
+
+            TIME_ELAPSED_HOURS([imp_stab2_inj_time], 1,
+                               EARLIEST_TIME([imp_stab2_source], "imp_inj_time"))
+
+        供试品溶液稳定性-2/-3 的「时间点(h)」要从「稳定性来源」下拉所选那一段
+        （冷藏 / 室温第 1 次）的**最早进样时间**起算（有关物质 20260923 裁决
+        Q3 子问 1）。进样时间是文本，XAGG_MIN 只认数值、BASELINE_BYlist 会先
+        数值化，拼不出这件事。
+
+        - `source_kw` 可以是字面量，也可以是字段引用（下拉的值）—— 与
+          LOOKUP([imp_cf_source], …) 同款。数组路径会把标量字段内联成整列，
+          所以这里收到的可能是一列同样的值；各行**不一样**就报错，不猜。
+        - 解析与 TIME_ELAPSED_HOURS 是同一个 _parse_dt。源列里有一格认不出来
+          （比如 `2026/05/12 20:13` 斜杠写法）→ 报错：少一格就可能少了真正
+          最早的那一针，算出来的整列 t0 都是错的，而且看不出来。
+        - 源段一个进样时间都没有 → 报错，**不回退到本段自己的最早时间**。
+
+        「报错」在这里就是引擎的约定：数组路径整列写 '---'，并在本次写入的
+        公式失败汇总里留名（与 LOOKUP 取不到源时同一条路）。★ 所以它要直接写在
+        TIME_ELAPSED_HOURS 的第三个参数里：单独占一个字段的话，失败时那个
+        字段是 '---'，而 TIME_ELAPSED_HOURS 收到 '---' 的 base 会按「没给
+        base」回退到本列最早时间 —— 正是这里要拒绝的那个静默回退。
+
+        返回源里那一格的**原文**，TIME_ELAPSED_HOURS 再按同一套规则解析它，
+        时区标签也就原样参与它的一致性检查。
+        """
+        if isinstance(source_kw, (list, tuple)):
+            picked = set(_safe_text(v).strip() for v in source_kw
+                         if v is not None)
+            picked.discard(u"")
+            if len(picked) > 1:
+                raise ValueError(
+                    u"EARLIEST_TIME: the source AS differs by row (%s) -- "
+                    u"one column can only be measured from one segment"
+                    % u", ".join(sorted(picked)))
+            source_kw = picked.pop() if picked else u""
+        source_kw = _safe_text(source_kw).strip()
+        if not source_kw or source_kw == _PLACEHOLDER:
+            raise KeyError(u"EARLIEST_TIME: no source AS selected")
+        data = sibling_data.get(source_kw)
+        if data is None:
+            raise KeyError(
+                u"EARLIEST_TIME: source service '%s' not found or has no "
+                u"cross-referenceable fields" % source_kw)
+        cells = data.get(field_kw)
+        if cells is None:
+            raise KeyError(
+                u"EARLIEST_TIME: field '%s' not found in '%s' (is it "
+                u"cross-referenceable?)" % (_safe_text(field_kw), source_kw))
+        if not isinstance(cells, (list, tuple)):
+            cells = [cells]
+        texts = [c for c in cells
+                 if _safe_text(c).strip() not in (u"", _PLACEHOLDER)]
+        if not texts:
+            raise KeyError(
+                u"EARLIEST_TIME: '%s' of '%s' has no injection time yet"
+                % (_safe_text(field_kw), source_kw))
+        parsed = []
+        unreadable = []
+        for cell in texts:
+            moment, label = _parse_dt(cell)
+            if moment is None:
+                unreadable.append(_safe_text(cell))
+            else:
+                parsed.append((moment, label, _safe_text(cell)))
+        if unreadable:
+            raise ValueError(
+                u"EARLIEST_TIME: %d value(s) in '%s' of '%s' are not a "
+                u"timestamp (e.g. %r) -- write it as 2026-05-12 20:13"
+                % (len(unreadable), _safe_text(field_kw), source_kw,
+                   unreadable[0]))
+        labels = set(label for _, label, _ in parsed)
+        if len(labels) > 1:
+            raise ValueError(
+                u"EARLIEST_TIME: inconsistent timezone labels %s in '%s' of "
+                u"'%s'" % (sorted(labels), _safe_text(field_kw), source_kw))
+        return min(parsed)[2]
+
     def _coalesce_conflict(row_index, chosen, disagreeing):
         """Report a row whose sources disagree.  Never resolves it."""
         from bika.lims import logger as _co_logger
@@ -8320,6 +8406,8 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "COALESCE": _coalesce,
         "SHIFT": _shift,
         "TIME_ELAPSED_HOURS": _time_elapsed_hours,
+        # Only meaningful as TIME_ELAPSED_HOURS's base -- see its docstring.
+        "EARLIEST_TIME": _earliest_time,
         "RESULT_NUM": _result_num,
         "ROUND": _round_half_up,
         "ROUND_EVEN": _round_half_even,
