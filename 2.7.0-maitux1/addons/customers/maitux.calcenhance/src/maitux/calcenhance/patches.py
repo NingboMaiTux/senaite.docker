@@ -7885,7 +7885,14 @@ def _evaluate_calculatedlist_interims(self, only=None):
                 # requirement, and (b) turned the whole column into strings,
                 # so no downstream formula could compute with it.  Rounding
                 # is ROUND / ROUND_EVEN's job and display is FORMAT's.
-                results.append(fv)
+                #
+                # "Untouched" includes the places: a rounded input (a _Fixed,
+                # the usual RESULT_STATUS([imp_pct_round], ...) spelling)
+                # goes out as itself.  float(v) here stripped them, so the
+                # report column showed 0.1 where ROUND_EVEN(x, 2) had given
+                # 0.10 -- the one display the analysts asked for (有关物质
+                # 20260923 裁决 H5, r219/259/264-268).
+                results.append(v if isinstance(v, _Fixed) else fv)
             elif fv >= lod:
                 results.append(u"\uff1c%s%%" % _fmt_limit(loq))
             else:

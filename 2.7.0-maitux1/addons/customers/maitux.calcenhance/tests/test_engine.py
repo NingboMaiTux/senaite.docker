@@ -2397,6 +2397,30 @@ def test_fixed_s2_through_the_engine(p, r):
     r.check("a further pass changes no stored byte", after == before, True)
 
 
+def test_fixed_s2_result_status(p, r):
+    """S2 follow-up: RESULT_STATUS passes a rounded number through WITH its
+    places -- "先修约、再分档" is how every 报告值 column is written, and
+    the 0.10-not-0.1 display (裁决 H5) lives or dies here."""
+    import json
+
+    install_engine_stubs()
+    _, analyses = build_sample([{
+        "as_id": "AS1", "service_kw": "s2rs", "fields": [
+            {"keyword": "imp_pct", "result_type": "list",
+             "value": json.dumps([u"0.1", u"0.0449", u"0.01", u"1.2"])},
+            {"keyword": "loq", "result_type": "", "value": u"0.05"},
+            {"keyword": "lod", "result_type": "", "value": u"0.02"},
+            {"keyword": "imp_pct_round", "result_type": "calculatedlist",
+             "formula": u"ROUND_EVEN([imp_pct], 2)"},
+            {"keyword": "imp_report", "result_type": "calculatedlist",
+             "formula": u"RESULT_STATUS([imp_pct_round],[loq],[lod])"},
+        ]}])
+    out = evaluate(p, analyses, ("AS1",))
+    r.check("RESULT_STATUS keeps the rounded places, labels as before",
+            json.loads(out.get("AS1.imp_report") or "[]"),
+            [u"0.10", u"＜0.05%", u"ND", u"1.20"])
+
+
 def test_fixed_s2_cross_as(p, r):
     """S2 (2026-09-24 addition): the cross-AS collector keeps places too."""
     import json
@@ -2615,6 +2639,7 @@ def main():
     test_fixed_s1_scalar_engine(p, r)
     test_fixed_s2_helpers(p, r)
     test_fixed_s2_through_the_engine(p, r)
+    test_fixed_s2_result_status(p, r)
     test_fixed_s2_cross_as(p, r)
     test_earliest_time_s5(p, r)
     test_fixed_s1_through_the_engine(p, r)
