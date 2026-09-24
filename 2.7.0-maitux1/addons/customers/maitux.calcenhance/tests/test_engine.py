@@ -305,8 +305,15 @@ def test_count_values_rows(p, r):
 #                     _MIN / _AVG / _COUNT on the array table, LOOKUP2 on
 #                     BOTH -- the scalar table therefore goes 31 -> 32,
 #                     the first time it has moved since the rounding hoist)
-EXPECTED_SAFE_ENTRIES = 97
-EXPECTED_SCALAR_ENTRIES = 32
+#              -> 98 (修约位数随值传递 S1: _Fixed on BOTH tables -- not a
+#                     formula function, it is what repr(_Fixed) spells, so
+#                     an inlined rounded column evals back; scalar 32 -> 33)
+#              -> 99 (S4: GROUP_AVG_TOPlist -- array table only, it is a
+#                     GROUP_*list; 有关物质 20260923 裁决 Q1 / §6-③)
+#              -> 100 (S5: EARLIEST_TIME -- array table only; it is only
+#                     meaningful as TIME_ELAPSED_HOURS's base, 裁决 §6-⑤)
+EXPECTED_SAFE_ENTRIES = 100
+EXPECTED_SCALAR_ENTRIES = 33
 
 
 def test_registry_totals(p, r):
@@ -1168,8 +1175,11 @@ def test_baseline_through_the_engine(p, r):
     ])
     r.check("engine: baseline column", two_column.get("imp_base"),
             S1919_BASELINE)
+    # 修约位数随值传递 S2: a ROUND_EVEN(...,1) column is stored as its
+    # fixed-point text (storage form A'); the numbers are the same.
     r.check("engine: deviation column", two_column.get("imp_deviation"),
-            [100.0] * 5 + S1919_DEVIATION_8H)
+            [u"100.0"] * 5 + [v if v == u"---" else u"%.1f" % v
+                              for v in S1919_DEVIATION_8H])
     # ★ The new peak has to reach the RESULT as a blank.  The per-element
     # path propagates the placeholder for free -- but only because the
     # baseline really is "---" there, which is the whole point.
@@ -2153,6 +2163,449 @@ def test_xagg_coalesce_no_new_code(p, r):
                 name in safe, True)
 
 
+def test_fixed_s1(p, r):
+    """修约位数随值传递 S1: the rounding family returns a _Fixed.
+
+    Criteria ①-⑨ of the S1 slice in
+    Docs/Cal增加/maitux.calcenhance-修约位数随值传递-Backlog.md; the ②.2 /
+    ②.3 tables are 修约与显示口径.md §2.2 / §2.3 cell for cell.
+    """
+    import copy
+    import json
+    import pickle
+
+    F = p._Fixed
+
+    # ① the three text spellings agree
+    for value, digits, want in ((1609.0, 0, "1609"), (3.1, 3, "3.100")):
+        x = F(value, digits)
+        r.check("① str(_Fixed(%r,%d))" % (value, digits), str(x), want)
+        r.check("① unicode(_Fixed(%r,%d))" % (value, digits),
+                unicode(x), unicode(want))
+        r.check("① u'%%s' %% _Fixed(%r,%d)" % (value, digits),
+                u"%s" % x, unicode(want))
+
+    # ② still a float, never text -- the array engine classifies on this
+    x = F(3.1, 3)
+    r.check("② isinstance float", isinstance(x, float), True)
+    r.check("② not basestring", isinstance(x, (str, unicode)), False)
+
+    # ③ arithmetic gives a PLAIN float: the places do not spread
+    r.check("③ _Fixed / 2 is float", type(x / 2) is float, True)
+    r.check("③ _Fixed * 100 is float", type(x * 100) is float, True)
+    r.check("③ _Fixed + _Fixed is float", type(x + x) is float, True)
+
+    # ④ numeric comparison and ordering
+    r.check("④ 3.100 > 5.0 is False", x > 5.0, False)
+    ordered = sorted([F(10.0, 1), F(9.0, 1)])
+    r.check("④ sorted numerically", [float(v) for v in ordered], [9.0, 10.0])
+
+    # ⑤ deepcopy / pickle round trips keep digits and do not raise
+    for label, dup in (("deepcopy", lambda v: copy.deepcopy(v)),
+                       ("pickle", lambda v: pickle.loads(pickle.dumps(v))),
+                       ("pickle-2", lambda v: pickle.loads(
+                           pickle.dumps(v, 2)))):
+        try:
+            y = dup(x)
+            r.check("⑤ %s keeps type" % label, type(y) is F, True)
+            r.check("⑤ %s keeps digits" % label, y.digits, 3)
+            r.check("⑤ %s keeps text" % label, str(y), "3.100")
+        except Exception as err:
+            r.check("⑤ %s raised" % label, repr(err), None)
+    r.check("⑤ deepcopy of an interim dict holding one",
+            str(copy.deepcopy({"value": [x]})["value"][0]), "3.100")
+
+    # ⑥ 口径 §2.2: digits=0 never shows ".0"
+    half_up, half_even = p._round_half_up, p._round_half_even
+    table_0 = [
+        (1609, "1609", "1609"), (1609.0, "1609", "1609"),
+        (u"1609", "1609", "1609"), (1609.4, "1609", "1609"),
+        (1609.5, "1610", "1610"), (2.5, "3", "2"), (3.5, "4", "4"),
+    ]
+    for value, want_up, want_even in table_0:
+        r.check("⑥ ROUND(%r,0)" % (value,), str(half_up(value, 0)), want_up)
+        r.check("⑥ ROUND_EVEN(%r,0)" % (value,),
+                str(half_even(value, 0)), want_even)
+
+    # ⑦ 口径 §2.3: digits=3 keeps trailing zeros
+    table_3 = [
+        (3.1, "3.100"), (3.100, "3.100"), (u"3.100", "3.100"),
+        (3.0, "3.000"), (0.04, "0.040"),
+    ]
+    for value, want in table_3:
+        r.check("⑦ ROUND(%r,3)" % (value,), str(half_up(value, 3)), want)
+        r.check("⑦ ROUND_EVEN(%r,3)" % (value,),
+                str(half_even(value, 3)), want)
+    r.check("⑦ ROUND_UP(1.601,1)", str(p._round_up(1.601, 1)), "1.7")
+    r.check("⑦ ROUND_DOWN(1.69,2)", str(p._round_down(1.69, 2)), "1.69")
+    r.check("⑦ ROUND_DOWN(1.6,2)", str(p._round_down(1.6, 2)), "1.60")
+
+    # ⑧ the placeholder is not wrapped
+    got = half_even(u"---", 3)
+    r.check("⑧ ROUND_EVEN('---',3) is the placeholder", got, u"---")
+    r.check("⑧ ... and not a _Fixed", isinstance(got, F), False)
+    r.check("⑧ list maps element-wise",
+            [str(v) for v in half_even([3.1, u"---"], 3)],
+            ["3.100", "---"])
+
+    # ⑨ S1 must not change array storage: json still writes the float
+    r.check("⑨ json.dumps unchanged", json.dumps([F(1609.0, 0)]), "[1609.0]")
+
+    # repr() must round-trip through the array engine's eval, and must not
+    # be an int literal (Py2 `1609/2` would be integer division).
+    back = eval(repr([F(1609.0, 0), F(3.1, 3)]), {"_Fixed": F})
+    r.check("repr round-trips digits", [str(v) for v in back],
+            ["1609", "3.100"])
+    r.check("repr is not an int literal", eval(repr(F(1609.0, 0)),
+                                               {"_Fixed": F}) / 2, 804.5)
+
+    # Negative digits round to tens but still print as an integer
+    r.check("ROUND(1609,-1)", str(half_up(1609, -1)), "1610")
+
+
+def test_fixed_s2_helpers(p, r):
+    """修约位数随值传递 S2: revive / serialise, the two halves of form A'."""
+    import json
+
+    F, revive = p._Fixed, p._revive_fixed
+    # 需求与方案 §2.3 table, plus the zero that `or` would have dropped
+    for text, want in ((u"1609", "1609"), (u"3.100", "3.100"),
+                       (u"1609.50", "1609.50"), (u"-958.88", "-958.88"),
+                       (u"0.00", "0.00"), ("12.5", "12.5")):
+        got = revive(text)
+        r.check("revive %r is _Fixed" % text, isinstance(got, F), True)
+        r.check("revive %r text" % text, str(got) if got is not None
+                else None, want)
+    # §6.3: anything that is not a plain fixed-point literal stays as is
+    for text in (u"---", u"1,609", u" 12", u"12 ", u"1e3", u"+5", u"007",
+                 u"", u"ND", u"＜0.05%", u"未知杂质", u"S1919-Z",
+                 u"0." + u"1" * 20):
+        r.check("revive %r -> None" % text, revive(text), None)
+    for value in (1609.0, 3, None, [u"1"]):
+        r.check("revive non-text %r -> None" % (value,), revive(value), None)
+
+    # _stored_number: text keeps places, JSON numbers stay plain floats
+    r.check("_stored_number(u'0.00') keeps digits",
+            str(p._stored_number(u"0.00")), "0.00")
+    r.check("_stored_number(1609.0) plain", type(p._stored_number(1609.0)),
+            float)
+
+    # _dumps_fixed: only _Fixed cells change
+    r.check("_dumps_fixed mixed",
+            p._dumps_fixed([F(1609.0, 0), 1609.0, u"---", u"＜0.05%",
+                            F(0.0, 2)]),
+            json.dumps([u"1609", 1609.0, u"---", u"＜0.05%", u"0.00"]))
+    unrounded = [0.1 + 0.2, 1.0 / 3, 97816.0, 1e-7]
+    r.check("_dumps_fixed of an unrounded column is json.dumps, byte for "
+            "byte", p._dumps_fixed(unrounded), json.dumps(unrounded))
+
+    # _num_or_none carries a _Fixed; _dec_quantize still rounds it
+    x = F(3.1, 3)
+    r.check("_num_or_none keeps _Fixed", p._num_or_none(x) is x, True)
+    r.check("ROUND_EVEN of a _Fixed", str(p._round_half_even(x, 1)), "3.1")
+    r.check("ROUND of a revived text", str(p._round_half_up(
+        revive(u"2.50"), 0)), "3")
+
+
+def test_fixed_s2_through_the_engine(p, r):
+    """修约位数随值传递 S2: form A' end to end through the real engine.
+
+    ④ is 口径 §2.4: BASELINE_BYlist over the hand-typed g_area must hand
+    back exactly what was typed.  ③ is the slice's one way to break the
+    feature: a rounded column stored as TEXT must still feed arithmetic.
+    """
+    import json
+
+    install_engine_stubs()
+    area = [u"1609", u"1484", u"55697", u"1609.50", u"1600", u"1480",
+            u"55000", u"1610.0"]
+    hours = [u"0", u"0", u"0", u"0", u"2", u"2", u"2", u"2"]
+    peak = [u"A", u"B", u"C", u"D", u"A", u"B", u"C", u"D"]
+    names = [u"未知杂质", u"S1919-Z", u"未知杂质", u"S1919-Z",
+             u"未知杂质", u"S1919-Z", u"未知杂质", u"S1919-Z"]
+
+    def run(passes=3):
+        _, analyses = build_sample([{
+            "as_id": "AS1", "service_kw": "s2fixed",
+            "fields": [
+                {"keyword": "g_area", "result_type": "list",
+                 "value": json.dumps(area)},
+                {"keyword": "imp_stab_time", "result_type": "list",
+                 "value": json.dumps(hours)},
+                {"keyword": "imp_pct_group", "result_type": "list",
+                 "value": json.dumps(peak)},
+                {"keyword": "imp_name", "result_type": "list",
+                 "value": json.dumps(names)},
+                {"keyword": "imp_base", "result_type": "calculatedlist",
+                 "formula": u"BASELINE_BYlist([g_area],[imp_stab_time],"
+                            u"[imp_pct_group])"},
+                {"keyword": "imp_deviation", "result_type": "calculatedlist",
+                 "formula": u"ROUND_EVEN([g_area]/[imp_base]*100, 1)"},
+                {"keyword": "imp_ratio_raw", "result_type": "calculatedlist",
+                 "formula": u"[g_area]/[imp_base]*100"},
+                {"keyword": "imp_dev_half", "result_type": "calculatedlist",
+                 "formula": u"[imp_deviation] / 2"},
+                {"keyword": "imp_dev_max", "result_type": "calculatedlist",
+                 "formula": u"GROUP_MAXlist([imp_deviation],[imp_pct_group])"},
+                {"keyword": "imp_by_hour", "result_type": "calculatedlist",
+                 "formula": u"GROUP_SUMlist([g_area],[imp_stab_time])"},
+                {"keyword": "imp_name_copy", "result_type": "calculatedlist",
+                 "formula": u"[imp_name]"},
+            ]}])
+        return analyses, evaluate(p, analyses, ("AS1",), passes=passes)
+
+    analyses, out = run()
+    got = dict((k.split(".", 1)[1], json.loads(v))
+               for k, v in out.items() if v)
+
+    # ④ a pure carry comes back exactly as typed
+    r.check("④ BASELINE_BYlist carries g_area as typed",
+            got.get("imp_base"), area[:4] * 2)
+    # ① a rounded column is stored as fixed-point text
+    r.check("① ROUND_EVEN column stored as text",
+            got.get("imp_deviation"),
+            [u"100.0"] * 4 + [u"99.4", u"99.7", u"98.7", u"100.0"])
+    # ② an unrounded column is still JSON numbers, byte for byte what
+    #    json.dumps of the plain computation gives
+    want_raw = [a / b * 100 for a, b in zip(
+        [float(v) for v in area], [float(v) for v in area[:4] * 2])]
+    r.check("② unrounded column untouched", out.get("AS1.imp_ratio_raw"),
+            json.dumps(want_raw))
+    # ③ a text-stored rounded column still feeds arithmetic (not '---')
+    r.check("③ downstream of the rounded column computes",
+            got.get("imp_dev_half"),
+            [50.0] * 4 + [49.7, 49.85, 49.35, 50.0])
+    # selection keeps the places, arithmetic does not
+    r.check("GROUP_MAXlist of a rounded column keeps places",
+            got.get("imp_dev_max"), [u"100.0"] * 8)
+    r.check("GROUP_SUMlist is computed, so plain",
+            [type(v) for v in got.get("imp_by_hour", [])], [float] * 8)
+    # text keys "0"/"2" still group (the _norm_key spelling)
+    r.check("GROUP_SUMlist by a text key still groups",
+            got.get("imp_by_hour")[0],
+            1609 + 1484 + 55697 + 1609.5)
+    # names are not mistaken for numbers
+    r.check("name column not wrapped", got.get("imp_name_copy"), names)
+
+    # stable: one more pass writes nothing new (the text identity §4.1
+    # rests on "same inputs -> same bytes")
+    before = dict((i["keyword"], i["value"])
+                  for i in analyses["AS1"].getInterimFields())
+    p._evaluate_interims_ordered(analyses["AS1"])
+    after = dict((i["keyword"], i["value"])
+                 for i in analyses["AS1"].getInterimFields())
+    r.check("a further pass changes no stored byte", after == before, True)
+
+
+def test_fixed_s2_result_status(p, r):
+    """S2 follow-up: RESULT_STATUS passes a rounded number through WITH its
+    places -- "先修约、再分档" is how every 报告值 column is written, and
+    the 0.10-not-0.1 display (裁决 H5) lives or dies here."""
+    import json
+
+    install_engine_stubs()
+    _, analyses = build_sample([{
+        "as_id": "AS1", "service_kw": "s2rs", "fields": [
+            {"keyword": "imp_pct", "result_type": "list",
+             "value": json.dumps([u"0.1", u"0.0449", u"0.01", u"1.2"])},
+            {"keyword": "loq", "result_type": "", "value": u"0.05"},
+            {"keyword": "lod", "result_type": "", "value": u"0.02"},
+            {"keyword": "imp_pct_round", "result_type": "calculatedlist",
+             "formula": u"ROUND_EVEN([imp_pct], 2)"},
+            {"keyword": "imp_report", "result_type": "calculatedlist",
+             "formula": u"RESULT_STATUS([imp_pct_round],[loq],[lod])"},
+        ]}])
+    out = evaluate(p, analyses, ("AS1",))
+    r.check("RESULT_STATUS keeps the rounded places, labels as before",
+            json.loads(out.get("AS1.imp_report") or "[]"),
+            [u"0.10", u"＜0.05%", u"ND", u"1.20"])
+
+
+def test_fixed_s2_cross_as(p, r):
+    """S2 (2026-09-24 addition): the cross-AS collector keeps places too."""
+    import json
+
+    install_engine_stubs()
+    _, analyses = build_sample([
+        {"as_id": "SRC", "service_kw": "src_as", "fields": [
+            {"keyword": "cf", "result_type": "calculated",
+             "formula": u"ROUND_EVEN([cf_raw], 2)",
+             "cross_referenceable": True},
+            {"keyword": "cf_raw", "result_type": "", "value": u"1.0"},
+            {"keyword": "rep", "result_type": "list",
+             "value": json.dumps([u"0.10", u"0.15"]),
+             "cross_referenceable": True},
+            # a key column typed as TEXT: reads back as _Fixed "1" / "2"
+            {"keyword": "rk", "result_type": "list",
+             "value": json.dumps([u"1", u"2"]),
+             "cross_referenceable": True},
+        ]},
+        {"as_id": "DST", "service_kw": "dst_as", "fields": [
+            # ... matched against JSON NUMBERS here: "1.0" / "2.0" as text
+            {"keyword": "g_x", "result_type": "list",
+             "value": json.dumps([1.0, 2.0])},
+            {"keyword": "g_one", "result_type": "", "value": u"2"},
+            {"keyword": "cf_lookup", "result_type": "calculatedlist",
+             "formula": u'LOOKUP("src_as","cf","cf","")'},
+            {"keyword": "cf_scalar", "result_type": "calculated",
+             "formula": u'LOOKUP("src_as","cf","cf","")'},
+            {"keyword": "rep_lookup", "result_type": "calculatedlist",
+             "formula": u'LOOKUP("src_as","rep","rk",[g_x])'},
+            {"keyword": "rep_lookup2", "result_type": "calculatedlist",
+             "formula": u'LOOKUP2("src_as","rep","rk",[g_x],"rk",[g_x])'},
+            {"keyword": "rep_scalar", "result_type": "calculated",
+             "formula": u'LOOKUP("src_as","rep","rk",[g_one])'},
+        ]},
+    ])
+    out = evaluate(p, analyses, ("SRC", "DST"))
+    r.check("source scalar stored with places", out.get("SRC.cf"), u"1.00")
+    r.check("LOOKUP into a list keeps the places",
+            json.loads(out.get("DST.cf_lookup") or "[]"), [u"1.00"])
+    r.check("LOOKUP into a scalar keeps the places",
+            out.get("DST.cf_scalar"), u"1.00")
+    # the key spelling: text "1" on one side, number 1.0 on the other,
+    # must still meet (_key_text) -- and the value keeps its places
+    r.check("LOOKUP text key vs number key still matches",
+            json.loads(out.get("DST.rep_lookup") or "[]"), [u"0.10", u"0.15"])
+    r.check("LOOKUP2 text key vs number key still matches",
+            json.loads(out.get("DST.rep_lookup2") or "[]"),
+            [u"0.10", u"0.15"])
+    r.check("scalar engine LOOKUP (float key) vs text key",
+            out.get("DST.rep_scalar"), u"0.15")
+
+
+def test_fixed_s1_scalar_engine(p, r):
+    """S1 ⑩ (rewritten): the SCALAR engine stores the fixed-point text.
+
+    "Scalar is free" (Backlog S1): _stringify_result ends in str(result),
+    and str(_Fixed) is already the fixed-point text.  lims-dev has no
+    scalar ROUND field with digits != 1 (42 Calculations checked on
+    2026-09-24), so this is where the claim is actually observed.
+    """
+    install_engine_stubs()
+    _, analyses = build_sample([{
+        "as_id": "AS1", "service_kw": "s1scalar",
+        "fields": [
+            {"keyword": "x", "result_type": "", "value": u"1609.4"},
+            {"keyword": "y", "result_type": "", "value": u"3.1"},
+            {"keyword": "r0", "result_type": "calculated",
+             "formula": u"ROUND_EVEN([x], 0)"},
+            {"keyword": "r3", "result_type": "calculated",
+             "formula": u"ROUND_EVEN([y], 3)"},
+            {"keyword": "half", "result_type": "calculated",
+             "formula": u"[r3] / 2"},
+        ]}])
+    out = evaluate(p, analyses, ("AS1",))
+    r.check("⑩ scalar ROUND_EVEN(1609.4,0) stored", out.get("AS1.r0"),
+            "1609")
+    r.check("⑩ scalar ROUND_EVEN(3.1,3) stored", out.get("AS1.r3"),
+            "3.100")
+    # read back as a plain float: arithmetic on it is ordinary
+    r.check("⑩ downstream of a rounded scalar is ordinary",
+            out.get("AS1.half"), "1.55")
+
+
+def test_fixed_s1_through_the_engine(p, r):
+    """S1: a rounded column feeding another ARRAY formula still evaluates.
+
+    The array path inlines columns with repr(), so _Fixed has to be
+    resolvable in _SAFE or the downstream column becomes "---".
+    """
+    import json
+
+    install_engine_stubs()
+    _, analyses = build_sample([{
+        "as_id": "AS1", "service_kw": "s1fixed",
+        "fields": [
+            {"keyword": "g_area", "result_type": "list",
+             "value": json.dumps([u"100.04", u"200.06", u"300"])},
+            {"keyword": "g_grp", "result_type": "list",
+             "value": json.dumps([u"A", u"A", u"B"])},
+            {"keyword": "rnd", "result_type": "calculatedlist",
+             "formula": u"ROUND_EVEN([g_area], 1)"},
+            {"keyword": "grp_sum", "result_type": "calculatedlist",
+             "formula": u"GROUP_SUMlist([rnd], [g_grp])"},
+        ]}])
+    out = evaluate(p, analyses, ("AS1",))
+    got = dict((k.split(".", 1)[1], json.loads(v))
+               for k, v in out.items() if v)
+    # S1 left array STORAGE alone; S2 writes a rounded column as its
+    # fixed-point text (storage form A').
+    r.check("engine: rounded column stored as text (S2)", out.get("AS1.rnd"),
+            '["100.0", "200.1", "300.0"]')
+    r.check("engine: rounded column stored",
+            [float(v) for v in got.get("rnd", [])], [100.0, 200.1, 300.0])
+    r.check("engine: downstream array formula not blanked",
+            [round(float(v), 6) for v in got.get("grp_sum", [])],
+            [300.1, 300.1, 300.0])
+
+
+def test_earliest_time_s5(p, r):
+    """S5 (修约位数随值传递 Backlog): EARLIEST_TIME as TIME_ELAPSED_HOURS's base.
+
+    供试品溶液稳定性-2/-3: hours counted from the earliest injection of the
+    segment chosen in 「稳定性来源」, not from this segment's own first row.
+    """
+    import json
+
+    install_engine_stubs()
+    formula = (u'TIME_ELAPSED_HOURS([imp_stab2_inj_time], 1, '
+               u'EARLIEST_TIME([imp_stab2_source], "imp_inj_time"))')
+
+    def run(cold_times, source=u"imp_stability_cold", own=None,
+            f=formula):
+        _, analyses = build_sample([
+            {"as_id": "COLD", "service_kw": "imp_stability_cold", "fields": [
+                {"keyword": "imp_inj_time", "result_type": "list",
+                 "value": json.dumps(cold_times),
+                 "cross_referenceable": True}]},
+            {"as_id": "RT", "service_kw": "imp_stability_rt", "fields": [
+                {"keyword": "imp_inj_time", "result_type": "list",
+                 "value": json.dumps([u"2026-05-13 08:00"]),
+                 "cross_referenceable": True}]},
+            {"as_id": "S2", "service_kw": "imp_stab_sample2", "fields": [
+                {"keyword": "imp_stab2_source", "result_type": "select",
+                 "value": source},
+                {"keyword": "imp_stab2_inj_time", "result_type": "list",
+                 "value": json.dumps(own or [u"2026-05-14 20:13",
+                                             u"2026-05-15 02:13"])},
+                {"keyword": "imp_stab2_time", "result_type": "calculatedlist",
+                 "formula": f}]},
+        ])
+        out = evaluate(p, analyses, ("COLD", "RT", "S2"))
+        return json.loads(out.get("S2.imp_stab2_time") or "null")
+
+    cold = [u"2026-05-12 20:13", u"2026-05-12 18:13", u"2026-05-13 20:13"]
+    # t0 = the COLD segment's earliest (18:13 on the 12th), not its first row
+    r.check("S5 hours from the selected segment's earliest injection",
+            run(cold), [u"50.0", u"56.0"])
+    r.check("S5 the dropdown decides: RT gives a different t0",
+            run(cold, source=u"imp_stability_rt"), [u"36.2", u"42.2"])
+    r.check("S5 literal source works the same way",
+            run(cold, f=formula.replace(u"[imp_stab2_source]",
+                                        u'"imp_stability_cold"')),
+            [u"50.0", u"56.0"])
+    # ★ no fallback: a source with no times must not become "hours since my
+    # own first row" ([0.0, 6.0]) -- that would read as perfectly ordinary
+    r.check("S5 empty source -> column '---' (no fallback to own t0)",
+            run([]), [u"---", u"---"])
+    r.check("S5 no source selected -> '---'", run(cold, source=u""),
+            [u"---", u"---"])
+    r.check("S5 slash timestamp in the source is refused, not skipped",
+            run([u"2026/05/12 18:13", u"2026-05-12 20:13"]),
+            [u"---", u"---"])
+
+    # dependency: editing the chosen segment must re-evaluate this AS
+    r.check("S5 dynamic source is a dependency",
+            p._lookup_has_dynamic_source(formula), True)
+    r.check("S5 literal source is extracted",
+            u"imp_stability_cold" in p._extract_lookup_sources(
+                u'EARLIEST_TIME("imp_stability_cold", "imp_inj_time")'),
+            True)
+    r.check("S5 registered in _SAFE", "EARLIEST_TIME" in
+            _registry_keys(p, "_SAFE"), True)
+
+
 def main():
     p = load_patches()
     print("IMPORT OK  (no Zope instance started)")
@@ -2182,6 +2635,14 @@ def main():
     test_s7_registration(p, r)
     test_round_up(p, r)
     test_round_down(p, r)
+    test_fixed_s1(p, r)
+    test_fixed_s1_scalar_engine(p, r)
+    test_fixed_s2_helpers(p, r)
+    test_fixed_s2_through_the_engine(p, r)
+    test_fixed_s2_result_status(p, r)
+    test_fixed_s2_cross_as(p, r)
+    test_earliest_time_s5(p, r)
+    test_fixed_s1_through_the_engine(p, r)
     test_baseline_bylist(p, r)
     test_baseline_registration(p, r)
     test_baseline_through_the_engine(p, r)

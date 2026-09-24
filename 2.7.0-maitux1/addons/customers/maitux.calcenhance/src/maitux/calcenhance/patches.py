@@ -762,6 +762,16 @@ def _patch_get_formatted_interim():
                     formatted = []
                     for v in arr:
                         try:
+                            # A fixed-point text cell is shown as stored:
+                            # float(v) is what turned "3.100" back into 3.1
+                            # on this screen (需求与方案 §3 #6).  A JSON
+                            # number is formatted exactly as before.
+                            if isinstance(v, basestring):
+                                fixed = _revive_fixed(v)
+                                if fixed is not None:
+                                    formatted.append(
+                                        formatDecimalMark(fixed, self.dmk))
+                                    continue
                             formatted.append(formatDecimalMark(float(v), self.dmk))
                         except (ValueError, TypeError):
                             formatted.append(unicode(v))
@@ -1755,6 +1765,11 @@ def _collect_cross_referenceable_data_uncached(analysis):
                         if isinstance(arr, list):
                             # Convert floatable string elements to float
                             # (frontend MultiValue submits text inputs → JSON strings)
+                            # A fixed-point literal comes back as a _Fixed:
+                            # a column carried across AS as-is (AS-25 第 n 份
+                            # 报告值, a LOOKUP'd correction factor) must keep
+                            # the places it was stored with (口径 ④,
+                            # 有关物质 20260923 裁决 §6-②).
                             import bika.lims.api as _api_ccr
                             typed = []
                             for v in arr:
@@ -1762,7 +1777,7 @@ def _collect_cross_referenceable_data_uncached(analysis):
                                     if isinstance(v, (int, float)):
                                         typed.append(float(v))
                                     elif isinstance(v, basestring) and _api_ccr.is_floatable(v):
-                                        typed.append(float(v))
+                                        typed.append(_stored_number(v))
                                     else:
                                         typed.append(v)
                                 except Exception:
@@ -1776,7 +1791,9 @@ def _collect_cross_referenceable_data_uncached(analysis):
                     try:
                         import bika.lims.api as _api
                         if _api.is_floatable(val):
-                            scalar = float(val)
+                            # Same as the array branch: a stored "1.00"
+                            # handed on by LOOKUP stays "1.00".
+                            scalar = _stored_number(val)
                         else:
                             # [PY2-UNICODE] _safe_text, not str().  See R13.
                             # RecordsField stores string subfields as unicode
@@ -2267,6 +2284,13 @@ def _num_or_none(v):
         return None
     if isinstance(v, bool):
         return float(v)
+    if isinstance(v, _Fixed):
+        # Already a number, and one that knows its places.  float() would
+        # throw them away, and every SELECTING function built on this --
+        # BASELINE_BYlist, GROUP_REPORT_TOPlist, GROUP_MAX/MIN -- would hand
+        # the analyst's "1609" back as 1609.0 (口径 ④).  Arithmetic on the
+        # result still gives a plain float, so nothing COMPUTED keeps them.
+        return v
     if isinstance(v, (int, float)):
         return float(v)
     try:
@@ -2278,6 +2302,147 @@ def _num_or_none(v):
         return float(s)
     except (ValueError, TypeError):
         return None
+
+
+class _Fixed(float):
+    """A float that remembers how many decimals it was rounded to.
+
+    The rounding family used to end in `float(d)`: at that moment
+    Decimal('3.100') held both the value and the number of places, and
+    float() kept only the value.  Everything downstream -- `1609.0` where
+    ROUND(x, 0) was asked for, `3.1` where ROUND_EVEN(x, 3) was asked for --
+    followed from that one discard (修约与显示口径.md §2).
+
+    A float SUBCLASS, not a Decimal and not a string (需求与方案 §2.1):
+
+      - Decimal / float raises TypeError on Py2, so `[a]/[b]*100` would
+        break on every rounded input;
+      - a string compares wrongly: on Py2 '3.100' > 5.0 is always True and
+        sorted(['10.0', '9.0']) comes out reversed, so `ROUND(x,1) > limit`
+        would silently give the wrong answer;
+      - a float subclass is `isinstance(x, float)`, so arithmetic,
+        comparison, sorting and every numeric check keep working, and the
+        result of any arithmetic is a PLAIN float -- the places do not
+        spread.  A rounded value used in a further calculation gets its
+        places from the next ROUND, not from this one.
+
+    str() / unicode() / u"%s" give the fixed-point text ("1609", "3.100").
+    repr() deliberately does NOT: the array engine inlines whole columns
+    into the formula text with repr() and eval()s it, and a bare "1609"
+    there is an int literal -- `1609/2` would become Py2 integer division.
+    repr() therefore spells a constructor call that the array engine's
+    _SAFE resolves back into a _Fixed, and for a plain-float column the
+    inlined text is exactly what it was before.
+
+    __reduce__ / __getnewargs__ are not optional: with __slots__ and no
+    state hook, deepcopy and pickle both raise TypeError, and
+    safe_format_interim deep-copies interim fields -- that would be a 500
+    on save, not a display glitch (需求与方案 §4.2).
+    """
+    __slots__ = ("digits",)
+
+    # "%.*f" refuses very large precisions on Py2; nothing rounds to more
+    # than a handful of places, so this only has to keep __str__ total.
+    _MAX_DIGITS = 15
+
+    def __new__(cls, value, digits):
+        obj = float.__new__(cls, value)
+        obj.digits = min(max(int(digits), 0), cls._MAX_DIGITS)
+        return obj
+
+    def __str__(self):
+        return "%.*f" % (self.digits, self)
+
+    def __unicode__(self):
+        return unicode(self.__str__())
+
+    def __repr__(self):
+        return "_Fixed(%s, %d)" % (float.__repr__(self), self.digits)
+
+    def __reduce__(self):
+        return (_Fixed, (float(self), self.digits))
+
+    def __getnewargs__(self):
+        return (float(self), self.digits)
+
+
+# A plain fixed-point literal: optional minus, digits, optional fraction.
+# Deliberately narrow (需求与方案 §6.3): "1,609", " 12", "1e3", "+5" do not
+# match and stay exactly what they are today.  Widening it to "revive as
+# much as possible" is how a label gets mistaken for a number.
+import re as _fixed_re
+_FIXED_LITERAL_RE = _fixed_re.compile(r"-?\d+(?:\.(\d+))?\Z")
+
+
+def _revive_fixed(value):
+    """The _Fixed a stored fixed-point literal stands for, or None.
+
+    The read-back half of storage form A' (需求与方案 §2.2 / §2.3): a
+    rounded column is stored as text ("1609", "3.100"), and reading it back
+    must give the places back, or the next pass writes "1609.0" again.
+    Hand-typed `list` fields are stored as text too, which is what makes a
+    pure carry (BASELINE_BYlist over g_area) come out as typed (口径 ④).
+
+    Only when the literal survives the round trip byte for byte: "007" or a
+    fraction longer than _Fixed can print would come back as a different
+    text, so those stay on the old path (a plain float).
+    """
+    if not isinstance(value, basestring):
+        return None
+    text = _safe_text(value)
+    match = _FIXED_LITERAL_RE.match(text)
+    if match is None:
+        return None
+    digits = len(match.group(1) or u"")
+    if digits > _Fixed._MAX_DIGITS:
+        return None
+    fixed = _Fixed(float(text), digits)
+    if unicode(fixed) != text:
+        return None
+    return fixed
+
+
+def _stored_number(value):
+    """float(value) for a stored array cell, keeping a fixed literal's places.
+
+    Every collector that turns a stored array back into numbers used to say
+    float(v); this is that, except that a fixed-point literal comes back as
+    the _Fixed it was written from.  A JSON number stays a plain float -- an
+    unrounded column is not touched (A').
+    """
+    fixed = _revive_fixed(value)
+    if fixed is not None:
+        return fixed
+    return float(value)
+
+
+def _key_text(value):
+    """Text of a value used as a MATCH KEY, spelling a _Fixed as before.
+
+    A key column typed as text ("1", "2") reads back as a _Fixed now, and
+    its text is "1".  The other side of the match is often a plain float --
+    the scalar engine reads its fields with float(), a computed key column
+    is JSON numbers -- whose text is "1.0".  Both sides used to be "1.0",
+    so matching on _safe_text would silently stop finding rows that it
+    finds today.  Keys match on the value, never on the places.
+    """
+    if isinstance(value, _Fixed):
+        value = float(value)
+    return _safe_text(value)
+
+
+def _dumps_fixed(values):
+    """json.dumps for a computed column, writing _Fixed cells as their text.
+
+    json.dumps renders floats with float.__repr__ and never consults the
+    subclass, so it has to be told.  Only _Fixed cells change: plain floats,
+    placeholders and labels serialise exactly as before -- the unrounded
+    columns' stored text must stay byte-identical (Backlog S2 criterion ②),
+    because Py2 str(float) keeps only 12 significant digits and turning
+    them into text would lose precision on every save.
+    """
+    return json.dumps([unicode(v) if isinstance(v, _Fixed) else v
+                       for v in values])
 
 
 def _dec_quantize(val, digits, rounding):
@@ -2303,7 +2468,9 @@ def _dec_quantize(val, digits, rounding):
         return None
     try:
         q = Decimal(1).scaleb(-d)
-        return Decimal(repr(n)).quantize(q, rounding=rounding)
+        # float.__repr__, not repr(): n may be a _Fixed, whose repr is a
+        # constructor call (see _Fixed), not a decimal literal.
+        return Decimal(float.__repr__(n)).quantize(q, rounding=rounding)
     except (InvalidOperation, ValueError, ArithmeticError):
         return None
 
@@ -2314,7 +2481,7 @@ def _round_half_up(val, digits=0):
         return [_round_half_up(v, digits) for v in val]
     from decimal import ROUND_HALF_UP
     d = _dec_quantize(val, digits, ROUND_HALF_UP)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _round_half_even(val, digits=0):
@@ -2326,7 +2493,7 @@ def _round_half_even(val, digits=0):
         return [_round_half_even(v, digits) for v in val]
     from decimal import ROUND_HALF_EVEN
     d = _dec_quantize(val, digits, ROUND_HALF_EVEN)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _round_up(val, digits=0):
@@ -2358,7 +2525,7 @@ def _round_up(val, digits=0):
         return [_round_up(v, digits) for v in val]
     from decimal import ROUND_UP
     d = _dec_quantize(val, digits, ROUND_UP)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _round_down(val, digits=0):
@@ -2387,7 +2554,7 @@ def _round_down(val, digits=0):
         return [_round_down(v, digits) for v in val]
     from decimal import ROUND_DOWN
     d = _dec_quantize(val, digits, ROUND_DOWN)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _format_digits(val, digits=0):
@@ -2793,7 +2960,7 @@ def _make_lookup(sibling_data):
                 return v
             if isinstance(v, str):
                 return v.decode("utf-8", "replace")
-            return unicode(v)
+            return _key_text(v)
 
         if key_values is not None:
             # Element-wise lookup: match each key, return array
@@ -2913,8 +3080,8 @@ def _make_lookup(sibling_data):
             columns[u"target"] = columns[u"target"] * rows
 
         target_arr = columns[u"target"]
-        key1_arr = [_safe_text(v) for v in columns[u"key1"]]
-        key2_arr = [_safe_text(v) for v in columns[u"key2"]]
+        key1_arr = [_key_text(v) for v in columns[u"key1"]]
+        key2_arr = [_key_text(v) for v in columns[u"key2"]]
 
         import json as _l2_json
 
@@ -2954,8 +3121,8 @@ def _make_lookup(sibling_data):
         results = []
         ambiguous = []
         for value1, value2 in pairs:
-            want1 = _safe_text(value1)
-            want2 = _safe_text(value2)
+            want1 = _key_text(value1)
+            want2 = _key_text(value2)
             hits = [index for index in range(rows)
                     if key1_arr[index] == want1 and key2_arr[index] == want2]
             if not hits:
@@ -3008,13 +3175,19 @@ import re as _lookup_re
 # dependency-free: the downstream value would be computed once and then never
 # refreshed when the source changes (the stale-value failure v1.5.0 fixed for
 # LOOKUP).  No log line, no '---' -- just an old number.
-_LOOKUP_SRC_RE = _lookup_re.compile(r'''LOOKUP2?\s*\(\s*["']([^"']+)["']''')
+#
+# EARLIEST_TIME reads another AS the same way (source first), so it rides
+# both regexes: without that, editing the selected stability segment's
+# injection times would leave the hours column measured from the old t0.
+_LOOKUP_SRC_RE = _lookup_re.compile(
+    r'''(?:LOOKUP2?|EARLIEST_TIME)\s*\(\s*["']([^"']+)["']''')
 
 # LOOKUP whose source service is a [keyword] reference rather than a literal,
 # e.g. LOOKUP([imp_src_as], "imp_correction_factor", "imp_name", [imp_name]).
 # The value only exists at evaluation time, so _LOOKUP_SRC_RE -- which reads
 # quoted literals -- finds nothing and the formula looks dependency-free.
-_LOOKUP_DYNAMIC_SRC_RE = _lookup_re.compile(r'LOOKUP2?\s*\(\s*\[')
+_LOOKUP_DYNAMIC_SRC_RE = _lookup_re.compile(
+    r'(?:LOOKUP2?|EARLIEST_TIME)\s*\(\s*\[')
 
 # Cross-AS aggregation (XAGG_*) reads its source AS from string-literal
 # arguments too, but unlike LOOKUP the source is not a fixed position:
@@ -4927,6 +5100,10 @@ def _bind_formula_values(expr, token_re, resolve):
         expr = expr.replace("[%s]" % keyword, name)
         if isinstance(value, bool):
             variables[name] = value
+        elif isinstance(value, _Fixed):
+            # A pure carry (`[g_area]`, `COALESCE`-free passthrough) must
+            # hand the places on; arithmetic drops them by itself.
+            variables[name] = value
         elif isinstance(value, (int, float)):
             variables[name] = float(value)
         elif api.is_floatable(value):
@@ -5459,6 +5636,8 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
             "ROUND_UP": _round_up,
             "ROUND_DOWN": _round_down,
             "FORMAT": _format_digits,
+            # repr(_Fixed) spells this constructor; see _Fixed.
+            "_Fixed": _Fixed,
         }}
 
         # Step 4b: bind the remaining [keyword] references (averaged value_map)
@@ -5678,6 +5857,12 @@ def _evaluate_calculatedlist_interims(self, only=None):
                     # placeholder rows so downstream element-wise formulas stay
                     # row-aligned.  Store them in list_arrays with numbers as
                     # floats and "---" as a string.
+                    #
+                    # A fixed-point TEXT cell ("1609", "3.100") is read back
+                    # as a _Fixed: that is either a rounded column written by
+                    # _dumps_fixed or a hand-typed list, and in both cases the
+                    # places are part of the value (storage form A').  A JSON
+                    # number is read exactly as before.
                     if any(v == _PLACEHOLDER for v in arr):
                         typed = []
                         for v in arr:
@@ -5685,13 +5870,16 @@ def _evaluate_calculatedlist_interims(self, only=None):
                                 typed.append(_PLACEHOLDER)
                             elif v is not None and v != "" and (
                                     isinstance(v, (int, float)) or api.is_floatable(v)):
-                                typed.append(float(v))
+                                typed.append(_stored_number(v))
                             else:
                                 typed.append(_to_unicode(v))
                         list_arrays[kw] = typed
                     else:
                         # Try to interpret as numeric array first
-                        nums = [float(str(v)) for v in arr
+                        # (not `_revive_fixed(v) or ...`: _Fixed(0.0, 2) is
+                        # falsy, and "0.00" would lose its places)
+                        nums = [_stored_number(v) if isinstance(v, basestring)
+                                else float(str(v)) for v in arr
                                 if v is not None and v != "" and (
                                     isinstance(v, (int, float)) or api.is_floatable(v))]
                         if nums and len(nums) == len(arr):
@@ -5778,6 +5966,13 @@ def _evaluate_calculatedlist_interims(self, only=None):
         """Normalise a group key to unicode so CJK keys compare correctly."""
         if isinstance(k, str):
             k = k.decode("utf-8", "replace")
+        if isinstance(k, _Fixed):
+            # Spell a number the way it was spelled before _Fixed existed.
+            # A key column read back from text ("0", "2") is a _Fixed now
+            # and would print "0", while the same key computed elsewhere is
+            # a plain 0.0 -> "0.0"; the two groups would silently stop
+            # meeting.  Grouping is about the value, not the places.
+            k = float(k)
         return unicode(k) if k is not None else u""
 
     def _group_apply(values, key_arrays, agg, empty=_PLACEHOLDER):
@@ -6252,6 +6447,64 @@ def _evaluate_calculatedlist_interims(self, only=None):
             chosen = best.get(key)
             out.append(_PLACEHOLDER if chosen is None else chosen[1])
         return out
+
+    def _group_avg_toplist(values, reports, *key_arrays):
+        """同组只取**最高档那几针**求平均，广播到该组每一行。
+
+            GROUP_AVG_TOPlist([imp_pct_num], [imp_report], [imp_pct_group])
+            GROUP_AVG_TOPlist([imp_pct_num], [imp_report],
+                              [imp_name], [imp_pct_group])
+
+        平均单杂的口径（有关物质 20260923 裁决 Q1 勾 A）：同一个杂质的几针里，
+        有报告值 ≥报告限的 → 只平均这几针；否则有 ≥积分限（「＜x%」）的 →
+        只平均这几针；全是 ND → 全部针参与。平均的是 `values`（未修约的检测
+        杂质原值），平均完再由外层 ROUND 修约。
+
+            报告值  0.06 / 0.05 / ＜0.05% / ＜0.05% / ND / ND
+            → 只平均前两针的检测杂质
+
+        **分档与 GROUP_REPORT_TOPlist 是同一份**：档次来自 _report_rank，组键
+        来自 _distinct_first_rows —— 「哪一档最高」与报告值那一列取出来的是
+        同一档，两列不可能各说各的。边界 `≥` 不在这里判：报告值那一列是
+        RESULT_STATUS 出的，等于报告限的那针在那里就已经是数字（第 3 档）。
+
+        GROUP_AVGlist 做不了这件事：它平均整组所有针，最高档之外的针把平均
+        拉低，而且拉低多少取决于 ND 针的检测杂质恰好是几 —— 算出一个看着
+        合理的错数。
+
+        - 一组里没有任何一针认得出档次（全空 / 全 '---'）→ 该组 '---'
+        - 选中的针里 `values` 一个数值都没有 → 该组 '---'（不是 0）
+        - 「全是 ND → 全部针参与」按字面：该组**每一行**都参与，包括报告值
+          缺失的那几行；它们的 `values` 若也不是数，照常被跳过
+
+        数组路径函数，与 GROUP_*list 一样**单独占一个字段**。
+        """
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        values = list(values)
+        count = len(values)
+        if not isinstance(reports, (list, tuple)):
+            reports = [reports] * count
+        reports = list(reports) + [None] * (count - len(reports))
+        row_keys, _ = _distinct_first_rows(key_arrays, count)
+
+        top = {}
+        for index, key in enumerate(row_keys):
+            band = _report_rank(reports[index])[0]
+            if band > top.get(key, 0):
+                top[key] = band
+        members = {}
+        for index, key in enumerate(row_keys):
+            band = top.get(key, 0)
+            if band == 0:
+                continue
+            if band == 1 or _report_rank(reports[index])[0] == band:
+                members.setdefault(key, []).append(values[index])
+        means = {}
+        for key, cells in members.items():
+            nums = _nums_only(cells)
+            means[key] = sum(nums) / len(nums) if nums else _PLACEHOLDER
+        return [means.get(key, _PLACEHOLDER) for key in row_keys]
 
     def _distinct_values(fn_label, values, key_array):
         """每个键只留一个数值，按首次出现顺序。
@@ -7384,6 +7637,86 @@ def _evaluate_calculatedlist_interims(self, only=None):
                    else "the earliest row"))
         return out
 
+    def _earliest_time(source_kw, field_kw):
+        """The earliest timestamp in another AS's column, as that AS stores it.
+
+            TIME_ELAPSED_HOURS([imp_stab2_inj_time], 1,
+                               EARLIEST_TIME([imp_stab2_source], "imp_inj_time"))
+
+        供试品溶液稳定性-2/-3 的「时间点(h)」要从「稳定性来源」下拉所选那一段
+        （冷藏 / 室温第 1 次）的**最早进样时间**起算（有关物质 20260923 裁决
+        Q3 子问 1）。进样时间是文本，XAGG_MIN 只认数值、BASELINE_BYlist 会先
+        数值化，拼不出这件事。
+
+        - `source_kw` 可以是字面量，也可以是字段引用（下拉的值）—— 与
+          LOOKUP([imp_cf_source], …) 同款。数组路径会把标量字段内联成整列，
+          所以这里收到的可能是一列同样的值；各行**不一样**就报错，不猜。
+        - 解析与 TIME_ELAPSED_HOURS 是同一个 _parse_dt。源列里有一格认不出来
+          （比如 `2026/05/12 20:13` 斜杠写法）→ 报错：少一格就可能少了真正
+          最早的那一针，算出来的整列 t0 都是错的，而且看不出来。
+        - 源段一个进样时间都没有 → 报错，**不回退到本段自己的最早时间**。
+
+        「报错」在这里就是引擎的约定：数组路径整列写 '---'，并在本次写入的
+        公式失败汇总里留名（与 LOOKUP 取不到源时同一条路）。★ 所以它要直接写在
+        TIME_ELAPSED_HOURS 的第三个参数里：单独占一个字段的话，失败时那个
+        字段是 '---'，而 TIME_ELAPSED_HOURS 收到 '---' 的 base 会按「没给
+        base」回退到本列最早时间 —— 正是这里要拒绝的那个静默回退。
+
+        返回源里那一格的**原文**，TIME_ELAPSED_HOURS 再按同一套规则解析它，
+        时区标签也就原样参与它的一致性检查。
+        """
+        if isinstance(source_kw, (list, tuple)):
+            picked = set(_safe_text(v).strip() for v in source_kw
+                         if v is not None)
+            picked.discard(u"")
+            if len(picked) > 1:
+                raise ValueError(
+                    u"EARLIEST_TIME: the source AS differs by row (%s) -- "
+                    u"one column can only be measured from one segment"
+                    % u", ".join(sorted(picked)))
+            source_kw = picked.pop() if picked else u""
+        source_kw = _safe_text(source_kw).strip()
+        if not source_kw or source_kw == _PLACEHOLDER:
+            raise KeyError(u"EARLIEST_TIME: no source AS selected")
+        data = sibling_data.get(source_kw)
+        if data is None:
+            raise KeyError(
+                u"EARLIEST_TIME: source service '%s' not found or has no "
+                u"cross-referenceable fields" % source_kw)
+        cells = data.get(field_kw)
+        if cells is None:
+            raise KeyError(
+                u"EARLIEST_TIME: field '%s' not found in '%s' (is it "
+                u"cross-referenceable?)" % (_safe_text(field_kw), source_kw))
+        if not isinstance(cells, (list, tuple)):
+            cells = [cells]
+        texts = [c for c in cells
+                 if _safe_text(c).strip() not in (u"", _PLACEHOLDER)]
+        if not texts:
+            raise KeyError(
+                u"EARLIEST_TIME: '%s' of '%s' has no injection time yet"
+                % (_safe_text(field_kw), source_kw))
+        parsed = []
+        unreadable = []
+        for cell in texts:
+            moment, label = _parse_dt(cell)
+            if moment is None:
+                unreadable.append(_safe_text(cell))
+            else:
+                parsed.append((moment, label, _safe_text(cell)))
+        if unreadable:
+            raise ValueError(
+                u"EARLIEST_TIME: %d value(s) in '%s' of '%s' are not a "
+                u"timestamp (e.g. %r) -- write it as 2026-05-12 20:13"
+                % (len(unreadable), _safe_text(field_kw), source_kw,
+                   unreadable[0]))
+        labels = set(label for _, label, _ in parsed)
+        if len(labels) > 1:
+            raise ValueError(
+                u"EARLIEST_TIME: inconsistent timezone labels %s in '%s' of "
+                u"'%s'" % (sorted(labels), _safe_text(field_kw), source_kw))
+        return min(parsed)[2]
+
     def _coalesce_conflict(row_index, chosen, disagreeing):
         """Report a row whose sources disagree.  Never resolves it."""
         from bika.lims import logger as _co_logger
@@ -7552,7 +7885,14 @@ def _evaluate_calculatedlist_interims(self, only=None):
                 # requirement, and (b) turned the whole column into strings,
                 # so no downstream formula could compute with it.  Rounding
                 # is ROUND / ROUND_EVEN's job and display is FORMAT's.
-                results.append(fv)
+                #
+                # "Untouched" includes the places: a rounded input (a _Fixed,
+                # the usual RESULT_STATUS([imp_pct_round], ...) spelling)
+                # goes out as itself.  float(v) here stripped them, so the
+                # report column showed 0.1 where ROUND_EVEN(x, 2) had given
+                # 0.10 -- the one display the analysts asked for (有关物质
+                # 20260923 裁决 H5, r219/259/264-268).
+                results.append(v if isinstance(v, _Fixed) else fv)
             elif fv >= lod:
                 results.append(u"\uff1c%s%%" % _fmt_limit(loq))
             else:
@@ -7587,6 +7927,9 @@ def _evaluate_calculatedlist_interims(self, only=None):
                 return v
             if isinstance(v, str):
                 return v.decode("utf-8", "replace")
+            if isinstance(v, _Fixed):
+                # match on the pre-_Fixed spelling, as _norm_key does
+                v = float(v)
             return unicode(v)
 
         str_key_arr = [_to_u(v) for v in key_arr]
@@ -7997,6 +8340,8 @@ def _evaluate_calculatedlist_interims(self, only=None):
         # —— 直接对广播列求 RSD 会把离散度稀释，而且看不出来。
         "DISTINCT_SEQlist": _distinct_seqlist,
         "GROUP_REPORT_TOPlist": _group_report_toplist,
+        # Rides the GROUP_\w+ entry in _ARRAY_FN_RE; no regex change.
+        "GROUP_AVG_TOPlist": _group_avg_toplist,
         "DISTINCT_RSD": _distinct_rsd,
         "DISTINCT_RANGE": _distinct_range,
         "DISTINCT_MAX": _distinct_max,
@@ -8068,12 +8413,18 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "COALESCE": _coalesce,
         "SHIFT": _shift,
         "TIME_ELAPSED_HOURS": _time_elapsed_hours,
+        # Only meaningful as TIME_ELAPSED_HOURS's base -- see its docstring.
+        "EARLIEST_TIME": _earliest_time,
         "RESULT_NUM": _result_num,
         "ROUND": _round_half_up,
         "ROUND_EVEN": _round_half_even,
         "ROUND_UP": _round_up,
         "ROUND_DOWN": _round_down,
         "FORMAT": _format_digits,
+        # Columns are inlined with repr(), and repr(_Fixed) spells this
+        # constructor -- without it a rounded column feeding another
+        # array formula raises NameError and reads "---".  See _Fixed.
+        "_Fixed": _Fixed,
         "INDEX_BY": _index_by,
         # Named in _ARRAY_FN_RE explicitly: it returns a whole column, and
         # the name does not end in _ROWS, so nothing else would route it to
@@ -8240,12 +8591,13 @@ def _evaluate_calculatedlist_interims(self, only=None):
                 # RESULT is the whole column must not be squeezed through
                 # that same [out_val] wrapping, or a 6-row table collapses
                 # to one row containing "---" (2026-09 XAGG addition).
-                new_value = _jj.dumps(r)
+                new_value = _dumps_fixed(r)
             elif isinstance(r, (str, unicode)):
                 new_value = _jj.dumps([r])
             else:
                 try:
-                    new_value = _jj.dumps([float(r)])
+                    new_value = _dumps_fixed(
+                        [r if isinstance(r, _Fixed) else float(r)])
                 except (ValueError, TypeError):
                     new_value = _jj.dumps([_PLACEHOLDER])
             if not _same_value(c.get("value", ""), new_value):
@@ -8332,7 +8684,8 @@ def _evaluate_calculatedlist_interims(self, only=None):
                         str_arrays[kw] = r
                     element_results = r
                 elif r is not None:
-                    element_results = [float(r)]
+                    element_results = [
+                        r if isinstance(r, _Fixed) else float(r)]
             except Exception as _dle:
                 _note_eval_failure(kw, _dle)
                 if _DEBUG:
@@ -8368,6 +8721,10 @@ def _evaluate_calculatedlist_interims(self, only=None):
                         element_results.append(_PLACEHOLDER)
                     elif isinstance(r, (str, unicode)):
                         element_results.append(r)
+                    elif isinstance(r, _Fixed):
+                        # float(r) here used to strip ROUND's places the
+                        # moment an element-wise formula produced them
+                        element_results.append(r)
                     else:
                         element_results.append(float(r))
                 except Exception as _dle:
@@ -8380,7 +8737,9 @@ def _evaluate_calculatedlist_interims(self, only=None):
             _dl_sys.stderr.write("maitux:   result kw=%s element_results=%s (len=%d)\n" % (kw, element_results[:5], len(element_results)))
 
         if element_results:
-            new_value = _jj.dumps(element_results)
+            # _Fixed cells are written as their text, everything else as
+            # before -- storage form A' (需求与方案 §2.2)
+            new_value = _dumps_fixed(element_results)
             if not _same_value(c.get("value", ""), new_value):
                 c["value"] = new_value
                 changed = True

@@ -600,12 +600,126 @@ def test_dedup_readme(p, r):
     text = open(readme, "rb").read().decode("utf-8")
     for name in ("DISTINCT_SEQlist", "GROUP_REPORT_TOPlist", "DISTINCT_RSD",
                  "DISTINCT_RANGE", "DISTINCT_MAX", "DISTINCT_MIN",
-                 "DISTINCT_AVG", "DISTINCT_COUNT", "LOOKUP2"):
+                 "DISTINCT_AVG", "DISTINCT_COUNT", "LOOKUP2",
+                 # 1.17.0 (修约位数随值传递 S4 / S5)
+                 "GROUP_AVG_TOPlist", "EARLIEST_TIME"):
         r.check("README documents %s" % name, name in text, True)
     r.check("README 写明序号列是用来数个数的",
             u"有几个" in text or u"个数" in text, True)
     r.check("README 写明重复行是空、不是 '---'",
             u"不是 '---'" in text or u"不是 `---`" in text, True)
+
+
+def test_group_avg_top_through_the_engine(p, r):
+    """S4 (修约位数随值传递 Backlog): GROUP_AVG_TOPlist, the Q1-A mean.
+
+    Driven through the real engine: the function is only useful if the
+    array path finds it (GROUP_\w+ in _ARRAY_FN_RE) and if the report
+    column it reads is RESULT_STATUS's own output.
+    """
+    install_engine_stubs()
+
+    def run(fields):
+        _, analyses = build_sample([{
+            "as_id": "AS1", "service_kw": "s4avg", "fields": fields}])
+        out = evaluate(p, analyses, ("AS1",))
+        return dict((k.split(".", 1)[1], json.loads(v))
+                    for k, v in out.items() if v and v.startswith("["))
+
+    def col(kw, values):
+        return {"keyword": kw, "result_type": "list",
+                "value": json.dumps(values)}
+
+    # -- 裁决 Q1 的例子: 0.06 / 0.05 / ＜0.05% / ＜0.05% / ND / ND ----------
+    pct = [u"0.061", u"0.052", u"0.031", u"0.029", u"0.004", u"0.003"]
+    rep = [u"0.06", u"0.05", u"＜0.05%", u"＜0.05%", u"ND", u"ND"]
+    got = run([
+        col("imp_pct_num", pct), col("imp_report", rep),
+        col("imp_pct_group", [u"Z1"] * 6),
+        {"keyword": "avg", "result_type": "calculatedlist",
+         "formula": u"GROUP_AVG_TOPlist([imp_pct_num],[imp_report],"
+                    u"[imp_pct_group])"},
+        {"keyword": "avg_r", "result_type": "calculatedlist",
+         "formula": u"ROUND_EVEN(GROUP_AVG_TOPlist([imp_pct_num],"
+                    u"[imp_report],[imp_pct_group]), 4)"},
+        {"keyword": "old", "result_type": "calculatedlist",
+         "formula": u"GROUP_AVGlist([imp_pct_num],[imp_pct_group])"},
+    ])
+    r.check("S4 Q1 example: only the two reportable injections",
+            [round(v, 9) for v in got.get("avg", [])],
+            [round((0.061 + 0.052) / 2, 9)] * 6)
+    r.check("S4 Q1 example, rounded after averaging",
+            got.get("avg_r"), [u"0.0565"] * 6)
+    r.check("S4 differs from GROUP_AVGlist (which averages all six)",
+            round(got.get("old", [0])[0], 9),
+            round(sum(float(v) for v in pct) / 6, 9))
+
+    # -- bands 2 and 1, and a group with nothing usable --------------------
+    got = run([
+        col("v", [u"0.03", u"0.02", u"0.001", u"0.004", u"0.002",
+                  u"0.5", u"0.6"]),
+        col("rep", [u"＜0.05%", u"＜0.05%", u"ND",
+                    u"ND", u"ND",
+                    u"---", u""]),
+        col("g", [u"A", u"A", u"A", u"B", u"B", u"C", u"C"]),
+        {"keyword": "avg", "result_type": "calculatedlist",
+         "formula": u"GROUP_AVG_TOPlist([v],[rep],[g])"},
+    ])
+    avg = got.get("avg", [])
+    r.check("S4 band 2 (＜x%) beats ND",
+            [round(x, 9) for x in avg[:3]], [0.025] * 3)
+    r.check("S4 all ND: every injection takes part",
+            [round(x, 9) for x in avg[3:5]], [0.003] * 2)
+    r.check("S4 no band at all -> '---', not 0", avg[5:], [u"---"] * 2)
+
+    # -- dual key (AS-12: [imp_name],[imp_pct_group]) ----------------------
+    got = run([
+        col("v", [u"0.10", u"0.20", u"0.30", u"0.40"]),
+        col("rep", [u"0.10", u"ND", u"0.30", u"0.40"]),
+        col("name", [u"甲", u"甲", u"乙", u"乙"]),
+        col("grp", [u"R0.85", u"R0.85", u"R0.85", u"R0.85"]),
+        {"keyword": "avg", "result_type": "calculatedlist",
+         "formula": u"GROUP_AVG_TOPlist([v],[rep],[name],[grp])"},
+    ])
+    r.check("S4 dual key keeps the two impurities apart",
+            [round(x, 9) for x in got.get("avg", [])],
+            [0.1, 0.1, 0.35, 0.35])
+
+    # -- the ≥ boundary, through RESULT_STATUS: equal to the report limit
+    #    is reported as a number, so it is in the top band ------------------
+    got = run([
+        col("v", [u"0.05", u"0.049", u"0.01"]),
+        col("g", [u"Z", u"Z", u"Z"]),
+        {"keyword": "loq", "result_type": "", "value": u"0.05"},
+        {"keyword": "lod", "result_type": "", "value": u"0.02"},
+        {"keyword": "rep", "result_type": "calculatedlist",
+         "formula": u"RESULT_STATUS([v],[loq],[lod])"},
+        {"keyword": "avg", "result_type": "calculatedlist",
+         "formula": u"GROUP_AVG_TOPlist([v],[rep],[g])"},
+    ])
+    r.check("S4 boundary: RESULT_STATUS reports the =loq injection",
+            got.get("rep", [None])[0] not in (u"ND", u"---")
+            and not unicode(got.get("rep", [u""])[0]).startswith(u"＜"),
+            True)
+    r.check("S4 boundary: =报告限 is in the top band on its own",
+            [round(x, 9) for x in got.get("avg", [])], [0.05] * 3)
+
+
+def test_group_avg_top_shares_the_banding(p, r):
+    """S4: one banding, not two -- GROUP_AVG_TOPlist reuses _report_rank
+    and _distinct_first_rows exactly as GROUP_REPORT_TOPlist does."""
+    src = open(p.__source_path__, "rb").read().decode("utf-8")
+    start = src.index(u"    def _group_avg_toplist(")
+    end = src.index(u"\n    def ", start + 10)
+    body = src[start:end]
+    r.check("S4 uses _report_rank", u"_report_rank(" in body, True)
+    r.check("S4 uses _distinct_first_rows",
+            u"_distinct_first_rows(" in body, True)
+    r.check("S4 has no banding of its own (no prefix/ND tests)",
+            u"_BELOW_LIMIT_PREFIXES" in body or u"_is_zero_marker" in body,
+            False)
+    r.check("S4 registered", u'"GROUP_AVG_TOPlist": _group_avg_toplist'
+            in src, True)
 
 
 def main():
@@ -629,6 +743,8 @@ def main():
     test_dedup_registration(p, r)
     test_dedup_through_the_engine(p, r)
     test_dedup_readme(p, r)
+    test_group_avg_top_through_the_engine(p, r)
+    test_group_avg_top_shares_the_banding(p, r)
     return r.report(
         "去重族: DISTINCT_SEQlist / GROUP_REPORT_TOPlist / DISTINCT_<OP> "
         "+ LOOKUP2")

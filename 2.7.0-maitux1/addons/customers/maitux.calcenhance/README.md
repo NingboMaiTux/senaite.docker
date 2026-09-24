@@ -2,13 +2,77 @@
 
 为 SENAITE LIMS 的计算公式（Calculation）模块增加三种新的 Interim Field 控件类型，支持 HPLC 含量测定、装量差异、杂质含量等复杂计算场景。
 
-**版本：** 1.16.0
+**版本：** 1.17.0
 **兼容：** SENAITE 2.x（实测 2.7.0 / Plone 5.2 / Python 2.7）
 
 > **关于 `ISSUES.md`**：本文多处写着「详见 `ISSUES.md` ISSUE-0xx」，但**该文件
 > 不在本仓库里**（2026-09-03 核实，git 全历史也没有提交记录）。那些
 > `ISSUE-0xx` 编号仍可作为问题标识使用，但**不要指望在本包目录下找到对应文档**。
 > 若有人手上留着这份台账，值得补进仓库。
+
+---
+
+## 1.17.0 更新概要（2026-09-24）
+
+需求与口径：`Docs/Cal增加/修约与显示口径.md`、`Docs/Cal增加/maitux.calcenhance-修约位数随值传递-需求与方案.md`；
+切片与验收证据：同目录 `…-修约位数随值传递-Backlog.md`。新函数来源：有关物质 20260923 轮裁决 §6。
+
+### ★ 行为变更：`ROUND` 家族现在自己保住位数（公式一个字不用改）
+
+`ROUND` / `ROUND_EVEN` / `ROUND_UP` / `ROUND_DOWN` 以前返回普通 float，公式里写的
+`digits` 在那一刻就丢了。现在返回一个**记得自己几位小数的数**：
+
+| 公式 | 以前显示 | 现在显示 |
+| ---- | -------- | -------- |
+| `ROUND_EVEN(1609.4, 0)` | `1609.0` | `1609` |
+| `ROUND_EVEN(3.1, 3)` | `3.1` | `3.100` |
+| `ROUND_EVEN(0.04, 3)` | `0.04` | `0.040` |
+| `BASELINE_BYlist([g_area],…)`（手输 `"1609"`）| `1609.0` | `1609`（原样搬运）|
+
+- 它仍然是**数**：比较、排序、`> 限度` 判定都照常；**参与运算后就是普通数**，位数不传染 ——
+  修约值再算一次，位数由外层新的 `ROUND` 决定
+- **修约过的 CalculatedList 列落库成定位数文本**（`["1609", "3.100"]`）；
+  **没修约的列逐字节不变**（仍是 JSON 数字，精度不丢）
+- 纯搬运（`LOOKUP` / `LOOKUP2` / `INDEX_BY_GROUP` / `BASELINE_BYlist` / `COALESCE` / `GROUP_MAX/MIN` /
+  `GROUP_REPORT_TOPlist` / 跨 AS 的 `XAGG_NTH2` …）把源里的写法原样带过来：手输 `"0.10"` 取回来还是 `0.10`
+- **`RESULT_STATUS` 的数字格带着位数透传**：`RESULT_STATUS([imp_pct_round], …)`（先修约、再分档）
+  的报告值显示 `0.10` / `97.00`，标签照旧 —— 裁决 H5「尾数是 0 也需要显示」就是这一条
+- **匹配键按值、不按位数**：手输的键列 `"1"` 与计算出来的 `1.0` 仍然能匹配上
+- **不再需要为了显示拆 `_disp` / `_calc` 两个字段、也不用在外面套 `FORMAT`**。
+  见下文「[ROUND / ROUND_EVEN / FORMAT](#round--round_even--format--修约与格式化)」
+
+**上线后要知道的三件事**
+
+1. **全站修约列的显示会统一变一次**（`digits=0` 去掉 `.0`、`digits≥2` 补齐尾随零）。
+   这是本次的目的，不是 bug。`digits=1` 的列多数看不出变化
+2. **首次重算时，这些列的落库文本会被改写一次**（数值不变），审计里会出现一批
+   「只改了写法」的记录。之后再算就稳定了（同样输入 → 同样字节）
+3. `INNOCARE.LabelAndReport` 的 `DataReport.pt` 直接打印落库的 JSON 原文：
+   以前是 `[1609.0, 1484.0]`，现在是 `["1609", "1484"]`（多了引号）。
+   那是该模板自己的既有缺陷，已另立任务
+
+### 新增函数（2 个）
+
+| 函数 | 用途 |
+| ---- | ---- |
+| `GROUP_AVG_TOPlist(值列, 报告值列, 键1[, 键2…])` | 同组**只取最高档那几针**求平均（平均单杂新口径，裁决 Q1-A）|
+| `EARLIEST_TIME(源AS, "字段")` | 另一个 AS 那一列的**最早时间**，作 `TIME_ELAPSED_HOURS` 的 base（裁决 Q3）|
+
+详见「[`GROUP_AVG_TOPlist` —— 只取最高档求平均](#group_avg_toplist--只取最高档求平均)」、
+「[`EARLIEST_TIME` —— 从所选那一段的最早进样起算](#earliest_time--从所选那一段的最早进样起算)」。
+
+### 函数表规模
+
+| | 条目 | = 常量 | + 函数 | + 内部 |
+| -- | ---- | ---- | ---- | ---- |
+| CalculatedList `_SAFE` | **100** | 3 | **96** | 1 |
+| 标量 `safe_globals` | **33** | 3 | 29 | 1 |
+
+较 v1.16.0：CalculatedList 97 -> 100（2 个新函数 + `_Fixed`），标量 32 -> 33（`_Fixed`）。
+`_Fixed` **不是给公式用的函数**：CalculatedList 引擎把整列按 `repr()` 内联进公式再求值，
+修约过的数 `repr` 出来是 `_Fixed(1609.0, 0)`，表里要有这个名字才能还原回来。
+
+不需要重建镜像（customers 层 bind-mount，`docker restart` 即可生效）。
 
 ---
 
@@ -1058,13 +1122,15 @@ bin/instance restart
 | `GROUP_REPORT_TOPlist(v,k1[,k2…])` | 每组最高档报告值，只在首行       | `GROUP_REPORT_TOPlist([imp_report],[imp_name],[imp_pct_group])` |
 | `DISTINCT_RSD/RANGE/MAX/MIN/AVG/COUNT(v,k)` | 先去重再统计（标量）    | `DISTINCT_RSD([imp_total],[g_sample_id])` |
 | `LOOKUP2(源,取值,键1,值1,键2,值2[,默认])` | 双键跨 AS 取值              | `LOOKUP2("imp_rec_weigh","imp_weigh","imp_name",[imp_name],"imp_spike_level",[imp_spike_level])` |
-| `ROUND(x,n)`                    | 四舍五入，返回**数值**               | `ROUND([A], 3)`                         |
-| `ROUND_EVEN(x,n)`               | 四舍六入五留双（GB/T 8170），**数值** | `ROUND_EVEN([A], 3)`                    |
-| `ROUND_UP(x,n)`                 | 远离零只进不舍，**数值**             | `ROUND_UP([A], 1)`                      |
-| `ROUND_DOWN(x,n)`               | 朝零只舍不进，**数值**               | `ROUND_DOWN([A], 1)`                    |
+| `ROUND(x,n)`                    | 四舍五入，返回**数值（带位数，v1.17）** | `ROUND([A], 3)`                         |
+| `ROUND_EVEN(x,n)`               | 四舍六入五留双（GB/T 8170），**数值（带位数）** | `ROUND_EVEN([A], 3)` → `3.100`  |
+| `ROUND_UP(x,n)`                 | 远离零只进不舍，**数值（带位数）**   | `ROUND_UP([A], 1)`                      |
+| `ROUND_DOWN(x,n)`               | 朝零只舍不进，**数值（带位数）**     | `ROUND_DOWN([A], 1)`                    |
 | `FORMAT(x,n)`                   | 定位数格式化保留尾随零，返回**字符串** | `FORMAT([A], 4)` → `"0.0400"`        |
 | `TIME_ELAPSED_HOURS(t,n=1)`     | 距数组内最早时间的小时差（数组）     | `TIME_ELAPSED_HOURS([inj_time], 1)`     |
 | `GROUP_AVGlist(v,*k)`           | 按组平均（广播）                     | `GROUP_AVGlist([val],[grp])`            |
+| `GROUP_AVG_TOPlist(v,rep,*k)`   | 按组**只取最高档那几针**平均（广播，v1.17）| `GROUP_AVG_TOPlist([pct],[report],[grp])` |
+| `EARLIEST_TIME(src,"f")`        | 另一 AS 那一列的最早时间（原文，v1.17），作 `TIME_ELAPSED_HOURS` 第三参 | `EARLIEST_TIME([src], "imp_inj_time")` |
 | `GROUP_STDEVlist(v,*k)`         | 按组标准差（广播）                   | `GROUP_STDEVlist([val],[grp])`          |
 | `GROUP_SUMlist(v,*k)`           | 按组求和（广播）                     | `GROUP_SUMlist([val],[grp])`            |
 | `GROUP_MAXlist(v,*k)`           | 按组最大值（广播）                   | `GROUP_MAXlist([val],[grp])`            |
@@ -2196,7 +2262,11 @@ RESULT_STATUS(值数组, [LOQ阈值], [LOD阈值]) → 数值与字符串的混�
 1. **下游可以计算了。** 旧版整列是字符串，进不了 `list_arrays`，
    任何下游公式都无法引用；现在数值元素可参与计算 —— 这是总杂求和
    （`RESULT_NUM` → `GROUP_SUMlist`）能成立的前提。
-2. **尾随零不再自动补。** 需要固定位数展示的字段，**外面套一层 `FORMAT`**：
+2. **尾随零不再自动补。** 需要固定位数展示的字段，**外面套一层 `FORMAT`**
+   （★ v1.17.0 起更简单：**先修约、再分档** —— `RESULT_STATUS` 对数值原样透传，
+   所以源列是 `ROUND_EVEN([imp_pct], 4)` 时，`RESULT_STATUS([imp_pct_round], …)` 的数字格
+   本身就显示 `0.0400`，标签格照旧是 `＜0.05%` / `ND`。**反过来套不行**：
+   `ROUND_EVEN(RESULT_STATUS(…), 4)` 会把标签修约成 `---`。下面是当时的写法）：
 
 ```
 # 展示字段：恢复 4 位小数
@@ -2307,6 +2377,39 @@ imp_seq = DISTINCT_SEQlist([imp_name], [imp_pct_group])      # AS-12 双键
 两个都是数组路径函数，返回整列，**必须单独占一个字段**。内联进别的表达式
 （`[x] * DISTINCT_SEQlist(...)`）会把整条公式推上数组路径，那里它是 list 乘 list，
 `TypeError` 把整列刷成 `---`，只在日志留一行 —— 与 `BASELINE_BYlist` 同一个坑。
+
+---
+
+## GROUP_AVG_TOPlist —— 只取最高档求平均
+
+```
+GROUP_AVG_TOPlist(值列, 报告值列, 键1[, 键2…]) → 数值数组（组内每行相同，广播）
+```
+
+平均单杂的口径（有关物质 20260923 裁决 Q1 勾 A）：同一个杂质的几针里
+
+1. 有报告值 **≥报告限**（报告值是数字）的 → **只平均这几针**
+2. 否则有 **≥积分限**（报告值是「＜x%」）的 → 只平均这几针
+3. **全是 ND** → 全部针参与
+
+平均的是**值列**（未修约的检测杂质原值），平均完再在外面修约：
+
+```
+# AS-10 单键
+imp_avg_single = ROUND_EVEN(GROUP_AVG_TOPlist([imp_pct_num],[imp_report],[imp_pct_group]), 4)
+# AS-12 双键
+imp_avg_single = ROUND_EVEN(GROUP_AVG_TOPlist([imp_pct_num],[imp_report],[imp_name],[imp_pct_group]), 4)
+```
+
+例：6 针报告值 `0.06 / 0.05 / ＜0.05% / ＜0.05% / ND / ND` → 只平均前两针的检测杂质。
+
+- **分档与 `GROUP_REPORT_TOPlist` 是同一份**（数字 > 「＜x%」> ND > 没数据），组键归一也同一份 ——
+  「哪一档最高」两列不可能各说各的
+- **边界 `≥` 由报告值那一列决定**：`RESULT_STATUS` 里等于报告限的那针已经是数字，自然进最高档
+- 一组里没有任何一针认得出档次（全空 / 全 `---`）→ 该组 `---`，**不是 0**
+- **`GROUP_AVGlist` 做不了这件事**：它平均整组所有针，最高档之外的针会把平均拉低，
+  而且拉低多少取决于 ND 针的检测杂质恰好是几 —— 一个看着合理的错数
+- 数组路径函数，**单独占一个字段**
 
 ---
 
@@ -2472,25 +2575,42 @@ rec_n     = GROUP_COUNTlist([rec], [level])    # → 2    ← 报表上要能看
 
 | 函数 | 返回 | 修约方式 |
 | ---- | ---- | -------- |
-| `ROUND(val, digits)` | **数值** | 四舍五入（round-half-up），逢五一律进位 |
-| `ROUND_EVEN(val, digits)` | **数值** | 四舍六入五留双（round-half-even），GB/T 8170 / 中国药典 |
+| `ROUND(val, digits)` | **数值（带位数）** | 四舍五入（round-half-up），逢五一律进位 |
+| `ROUND_EVEN(val, digits)` | **数值（带位数）** | 四舍六入五留双（round-half-even），GB/T 8170 / 中国药典 |
 | `FORMAT(val, digits)` | **字符串** | 同 `ROUND` 的方向，但**保留尾随零** |
 
-两者只在「正好一半」（被舍位为 5 且其后全 0）时不同：
+两者只在「正好一半」（被舍位为 5 且其后全 0）时不同（右边是**显示**，v1.17.0 起）：
 
 ```
 ROUND(1.25, 1)       → 1.3        ROUND_EVEN(1.25, 1)  → 1.2   （2 是偶数，五留双）
-ROUND(2.5, 0)        → 3.0        ROUND_EVEN(2.5, 0)   → 2.0
-                                  ROUND_EVEN(3.5, 0)   → 4.0
-ROUND_EVEN(1.35, 1)  → 1.4
+ROUND(2.5, 0)        → 3          ROUND_EVEN(2.5, 0)   → 2
+                                  ROUND_EVEN(3.5, 0)   → 4
+ROUND_EVEN(1.35, 1)  → 1.4        ROUND_EVEN(3.1, 3)   → 3.100
 FORMAT(0.04, 4)      → "0.0400"   FORMAT(2, 3)         → "2.000"
 ```
 
-### 为什么必须拆出 `FORMAT`
+### ★ v1.17.0 起：`ROUND` 自己保位数，展示不必再套 `FORMAT`
+
+**`ROUND` 家族的结果记得公式里写的 `digits`**：`ROUND_EVEN(x, 3)` 碰上 `3.1` 显示 `3.100`、
+`ROUND(x, 0)` 显示 `1609` 而不是 `1609.0`。它**仍然是数** —— 比较、排序、`> 限度`
+判定、`[a]/[b]*100` 都照常；**一参与运算就变回普通数**（位数不传染），所以
+`ROUND_EVEN(ROUND(x,3)/2, 1)` 显示几位只看外层的 `1`。
+
+落库：修约过的 CalculatedList 列存成定位数文本（`["1609", "3.100"]`），读回时还原位数；
+没修约的列仍是 JSON 数字、逐字节不变。标量 Calculated 本来就存文本，同样生效。
+
+**所以下面「展示归展示、计算归计算」那套拆字段的写法已经不需要了**：一个
+`ROUND_EVEN([x], 4)` 字段既能显示 `0.0400`、也能被下游引用。`FORMAT` 仍然可用，
+场景收窄到「就是要一个字符串」（比如拼进文本）。
+
+> 下面两小节是 v1.17.0 之前的背景，**保留作记录**。其中「`FORMAT` 的结果不能被下游引用」
+> 那句说得过宽（口径文档 §3.3 已记为文档口径问题），**本版未订正**，待单独核实后再改。
+
+### 为什么当初必须拆出 `FORMAT`（v1.17.0 之前）
 
 制药行业对有效数字有强制要求，而 `0.04` 与 `0.0400` 表达的精度不同。
-`ROUND` 返回数值 —— 数值没有「尾随零」这个概念，`0.0400` 存成数值就是 `0.04`。
-所以展示用 `FORMAT`（字符串，零保住了），计算用 `ROUND`（数值，可继续参与运算）。
+v1.17.0 之前 `ROUND` 返回普通数值 —— 普通数值没有「尾随零」这个概念，`0.0400` 存成数值就是 `0.04`。
+所以当时展示用 `FORMAT`（字符串，零保住了），计算用 `ROUND`（数值，可继续参与运算）。
 
 ### ⚠️ `FORMAT` 的结果不能被下游引用
 
@@ -2510,8 +2630,9 @@ imp_total = GROUP_SUMlist([imp_pct_disp], [sid])
 
 ### 修约的是你填的那个十进制数
 
-内部用 `Decimal(repr(值))` 而不是 `Decimal(浮点值)` —— 后者修约的是浮点二进制
+内部用 `Decimal(float.__repr__(值))` 而不是 `Decimal(浮点值)` —— 后者修约的是浮点二进制
 展开。这样保证修约对象是**分析员实际填进去的那个十进制数**。
+（v1.17.0 起写成 `float.__repr__` 而不是 `repr`：带位数的修约值 `repr` 出来是构造式，不是数字。）
 
 ### 也可以套在数组函数外面
 
@@ -2519,7 +2640,7 @@ imp_total = GROUP_SUMlist([imp_pct_disp], [sid])
 很自然的写法可用：
 
 ```
-rec_avg_r = ROUND(GROUP_AVGlist([rec], [level]), 1)     # → [102.3, 102.3, ...]
+rec_avg_r = ROUND(GROUP_AVGlist([rec], [level]), 1)     # → ["102.3", "102.3", ...]（v1.17.0 起落库为文本）
 rec_rsd_f = FORMAT(GROUP_RSDlist([rec], [level]), 2)    # → ["5.89", "5.89", ...]
 r2_r      = ROUND(RSQ_ROWS(...), 4)                     # → [1.0]
 ```
@@ -2675,6 +2796,34 @@ TIME_ELAPSED_HOURS: base u'2026/5/12 20:13' is not a parsable timestamp
 在此之前，要拿到「距对照品进样」这个口径，只能把对照品的进样时间**当作一行
 数据塞进质控数组**。那行会连带出现在同一张表的其它列里（一个面积、一个
 回收率），将来做 RSD 或限度判定时就是个真实的污染源。有了基准参数就不必了。
+
+---
+
+## EARLIEST_TIME —— 从所选那一段的最早进样起算
+
+```
+EARLIEST_TIME(源AS, "字段") → 源 AS 那一列里最早的时间（原文）
+```
+
+**只作 `TIME_ELAPSED_HOURS` 的第三个参数（base）用**：
+
+```
+# 供试品溶液稳定性-2/-3：时间点(h) 从「稳定性来源」下拉所选那一段的最早进样起算
+imp_stab2_time = TIME_ELAPSED_HOURS([imp_stab2_inj_time], 1,
+                                    EARLIEST_TIME([imp_stab2_source], "imp_inj_time"))
+```
+
+- 源 AS 可以写字面量 `"imp_stability_cold"`，也可以写字段引用（下拉的值），与 `LOOKUP([src], …)` 同款。
+  源段的那个字段要勾 **cross_referenceable**
+- 时间的解析与 `TIME_ELAPSED_HOURS` 是**同一套**（见下一节）。源列里**有一格认不出来**
+  （比如斜杠写法 `2026/05/12 20:13`）→ **整列 `---`**：少读一格就可能少了真正最早的那一针
+- 源段一个进样时间都没有 / 下拉没选 → **整列 `---`，不回退到本段自己的最早时间**
+- 失败时本次写入的公式失败汇总日志里会留名（与 LOOKUP 取不到源同一条路）
+- 改了源段的进样时间，读它的 AS 会被重算（与动态源 `LOOKUP` 同一套依赖传播）
+
+> ⚠️ **不要让它单独占一个字段再引用。** 它失败时靠「报错」让整列变 `---`；
+> 单独占字段的话那一格是 `---`，而 `TIME_ELAPSED_HOURS` 收到 `---` 的 base
+> 会按「没给 base」**回退到本列最早时间** —— 正是这里要拒绝的那个静默回退。
 
 ---
 
