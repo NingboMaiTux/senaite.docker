@@ -9,7 +9,7 @@
     "internal: true 的条目（_Fixed）不是给公式用的函数（D3）：面向公式作者的地方（in_engine / by_purpose / README 总表 / §6.3）一律跳过；对外口径 = 96 个函数 + 1 个内部名。",
     "加函数 = 同一个 commit 在这里登记；不登记 calcfuncs.py --check 就 ABORT。"
   ],
-  "engine_version": "1.17.0",
+  "engine_version": "1.18.0",
   "shape_vocab": {
     "scalar": "吃整列（或多个值），恒返回一个值",
     "column": "恒返回 list（每行一格，或行空间那一列）",

@@ -2,13 +2,161 @@
 
 为 SENAITE LIMS 的计算公式（Calculation）模块增加三种新的 Interim Field 控件类型，支持 HPLC 含量测定、装量差异、杂质含量等复杂计算场景。
 
-**版本：** 1.17.0
+**版本：** 1.18.0
 **兼容：** SENAITE 2.x（实测 2.7.0 / Plone 5.2 / Python 2.7）
 
 > **关于 `ISSUES.md`**：本文多处写着「详见 `ISSUES.md` ISSUE-0xx」，但**该文件
 > 不在本仓库里**（2026-09-03 核实，git 全历史也没有提交记录）。那些
 > `ISSUE-0xx` 编号仍可作为问题标识使用，但**不要指望在本包目录下找到对应文档**。
 > 若有人手上留着这份台账，值得补进仓库。
+
+---
+
+<!-- BEGIN functions-table：由 tools/gen_function_table.py 从 src/maitux/calcenhance/functions.json 生成，勿手改 -->
+
+## 函数总表（引擎 1.18.0，96 个函数）
+
+下面这张表由 `src/maitux/calcenhance/functions.json`（引擎函数清单）**生成**，本 README 其余各节是按版本写的更新概要。
+
+- **机械可核**：函数名、在哪张表（✓）、数组路径 —— 与 `patches.py` 每次核对，漂了就在流水线（`calcfuncs.py --check`）、单测（`tests/test_function_manifest.py`）和实例日志（`function manifest mismatch`）三处报错。
+- **人定、门禁核不了**：返回形状、参数、用途、since —— 出处见 `Docs/Cal增加/maitux.calcenhance-函数清单-基线对账.md` §1b。定错了**不会报错**。
+- 返回形状指函数在**列表引擎**（calculatedlist）里返回什么：`scalar` 吃整列（或多个值），恒返回一个值；`column` 恒返回 list（每行一格，或行空间那一列）；`elementwise` 一个值进一个值出，或 list 进逐个 list 出 —— 形状跟着参数走；`opaque` 静态定不了，取决于源字段（LOOKUP / LOOKUP2）。
+- 参数写成 `名字:kind`，`[…]` 可省、`*` 可变参；kind 见清单 `kind_vocab`。
+
+| 函数 | calculated | calculatedlist | 返回形状 | 数组路径 | 参数 | 用途 | since |
+|---|:---:|:---:|---|:---:|---|---|---|
+| `abs` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `APPEND` |  | ✓ | column | ✓ | lst:column, value:literal | 跨AS聚合、行空间 | 1.10.0 |
+| `avg` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：x:column | 整列统计、平均 | 1.0.0 |
+| `AVG_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、平均 | 1.5.0 |
+| `BAND` | ✓ | ✓ | elementwise |  | value:scalar, low:scalar, high:scalar, inside:scalar | 限值判定 | 1.5.0 |
+| `BASELINE_BYlist` |  | ✓ | column | ✓ | values:column, sequence:column, *keys:column | 分组统计、基线比较 | 1.7.0 |
+| `ceil` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `COALESCE` | ✓ | ✓ | elementwise | ✓ | 标量：*values:scalar ／ 列表：*cols:column | 缺失回退 | 1.2.0 |
+| `COUNT_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、计数 | 1.1.0 |
+| `COUNT_VALUES_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、计数 | 1.5.0 |
+| `DISTINCT_AVG` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、平均 | 1.15.0 |
+| `DISTINCT_COUNT` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、计数 | 1.15.0 |
+| `DISTINCT_MAX` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、最大值 | 1.15.0 |
+| `DISTINCT_MIN` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、最小值 | 1.15.0 |
+| `DISTINCT_RANGE` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、极差 | 1.15.0 |
+| `DISTINCT_RSD` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、RSD | 1.15.0 |
+| `DISTINCT_SEQlist` |  | ✓ | column | ✓ | *key_arrays:column | 去重统计、序号 | 1.15.0 |
+| `EARLIEST_TIME` |  | ✓ | scalar |  | source_kw:as_name, field_kw:field_name | 时间、跨AS取值 | 1.17.0 |
+| `exp` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `floor` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `FORMAT` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 格式化 | 1.1.0 |
+| `GATE` | ✓ | ✓ | elementwise |  | value:scalar, threshold:scalar, below:scalar | 限值判定 | 1.5.0 |
+| `GROUP_AVG` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、平均 | 1.0.0 |
+| `GROUP_AVG_TOPlist` |  | ✓ | column | ✓ | values:column, reports:column, *key_arrays:column | 分组统计、最高档、平均 | 1.17.0 |
+| `GROUP_AVGlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、平均 | 1.0.0 |
+| `GROUP_CI_HIGH` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、置信区间 | 1.5.0 |
+| `GROUP_CI_HIGHlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、置信区间 | 1.1.0 |
+| `GROUP_CI_LOW` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、置信区间 | 1.5.0 |
+| `GROUP_CI_LOWlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、置信区间 | 1.1.0 |
+| `GROUP_COUNTlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、计数 | 1.1.0 |
+| `GROUP_MAX` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、最大值 | 1.0.0 |
+| `GROUP_MAXlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、最大值 | 1.0.0 |
+| `GROUP_MIN` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、最小值 | 1.0.0 |
+| `GROUP_MINlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、最小值 | 1.0.0 |
+| `GROUP_REPORT_TOPlist` |  | ✓ | column | ✓ | values:column, *key_arrays:column | 分组统计、最高档 | 1.15.0 |
+| `GROUP_RSDlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、RSD | 1.1.0 |
+| `GROUP_STDEVlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、标准差 | 1.0.0 |
+| `GROUP_SUM` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、求和 | 1.0.0 |
+| `GROUP_SUMlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、求和 | 1.0.0 |
+| `INDEX_BY` | ✓ | ✓ | scalar |  | target_arr:column, key_arr:column, match_val:scalar | 按键查找 | 1.0.0 |
+| `INDEX_BY_GROUP` |  | ✓ | column | ✓ | target_arr:column, key_arr:column, match_val:scalar, group_arr:column | 按键查找 | 1.14.0 |
+| `INTERCEPT` | ✓ | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.0.0 |
+| `INTERCEPT_CI_HIGH_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `INTERCEPT_CI_LOW_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `INTERCEPT_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.0.0 |
+| `INTERCEPT_SE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、标准误 | 1.5.0 |
+| `len` | ✓ | ✓ | scalar |  | s:column | 整列统计、计数 | 1.0.0 |
+| `log` | ✓ | ✓ | elementwise |  | x:scalar, [base:scalar] | 数学运算 | 1.0.0 |
+| `log10` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `LOOKUP` | ✓ | ✓ | opaque |  | source_kw:as_name, target_kw:field_name, key_kw:field_name, key_val:scalar, [default:literal] | 跨AS取值 | 1.0.0 |
+| `LOOKUP2` | ✓ | ✓ | opaque |  | source_kw:as_name, target_kw:field_name, key1_kw:field_name, key1_val:scalar, key2_kw:field_name, key2_val:scalar, [default:literal] | 跨AS取值 | 1.15.0 |
+| `max` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：iterable:column | 整列统计、最大值 | 1.0.0 |
+| `min` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：iterable:column | 整列统计、最小值 | 1.0.0 |
+| `pow` | ✓ | ✓ | elementwise |  | x:scalar, y:scalar, [z:scalar] | 数学运算 | 1.0.0 |
+| `RESULT_NUM` |  | ✓ | elementwise |  | value:scalar, [name:scalar], [main_name:literal] | 数值化 | 1.1.0 |
+| `RESULT_STATUS` |  | ✓ | column | ✓ | values:column, [loq:scalar], [lod:scalar] | 限值判定 | 1.0.0 |
+| `ROUND` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.1.0 |
+| `round` | ✓ | ✓ | elementwise |  | number:scalar, [ndigits:literal] | 修约 | 1.0.0 |
+| `ROUND_DOWN` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.9.0 |
+| `ROUND_EVEN` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.1.0 |
+| `ROUND_UP` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.8.0 |
+| `RSD_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、RSD | 1.0.0 |
+| `RSQ` | ✓ | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.0.0 |
+| `RSQ_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.0.0 |
+| `SHIFT` |  | ✓ | column | ✓ | values:column, [offset:literal] | 相邻行 | 1.3.0 |
+| `SLOPE` | ✓ | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.0.0 |
+| `SLOPE_CI_HIGH_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `SLOPE_CI_LOW_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `SLOPE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.0.0 |
+| `SLOPE_SE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、标准误 | 1.5.0 |
+| `sqrt` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `SSE` |  | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.1.0 |
+| `SSE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.1.0 |
+| `stdev` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：x:column | 整列统计、标准差 | 1.0.0 |
+| `STDEV_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、标准差 | 1.0.0 |
+| `sum` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：iterable:column, [start:scalar] | 整列统计、求和 | 1.0.0 |
+| `TIME_ELAPSED_HOURS` |  | ✓ | column | ✓ | times:column, [digits:literal], [base:scalar] | 时间 | 1.1.0 |
+| `XAGG_AVG` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、平均 | 1.11.0 |
+| `XAGG_AVG2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、平均 | 1.14.0 |
+| `XAGG_AVG_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、平均 | 1.12.0 |
+| `XAGG_COUNT` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、计数 | 1.11.0 |
+| `XAGG_COUNT2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、计数 | 1.14.0 |
+| `XAGG_COUNT_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、计数 | 1.12.0 |
+| `XAGG_KEYS` |  | ✓ | column | ✓ | field_kw:field_name, *source_kws:as_name | 跨AS聚合、行空间 | 1.10.0 |
+| `XAGG_KEYS2` |  | ✓ | column | ✓ | key1_kw:field_name, key2_kw:field_name, part:literal, *source_kws:as_name | 跨AS聚合、行空间 | 1.14.0 |
+| `XAGG_KEYS_WHERE2` |  | ✓ | column | ✓ | key1_kw:field_name, key2_kw:field_name, part:literal, all_sources:as_name, filter_kw:field_name, threshold:literal, filtered_sources:as_name | 跨AS聚合、行空间 | 1.14.0 |
+| `XAGG_MAX` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、最大值 | 1.11.0 |
+| `XAGG_MAX2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、最大值 | 1.14.0 |
+| `XAGG_MAX_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、最大值 | 1.12.0 |
+| `XAGG_MIN` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、最小值 | 1.11.0 |
+| `XAGG_MIN2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、最小值 | 1.14.0 |
+| `XAGG_MIN_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、最小值 | 1.12.0 |
+| `XAGG_NTH2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, sort_kw:field_name, nth:literal, *source_kws:as_name | 跨AS聚合、取第n份 | 1.14.0 |
+| `XAGG_RSD` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、RSD | 1.11.0 |
+| `XAGG_RSD2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、RSD | 1.14.0 |
+| `XAGG_RSD_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、RSD | 1.12.0 |
+
+另有内部名 `_Fixed`：两张表里都注册了、公式作者不写它（清单里 `internal: true`），不列在上表。
+
+<!-- END functions-table -->
+
+### ★ 加函数的纪律：同一个 commit 里登记清单
+
+往两张函数表（标量引擎 `safe_globals` / 列表引擎 `_SAFE`）加、删、改名一个函数，
+或者改 `_ARRAY_FN_RE`，**必须在同一个 commit 里**：
+
+1. 改 `src/maitux/calcenhance/functions.json`（名字、`tables`、`array_path`，以及人定的
+   `shape` / `params` / `purpose` / `since`；`purpose` 只能用文件顶部 `purpose_vocab` 里的词）；
+2. 重跑 `python tools/gen_function_table.py`，让上面的总表跟上；
+3. 跑 `tests/test_function_manifest.py`（容器里 `python`，见 `tests/harness.py` 顶部）。
+
+不登记的后果不是「文档旧了」，是三处一起红：流水线的
+`calcfuncs.py --check` ABORT、`test_function_manifest.py` 失败、实例日志每次重启打一条
+`maitux: function manifest mismatch`。**但 shape / params / purpose 写错不会红**
+（代码里没有等价物，门禁核不了）—— 这几格要给出处（代码行号或 harness 用例）。
+
+---
+
+## 1.18.0 更新概要（2026-09-25）
+
+**加的是引擎函数的机器可读清单，不改任何函数的行为。** 任何一格计算结果都不变。
+
+| 改了什么 | 在哪 |
+|---|---|
+| 引擎函数清单：96 个函数 + 1 个内部名，每个登记在哪张表、返回形状、走不走数组路径、参数、用途、since | `src/maitux/calcenhance/functions.json` |
+| 引擎首次求值时拿**真表**与清单比对（每进程每张表一次，只报不拦）：一致打 INFO `function manifest ok`，不一致打 ERROR `function manifest mismatch`，读不到清单打一条 WARN，计算照常 | `patches.py` 的 `_manifest_selfcheck` |
+| 单测：清单 ↔ 出货 `patches.py` 的文本级核对，逐名断言（392 项） | `tests/test_function_manifest.py` |
+| README 顶部的函数总表（生成物）与生成脚本（带 `--check`） | 上方总表、`tools/gen_function_table.py` |
+
+流水线侧（不在本包、在 `.claude` 个人仓库）：`calcfuncs.py` 是读清单的唯一入口；
+`check_v10.py` 第 7 节、`check_semantic.py` C 节改读清单（删掉了手抄的函数正则）；
+新增 `check_capability.py`（拆解流水线 §6.3：源表公式用到的函数 ⊆ 清单）。
 
 ---
 
