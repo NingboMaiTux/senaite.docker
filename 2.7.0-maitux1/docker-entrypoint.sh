@@ -184,6 +184,23 @@ if [ -e "custom.cfg" ]; then
   gosu senaite python /docker-initialize.py
 fi
 
+# ---------------------------------------------------------------------------
+# 打开 MaiZODB 的关系化投影：plone.recipe.zope2instance 没有对应的 buildout
+# 选项能往 <zodb_db main> 里插普通 key（zope-conf-additional 落在
+# </zodb_db> 之后，是文件级的，不是 zodb_db 级的），所以只能像上面口令替换
+# 一样，在 buildout 生成 zope.conf 之后，运行时原地补一行。
+#
+# 之前这一行让实例直接起不来：ZODB.config.importable_name() 对 ZConfig 传
+# 进来的 unicode 调 __import__ 报 TypeError（Python 2 的 __import__ 的
+# fromlist 要求 str）。已在 ZODB.config 修好（commit af21190）并重新 build
+# 进镜像；这里重新打开。
+# ---------------------------------------------------------------------------
+ZCONF="/home/senaite/senaitelims/parts/instance/etc/zope.conf"
+if [ -f "$ZCONF" ] && ! grep -q '^[[:space:]]*relational-mapper[[:space:]]' "$ZCONF"; then
+  step "写入 relational-mapper 到 zope.conf"
+  sed -i '/^[[:space:]]*mount-point \/$/i\    relational-mapper ZODB.relational.senaite.mapper_factory' "$ZCONF"
+fi
+
 step "启动实例"
 
 # ZEO Server

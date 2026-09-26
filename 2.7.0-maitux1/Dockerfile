@@ -114,6 +114,11 @@ RUN set -eux; \
     sed -i 's|https://dist.plone.org/release/5.2.15/versions.cfg|versions.cfg|g' $SENAITE_INSTANCE_HOME/buildout-base.cfg; \
     rm -rf /tmp/plone-installer /Plone.tgz
 
+# 自建的 ZODB 包（版本号 5.8.1.post1，跟官方 5.8.1 区分开，避免 buildout
+# 从 PyPI 拿到官方版覆盖掉这份）。放在这一层、CACHEBUST 之前，改这个包
+# 只会让下面 buildout 那层重跑，不会连累前面 apt / Plone 安装。
+COPY vendor/ZODB-5.8.1.post1.tar.gz $WHEELHOUSE/
+
 ARG CACHEBUST=1
 ARG UPDATED_PACKAGES=
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -136,6 +141,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     mkdir -p $SENAITE_HOME/buildout-cache/downloads; \
     mkdir -p $SENAITE_INSTANCE_HOME/eggs; \
     mkdir -p $WHEELHOUSE; \
+    find /cache/eggs /cache/wheelhouse /cache/buildout-downloads \
+      -iname 'ZODB-5.8.1.post1*' -exec rm -rf {} + 2>/dev/null || true; \
     cp -a /cache/buildout-downloads/. $SENAITE_HOME/buildout-cache/downloads/ || true; \
     cp -a /cache/eggs/. $SENAITE_INSTANCE_HOME/eggs/ || true; \
     cp -a /cache/wheelhouse/. $WHEELHOUSE/ || true; \
