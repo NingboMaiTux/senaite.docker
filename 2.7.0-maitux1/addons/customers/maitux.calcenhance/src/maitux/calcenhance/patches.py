@@ -7610,11 +7610,52 @@ def _evaluate_calculatedlist_interims(self, only=None):
         r'^\s*(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})'
         r'(?::(\d{2}))?\s*([\w+:\-]*)\s*$')
 
+    # '3/25/2025 3:17:45 PM' -- what the Agilent workstation writes into
+    # 「进样时间」, and '2026/5/12 20:13' -- what a Chinese Excel writes
+    # (T14).  Refusing these was the single most common way this method's
+    # stability columns came out '---': the operator pastes the instrument's
+    # own text, nothing complains, and the whole column reads as missing.
+    #
+    # Which number is the month is decided by WHERE THE FOUR-DIGIT YEAR IS,
+    # never by guessing from the value alone:
+    #   2026/5/12    year first  -> 年/月/日
+    #   25/3/2025    year last, first > 12 -> 日/月/年 (the only reading left)
+    #   3/25/2025    year last   -> 月/日/年, the Agilent order
+    # '3/5/2025' is genuinely ambiguous; it is read as the Agilent order and
+    # SAID SO once per distinct text, because the other reading is also a
+    # perfectly ordinary date -- exactly the kind of wrong number that never
+    # looks wrong.  A two-digit year ('3/5/25') is refused outright: both the
+    # century and the order would have to be guessed.
+    _TIME_SLASH_RE = re.compile(
+        r'^\s*(\d{1,4})/(\d{1,2})/(\d{1,4})[ T](\d{1,2}):(\d{2})'
+        r'(?::(\d{2}))?\s*([AaPp][Mm])?\.?\s*([\w+:\-]*)\s*$')
+    _slash_said = set()
+
+    def _dt_from_parts(year, mon, day, hh, mm, ss, ap, tz):
+        """The tail every timestamp shape shares -> (datetime, tz label).
+
+        One place, because the three shapes differ only in how the DATE is
+        spelled: 12-hour clocks, optional seconds and the trailing timezone
+        label behave identically in all of them, and a second copy of the
+        AM/PM arithmetic is a second chance to get noon or midnight wrong."""
+        import datetime as _dp_dt
+        hh = int(hh)
+        ap = (ap or u"").upper()
+        if ap == u"PM" and hh != 12:
+            hh += 12
+        elif ap == u"AM" and hh == 12:
+            hh = 0
+        try:
+            return (_dp_dt.datetime(int(year), int(mon), int(day), hh,
+                                    int(mm), int(ss or 0)),
+                    (tz or u"").strip().upper())
+        except ValueError:
+            return None, None
+
     def _parse_dt(value):
         """Parse a timestamp into (datetime, timezone_label).
 
         Returns (None, None) when the text is not a timestamp."""
-        import datetime as _pd_dt
         if value is None:
             return None, None
         t = _safe_text(value).strip()
@@ -7625,28 +7666,38 @@ def _evaluate_calculatedlist_interims(self, only=None):
             mon = _MONTHS.get(m.group(1)[:3].upper())
             if mon is None:
                 return None, None
-            day, year = int(m.group(2)), int(m.group(3))
-            hh, mm = int(m.group(4)), int(m.group(5))
-            ss = int(m.group(6) or 0)
-            ap = (m.group(7) or u"").upper()
-            if ap == u"PM" and hh != 12:
-                hh += 12
-            elif ap == u"AM" and hh == 12:
-                hh = 0
-            tz = (m.group(8) or u"").strip().upper()
-            try:
-                return _pd_dt.datetime(year, mon, day, hh, mm, ss), tz
-            except ValueError:
-                return None, None
+            return _dt_from_parts(m.group(3), mon, m.group(2), m.group(4),
+                                  m.group(5), m.group(6), m.group(7),
+                                  m.group(8))
         m = _TIME_ISO_RE.match(t)
         if m:
-            try:
-                dt = _pd_dt.datetime(
-                    int(m.group(1)), int(m.group(2)), int(m.group(3)),
-                    int(m.group(4)), int(m.group(5)), int(m.group(6) or 0))
-            except ValueError:
+            return _dt_from_parts(m.group(1), m.group(2), m.group(3),
+                                  m.group(4), m.group(5), m.group(6), None,
+                                  m.group(7))
+        m = _TIME_SLASH_RE.match(t)
+        if m:
+            first, second, third = m.group(1), m.group(2), m.group(3)
+            if len(first) == 4:
+                year, mon, day = first, second, third
+            elif len(third) == 4:
+                year = third
+                if int(first) > 12:
+                    mon, day = second, first
+                else:
+                    mon, day = first, second
+                    if int(second) <= 12 and t not in _slash_said:
+                        _slash_said.add(t)
+                        import sys as _pd_sys
+                        _pd_sys.stderr.write(
+                            "maitux:   slash date %r read as MONTH/DAY/YEAR "
+                            "(the Agilent order); the day/month reading "
+                            "would be another real date, so spell it "
+                            "2026-05-12 20:13 style if that was meant\n"
+                            % (t,))
+            else:
                 return None, None
-            return dt, (m.group(7) or u"").strip().upper()
+            return _dt_from_parts(year, mon, day, m.group(4), m.group(5),
+                                  m.group(6), m.group(7), m.group(8))
         return None, None
 
     def _time_elapsed_hours(times, digits=1, base=None):
@@ -7750,9 +7801,10 @@ def _evaluate_calculatedlist_interims(self, only=None):
         - `source_kw` 可以是字面量，也可以是字段引用（下拉的值）—— 与
           LOOKUP([imp_cf_source], …) 同款。数组路径会把标量字段内联成整列，
           所以这里收到的可能是一列同样的值；各行**不一样**就报错，不猜。
-        - 解析与 TIME_ELAPSED_HOURS 是同一个 _parse_dt。源列里有一格认不出来
-          （比如 `2026/05/12 20:13` 斜杠写法）→ 报错：少一格就可能少了真正
-          最早的那一针，算出来的整列 t0 都是错的，而且看不出来。
+        - 解析与 TIME_ELAPSED_HOURS 是同一个 _parse_dt（1.19.0 起连字符、
+          斜杠、英文月名三种写法都认，两位年 `5/12/26` 仍然不认）。源列里有
+          一格认不出来 → 报错：少一格就可能少了真正最早的那一针，算出来的
+          整列 t0 都是错的，而且看不出来。
         - 源段一个进样时间都没有 → 报错，**不回退到本段自己的最早时间**。
 
         「报错」在这里就是引擎的约定：数组路径整列写 '---'，并在本次写入的
@@ -7806,7 +7858,8 @@ def _evaluate_calculatedlist_interims(self, only=None):
         if unreadable:
             raise ValueError(
                 u"EARLIEST_TIME: %d value(s) in '%s' of '%s' are not a "
-                u"timestamp (e.g. %r) -- write it as 2026-05-12 20:13"
+                u"timestamp (e.g. %r) -- accepted: 2026-05-12 20:13, "
+                u"2026/5/12 20:13, 5/12/2026 8:13:00 PM"
                 % (len(unreadable), _safe_text(field_kw), source_kw,
                    unreadable[0]))
         labels = set(label for _, label, _ in parsed)

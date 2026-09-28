@@ -2591,8 +2591,14 @@ def test_earliest_time_s5(p, r):
             run([]), [u"---", u"---"])
     r.check("S5 no source selected -> '---'", run(cold, source=u""),
             [u"---", u"---"])
-    r.check("S5 slash timestamp in the source is refused, not skipped",
+    # T14 (1.19.0): the slash spelling is now read, so the guard below moves
+    # to a two-digit year -- still refused, and still refused for the whole
+    # column rather than skipped, which is the property this case is here for.
+    r.check("S5 slash source is now read (T14): t0 = 18:13 on the 12th",
             run([u"2026/05/12 18:13", u"2026-05-12 20:13"]),
+            [u"50.0", u"56.0"])
+    r.check("S5 unreadable timestamp in the source is refused, not skipped",
+            run([u"5/12/26 18:13", u"2026-05-12 20:13"]),
             [u"---", u"---"])
 
     # dependency: editing the chosen segment must re-evaluate this AS
@@ -2604,6 +2610,68 @@ def test_earliest_time_s5(p, r):
             True)
     r.check("S5 registered in _SAFE", "EARLIEST_TIME" in
             _registry_keys(p, "_SAFE"), True)
+
+
+def test_slash_dates_t14(p, r):
+    """T14: the chromatography workstation's own timestamp is read as-is.
+
+    「进样时间」 is pasted out of the Agilent workstation, which writes
+    `3/25/2025 3:17:45 PM` (US order, 12-hour clock).  Refusing that spelling
+    is what put '---' down the whole 稳定性 column on lims-dev while nothing
+    reported an error: the cell holds a real timestamp, the operator pasted
+    exactly what the instrument produced, and the only sign of trouble was a
+    line in the instance log.
+
+    Which number is the month follows the FOUR-DIGIT YEAR's position, never a
+    guess from the value; `3/5/2025` is read the Agilent way and said so once.
+    A two-digit year is refused, because both the century and the order would
+    have to be guessed and a wrong date looks exactly like a right one.
+    """
+    import json
+
+    install_engine_stubs()
+
+    def hours(times, digits=1):
+        _, analyses = build_sample([
+            {"as_id": "A", "service_kw": "stab", "fields": [
+                {"keyword": "inj", "result_type": "list",
+                 "value": json.dumps(times)},
+                {"keyword": "h", "result_type": "calculatedlist",
+                 "formula": u"TIME_ELAPSED_HOURS([inj], %d)" % digits}]},
+        ])
+        return json.loads(
+            evaluate(p, analyses, ("A",)).get("A.h") or "null")
+
+    r.check("T14 Agilent 月/日/年 + 12 小时制",
+            hours([u"3/25/2025 3:17:45 PM", u"3/25/2025 7:17:45 PM"]),
+            [u"0.0", u"4.0"])
+    # 12 AM is midnight and 12 PM is noon -- the one pair of values that a
+    # hand-rolled +12 gets backwards, and both readings look plausible.
+    r.check("T14 12:xx AM / PM",
+            hours([u"3/25/2025 12:30:00 AM", u"3/25/2025 12:30:00 PM"]),
+            [u"0.0", u"12.0"])
+    r.check("T14 中文 Excel 年/月/日 (24h)",
+            hours([u"2026/5/12 20:13", u"2026/5/13 8:13"]),
+            [u"0.0", u"12.0"])
+    r.check("T14 年在后、首位 >12 -> 日/月/年",
+            hours([u"25/3/2025 10:00", u"25/3/2025 16:00"]),
+            [u"0.0", u"6.0"])
+    # 3/5/2025 is ambiguous; it must land on March 5, the same instant the
+    # ISO spelling names -- if it were read as 3 May the gap would be 1464h.
+    r.check("T14 歧义的 3/5/2025 按月/日读，与 ISO 同一时刻",
+            hours([u"3/5/2025 00:00", u"2025-03-05 06:00"]),
+            [u"0.0", u"6.0"])
+    r.check("T14 两位年不认，那一行 '---'，别的行照算",
+            hours([u"2026-05-12 20:13", u"3/5/25 10:00"]),
+            [u"0.0", u"---"])
+    r.check("T14 日期部分不成立的照旧不认 (13 月)",
+            hours([u"2026-05-12 20:13", u"13/25/2025 10:00"]),
+            [u"0.0", u"---"])
+    # The timezone label rides along unchanged: a column that mixes a labelled
+    # cell with a bare one is still refused (ISSUE-007), slash or not.
+    r.check("T14 时区标签不一致照旧整列拒算",
+            hours([u"3/25/2025 3:17:45 PM CST", u"3/25/2025 7:17:45 PM"]),
+            [u"---", u"---"])
 
 
 def main():
@@ -2642,6 +2710,7 @@ def main():
     test_fixed_s2_result_status(p, r)
     test_fixed_s2_cross_as(p, r)
     test_earliest_time_s5(p, r)
+    test_slash_dates_t14(p, r)
     test_fixed_s1_through_the_engine(p, r)
     test_baseline_bylist(p, r)
     test_baseline_registration(p, r)
