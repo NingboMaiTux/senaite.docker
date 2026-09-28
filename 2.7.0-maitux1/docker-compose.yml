@@ -91,6 +91,15 @@ services:
       # 仪器采集端的共享上报 Token。可选：不设就是空串，该通道关闭，
       # 采集端只能用仪器模板上登记的 agent_token 鉴权。
       PHASE1_INGEST_TOKEN: ${PHASE1_INGEST_TOKEN:-}
+      # maitux.elnlink (MaiELN link): where the ELN backend is reached from
+      # this network for the approved-result push, the browser-facing ELN
+      # address for deep links, the shared push token and the demo users'
+      # password. All optional: empty token = push unauthenticated, empty
+      # password = the demo seed refuses to create users.
+      ELN_API_BASE: ${ELN_API_BASE:-http://mainotebook-backend:8000}
+      ELN_PUBLIC_URL: ${ELN_PUBLIC_URL:-http://localhost:5173}
+      ELN_INTEGRATION_TOKEN: ${ELN_INTEGRATION_TOKEN:-}
+      ELN_DEMO_PASSWORD: ${ELN_DEMO_PASSWORD:-}
       PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
       PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
       LANG: C.UTF-8
@@ -132,6 +141,15 @@ services:
       # 仪器采集端的共享上报 Token。可选：不设就是空串，该通道关闭，
       # 采集端只能用仪器模板上登记的 agent_token 鉴权。
       PHASE1_INGEST_TOKEN: ${PHASE1_INGEST_TOKEN:-}
+      # maitux.elnlink (MaiELN link): where the ELN backend is reached from
+      # this network for the approved-result push, the browser-facing ELN
+      # address for deep links, the shared push token and the demo users'
+      # password. All optional: empty token = push unauthenticated, empty
+      # password = the demo seed refuses to create users.
+      ELN_API_BASE: ${ELN_API_BASE:-http://mainotebook-backend:8000}
+      ELN_PUBLIC_URL: ${ELN_PUBLIC_URL:-http://localhost:5173}
+      ELN_INTEGRATION_TOKEN: ${ELN_INTEGRATION_TOKEN:-}
+      ELN_DEMO_PASSWORD: ${ELN_DEMO_PASSWORD:-}
       PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
       PIP_TRUSTED_HOST: pypi.tuna.tsinghua.edu.cn
       LANG: C.UTF-8
