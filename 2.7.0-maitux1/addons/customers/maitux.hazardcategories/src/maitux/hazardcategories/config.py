@@ -46,3 +46,18 @@ LEGACY_HAZARD_EN_COMMON = {
 
 PROJECTNAME = "maitux.hazardcategories"
 PROFILE_ID = "profile-%s:default" % PROJECTNAME
+
+# 容器（Setup 入口）与条目的内容类型
+CONTAINER_TYPE = "HazardCategories"
+ITEM_TYPE = "HazardCategory"
+
+# 容器在 Setup 文件夹下的 id
+FOLDER_ID = "hazard_categories"
+
+# 新版 DX Setup 文件夹的 id。
+# senaite.core 的设置菜单 ``setupitems()`` 是
+# ``setup.objectValues() + bika_setup.objectValues()``，所以容器放在
+# ``<site>/setup`` 下会**自动**成为设置主页的一个入口 tile，
+# 并在 maitux.setupmenu 的管理界面里可按角色分配可见性。
+SETUP_FOLDER_ID = "setup"
+SETUP_TYPE = "Setup"

@@ -1,6 +1,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"
       xmlns:tal="http://xml.zope.org/namespaces/tal"
       xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      i18n:domain="maitux.stock"
       xmlns:metal="http://xml.zope.org/namespaces/metal"
       metal:use-macro="context/main_template/macros/master">
 <body>
@@ -12,15 +13,15 @@
             tal:define="result python:view.results(); filters python:result['filters']">
 
   <h1 class="documentFirstHeading" tal:content="python:view.page_title()">Usage Trace</h1>
-  <p class="text-muted" i18n:translate="stockusage_trace_desc1">按 LIMS 库存编号、厂家批号查询批次去向与使用情况，实现从批号到使用记录的追溯。</p>
-  <p class="text-muted" i18n:translate="stockusage_trace_desc2">批号一栏同时匹配「厂家批号」与「批次编号」，支持模糊查询。</p>
+  <p class="text-muted"  i18n:translate="stockusage_trace_desc1">Look up where a batch went and how it was used, by LIMS stock number or manufacturer lot, for full lot-to-usage traceability.</p>
+  <p class="text-muted"  i18n:translate="stockusage_trace_desc2">The lot number filter matches both the manufacturer lot and the batch number, with fuzzy matching.</p>
 
   <form method="get" class="row mb-4"
         tal:attributes="action python:view.context_url()">
 
     <div class="col-md-3 mb-2">
       <label class="small mb-1" for="stock_number"
-             i18n:translate="stockusage_stock_number">库存编号（LIMS）</label>
+              i18n:translate="stockusage_stock_number">Stock Number (LIMS)</label>
       <input type="text" class="form-control form-control-sm"
              id="stock_number" name="stock_number" placeholder="RM-001"
              tal:attributes="value python:filters.get('stock_number')"/>
@@ -28,35 +29,35 @@
 
     <div class="col-md-3 mb-2">
       <label class="small mb-1" for="batch_number"
-             i18n:translate="stockusage_batch_number">厂家批号 / 批次编号</label>
+              i18n:translate="stockusage_batch_number">Manufacturer Lot / Batch No.</label>
       <input type="text" class="form-control form-control-sm"
              id="batch_number" name="batch_number" placeholder="123456"
              tal:attributes="value python:filters.get('batch_number')"/>
     </div>
 
     <div class="col-md-3 mb-2">
-      <label class="small mb-1" i18n:translate="stockusage_destination">批次去向</label>
+      <label class="small mb-1"  i18n:translate="stockusage_destination">Batch Destination</label>
       <div class="form-check">
         <input type="hidden" name="worksheets_filter_submitted" value="1"/>
         <input class="form-check-input" type="checkbox" value="1"
                id="include_worksheets" name="include_worksheets"
                tal:attributes="checked python:'checked' if view.include_worksheets() else None"/>
         <label class="form-check-label small" for="include_worksheets"
-               i18n:translate="stockusage_include_worksheets">包含关联工作表去向（需遍历工作表，数据量大时较慢）</label>
+                i18n:translate="stockusage_include_worksheets">Include linked worksheet destinations (slower on large datasets)</label>
       </div>
     </div>
 
     <div class="col-md-3 mb-2 d-flex align-items-end">
       <button type="submit" class="btn btn-sm btn-primary mr-2"
-              name="search" value="1" i18n:translate="stockusage_search">查询</button>
+              name="search" value="1"  i18n:translate="stockusage_search">Search</button>
       <a class="btn btn-sm btn-outline-secondary"
-         i18n:translate="stockusage_reset"
-         tal:attributes="href python:view.context_url()">重置</a>
+          i18n:translate="stockusage_reset"
+         tal:attributes="href python:view.context_url()">Reset</a>
     </div>
   </form>
 
   <div class="alert alert-info" tal:condition="python:not result['has_filters']"
-       i18n:translate="stockusage_enter_filter">请输入「库存编号」或「厂家批号」后点击查询。</div>
+        i18n:translate="stockusage_enter_filter">Enter a stock number or manufacturer lot, then click Search.</div>
 
   <tal:block tal:condition="python:result['has_filters']">
 
@@ -64,20 +65,20 @@
          tal:content="python:view.summary_text(result['total'], result['page'], result['pages'])">-</div>
 
     <div class="alert alert-warning" tal:condition="python:not result['items']"
-         i18n:translate="stockusage_no_batch">没有匹配的库存批次，请调整查询条件。</div>
+          i18n:translate="stockusage_no_batch">No matching stock batches. Please adjust the filters.</div>
 
     <div class="card mb-4" tal:repeat="item python:result['items']">
 
       <div class="card-header" tal:define="ctx python:item['context']">
         <strong tal:content="python:ctx.get('batch_id') or '-'">Batch ID</strong>
         <span class="text-muted ml-2">|</span>
-        <span class="ml-2"><span i18n:translate="stockusage_stock_number_label">库存编号：</span><span
+        <span class="ml-2"><span  i18n:translate="stockusage_stock_number_label">Stock Number:</span><span
             tal:content="python:ctx.get('number') or '-'">-</span></span>
         <span class="text-muted ml-2">|</span>
-        <span class="ml-2"><span i18n:translate="stockusage_material_name">物料名称：</span><span
+        <span class="ml-2"><span  i18n:translate="stockusage_material_name">Material Name:</span><span
             tal:content="python:ctx.get('material_name') or '-'">-</span></span>
         <span class="text-muted ml-2">|</span>
-        <span class="ml-2"><span i18n:translate="stockusage_lot_label">厂家批号：</span><span
+        <span class="ml-2"><span  i18n:translate="stockusage_lot_label">Manufacturer Lot:</span><span
             tal:content="python:ctx.get('batch_number') or '-'">-</span></span>
         <a class="btn btn-sm btn-outline-secondary float-right"
            i18n:translate="stockusage_batch_detail"
@@ -89,35 +90,35 @@
 
         <div class="row small mb-3">
           <div class="col-md-3 mb-2">
-            <div class="text-muted" i18n:translate="stockusage_stock_type">库存类型</div>
+            <div class="text-muted"  i18n:translate="stockusage_stock_type">Stock Type</div>
             <div tal:content="python:ctx.get('stock_type') or '-'">-</div>
           </div>
           <div class="col-md-3 mb-2">
-            <div class="text-muted" i18n:translate="stockusage_supplier">供应商</div>
+            <div class="text-muted"  i18n:translate="stockusage_supplier">Supplier</div>
             <div tal:content="python:ctx.get('supplier') or '-'">-</div>
           </div>
           <div class="col-md-2 mb-2">
-            <div class="text-muted" i18n:translate="stockusage_current_amount">当前数量</div>
+            <div class="text-muted"  i18n:translate="stockusage_current_amount">Current Amount</div>
             <div>
               <span tal:content="python:item['current_amount_text']">0.00</span>
               <span tal:content="python:ctx.get('unit') or ''"></span>
             </div>
           </div>
           <div class="col-md-2 mb-2">
-            <div class="text-muted" i18n:translate="stockusage_batch_status">批次状态</div>
+            <div class="text-muted"  i18n:translate="stockusage_batch_status">Batch Status</div>
             <div tal:content="python:ctx.get('batch_status_label') or '-'">-</div>
           </div>
           <div class="col-md-2 mb-2">
-            <div class="text-muted" i18n:translate="stockusage_expiry">有效期</div>
+            <div class="text-muted"  i18n:translate="stockusage_expiry">Expiry Date</div>
             <div tal:content="python:item['expiry_date_text'] or '-'">-</div>
           </div>
           <div class="col-md-3 mb-2">
-            <div class="text-muted" i18n:translate="stockusage_location">存放位置</div>
+            <div class="text-muted"  i18n:translate="stockusage_location">Storage Location</div>
             <div tal:content="python:ctx.get('location') or '-'">-</div>
           </div>
           <div class="col-md-3 mb-2">
             <div class="text-muted"
-                 i18n:translate="stockusage_first_last_use">首次使用 / 最近使用</div>
+                  i18n:translate="stockusage_first_last_use">First / Last Use</div>
             <div>
               <span tal:content="python:summary['first_date'] or '-'">-</span>
               /
@@ -126,7 +127,7 @@
           </div>
           <div class="col-md-3 mb-2">
             <div class="text-muted"
-                 i18n:translate="stockusage_consume_return_total">领用合计 / 归还合计</div>
+                  i18n:translate="stockusage_consume_return_total">Total Consumed / Returned</div>
             <div>
               <span tal:content="python:summary['consume_total']">0.00</span>
               /
@@ -140,18 +141,18 @@
           <table class="table table-sm table-striped">
             <thead>
               <tr>
-                <th i18n:translate="stockusage_col_operation">操作类型</th>
-                <th i18n:translate="stockusage_col_operation_date">操作时间</th>
-                <th i18n:translate="stockusage_col_operator">操作人</th>
-                <th class="text-right" i18n:translate="stockusage_col_quantity">数量</th>
-                <th i18n:translate="stockusage_col_remarks">备注</th>
-                <th i18n:translate="stockusage_col_from_batch">来源批次</th>
+                <th  i18n:translate="stockusage_col_operation">Operation Type</th>
+                <th  i18n:translate="stockusage_col_operation_date">Operation Date</th>
+                <th  i18n:translate="stockusage_col_operator">Operator</th>
+                <th class="text-right"  i18n:translate="stockusage_col_quantity">Quantity</th>
+                <th  i18n:translate="stockusage_col_remarks">Remarks</th>
+                <th  i18n:translate="stockusage_col_from_batch">From Batch</th>
               </tr>
             </thead>
             <tbody>
               <tr tal:condition="python:not item['records']">
                 <td colspan="6" class="text-muted"
-                    i18n:translate="stockusage_no_records">该批次暂无使用记录</td>
+                     i18n:translate="stockusage_no_records">No usage records for this batch yet</td>
               </tr>
               <tr tal:repeat="record python:item['records']">
                 <td tal:content="python:record['operation_label'] or '-'">-</td>
@@ -176,10 +177,10 @@
 
         <div class="row mt-3">
           <div class="col-md-6">
-            <h6 i18n:translate="stockusage_split_targets">分装去向（由本批次分装出去的批次）</h6>
+            <h6  i18n:translate="stockusage_split_targets">Split destinations (batches split from this batch)</h6>
             <ul class="pl-3 mb-2">
               <li class="text-muted" tal:condition="python:not item['split_targets']"
-                  i18n:translate="stockusage_none">无</li>
+                   i18n:translate="stockusage_none">None</li>
               <li tal:repeat="target python:item['split_targets']">
                 <a tal:attributes="href python:target['url']"
                    tal:content="python:target['batch_id']">-</a>
@@ -189,13 +190,13 @@
             </ul>
           </div>
           <div class="col-md-6">
-            <h6 i18n:translate="stockusage_linked_worksheets">关联工作表去向（使用该批次的工作表）</h6>
+            <h6  i18n:translate="stockusage_linked_worksheets">Linked worksheet destinations (worksheets using this batch)</h6>
             <ul class="pl-3 mb-2">
               <li class="text-muted" tal:condition="python:not item['worksheets']">
                 <tal:block tal:condition="python:view.include_worksheets()"
-                           i18n:translate="stockusage_none_short">无</tal:block>
+                            i18n:translate="stockusage_none_short">None</tal:block>
                 <tal:block tal:condition="python:not view.include_worksheets()"
-                           i18n:translate="stockusage_worksheets_skipped">本次查询未反查工作表（可在上方勾选后重查）</tal:block>
+                            i18n:translate="stockusage_worksheets_skipped">Linked worksheets were not resolved in this query (tick the box above and search again)</tal:block>
               </li>
               <li tal:repeat="worksheet python:item['worksheets']">
                 <a tal:attributes="href python:worksheet['url']"

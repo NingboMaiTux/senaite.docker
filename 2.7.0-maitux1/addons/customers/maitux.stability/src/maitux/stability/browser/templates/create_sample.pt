@@ -42,7 +42,7 @@
           </tbody>
         </table>
 
-        <!-- Step 1: select the client, refresh the contact list -->
+        <!-- Step 1: choose the client, which refreshes the contact list -->
         <form method="get"
               tal:attributes="action string:${context/absolute_url}/@@create_sample">
           <tal:block tal:repeat="item python:view.tasks">
@@ -59,7 +59,7 @@
                       tal:content="c/title">Client</option>
             </select>
             <small class="form-text text-muted" i18n:translate="">
-              Selecting a client will refresh the contact list.
+              Selecting a client refreshes the contact list.
             </small>
           </div>
         </form>

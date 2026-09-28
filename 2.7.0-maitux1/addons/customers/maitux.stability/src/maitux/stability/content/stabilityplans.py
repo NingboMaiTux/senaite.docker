@@ -2,6 +2,7 @@
 from bika.lims.interfaces import IDoNotSupportSnapshots
 from plone.supermodel import model
 from senaite.core.content.base import Container
+from maitux.stability.title import TranslatableTitleMixin
 from senaite.core.interfaces import IHideActionsMenu
 from zope.interface import implementer
 
@@ -18,7 +19,7 @@ class IStabilityPlansSchema(model.Schema):
     IDoNotSupportSnapshots,
     IHideActionsMenu,
 )
-class StabilityPlans(Container):
+class StabilityPlans(TranslatableTitleMixin, Container):
     pass
 
 

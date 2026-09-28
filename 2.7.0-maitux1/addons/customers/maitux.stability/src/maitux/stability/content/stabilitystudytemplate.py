@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from maitux.stability import stabilityMessageFactory as _
 from bika.lims.interfaces import IDeactivable
 from plone.autoform import directives
 from plone.namedfile.field import NamedBlobFile
@@ -14,7 +15,6 @@ from z3c.form.interfaces import IAddForm
 from zope import schema
 from zope.interface import implementer
 
-from maitux.stability import _
 from maitux.stability.interfaces import IStabilityPlanTemplate
 
 

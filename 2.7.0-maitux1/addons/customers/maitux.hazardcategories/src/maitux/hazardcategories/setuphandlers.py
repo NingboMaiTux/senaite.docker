@@ -12,8 +12,11 @@ from maitux.hazardcategories import logger
 from maitux.hazardcategories import _ as _hc
 from maitux.hazardcategories.config import (
     DEFAULT_CATEGORIES,
+    FOLDER_ID,
     LEGACY_HAZARD_EN_COMMON,
     PROJECTNAME,
+    SETUP_FOLDER_ID,
+    SETUP_TYPE,
 )
 from maitux.hazardcategories.translation import (
     _to_unicode,
@@ -23,10 +26,10 @@ from maitux.hazardcategories.utils import (
     SCOPE_AR,
     SCOPE_BOTH,
     SCOPE_REFERENCE,
+    get_container,
     parse_categories,
 )
 
-FOLDER_ID = "hazard_categories"
 FOLDER_TITLE_MSG = _hc(u"HazardCategories Container",
                        default=u"Sample Properties")
 FOLDER_TITLE = u"Sample Properties"
@@ -41,7 +44,6 @@ FTI_ITEM_LABEL_MSG = _hc(
 )
 ITEM_TITLE_MSG = _hc(u"Sample Properties", default=u"Sample Properties")
 DEFAULT_LAYOUT = "hazardcategories-controlpanel"
-SIDEBAR_DEPTH = 2
 PROFILE_ID = "profile-%s:default" % PROJECTNAME
 LEGACY_CONFIGLET_ID = "maitux-hazardcategories"
 
@@ -90,7 +92,7 @@ def run_install_steps(portal):
     ensure_hazardcategories_in_setup_catalog(portal)
     setup_permissions(folder)
     migrate_hazard_titles(portal)
-    setup_sidebar()
+    remove_from_sidebar(portal)
 
 
 def _split_categories_rows(text):
@@ -330,7 +332,7 @@ def ensure_setup_catalog_usage_scope_index(portal):
     # the ``usage_scope`` / ``allowedRolesAndUsers`` indexes stay empty
     # unless we write them directly here.
     try:
-        folder = getattr(portal, FOLDER_ID, None)
+        folder = get_container()
         if folder is not None:
             for cid, obj in folder.contentItems():
                 if getattr(obj, "portal_type", "") == "HazardCategory":
@@ -347,14 +349,12 @@ def ensure_setup_catalog_usage_scope_index(portal):
 
 def ensure_hazardcategories_in_setup_catalog(portal):
     """把 hazard_categories 容器及全部 HazardCategory 子项补进
-    senaite_catalog_setup / uid_catalog，供 sidebar 二级菜单和
+    senaite_catalog_setup / uid_catalog，供设置菜单入口和
     ReferenceWidget 正确显示标题。幂等：重复执行无副作用。
+
+    容器从站点根搬进 setup 后路径变了，也必须靠这一步重新挂目录。
     """
-    folder = None
-    try:
-        folder = portal._getOb("hazard_categories", None)
-    except Exception:
-        folder = getattr(portal, "hazard_categories", None)
+    folder = get_container()
     if folder is None:
         return 0
     targets = [folder]
@@ -421,7 +421,7 @@ def migrate_hazard_titles(portal):
             updated += 1
             logger.info("hazard: FTI %s title -> Message (maitux.hazardcategories)",
                         portal_type)
-    folder = getattr(portal, FOLDER_ID, None)
+    folder = get_container()
     if folder is not None:
         try:
             folder.setTitle(FOLDER_TITLE_MSG)
@@ -456,6 +456,9 @@ def setup_type_constraints():
             logger.warn("typeinfo import failed: %s", exc)
 
     ensure_allowed_content_type(types_tool, "Plone Site", FOLDER_TYPE)
+    # Setup 文件夹开了 filter_content_types，必须显式允许本类型，
+    # 否则 <site>/setup/hazard_categories 建不出来
+    ensure_allowed_content_type(types_tool, SETUP_TYPE, FOLDER_TYPE)
 
     hc_fti = types_tool.getTypeInfo(FOLDER_TYPE)
     if hc_fti is None:
@@ -487,31 +490,53 @@ def _translate_msg(portal, msg):
     return translate_with_fallback(msg, context=portal)
 
 
+def get_setup_folder(portal):
+    """新版 DX Setup 文件夹（<site>/setup）"""
+    try:
+        return portal._getOb(SETUP_FOLDER_ID, None)
+    except Exception:
+        return None
+
+
 def setup_site_structure(portal):
+    """把容器建在 ``<site>/setup`` 下。
+
+    放在 setup 里的内容对象会被 senaite.core 设置菜单的 ``setupitems()``
+    （``setup.objectValues() + bika_setup.objectValues()``）自动收录，
+    即成为设置主页上的一个入口 tile；不再使用 BikaSetup 的
+    ``sidebar_folders``（旧版把容器挂成侧边栏里的一个文件夹节点）。
+
+    旧站点把容器建在站点根目录，安装时 cut/paste 搬进 setup —— 保留 UID 与
+    全部子项，因此已维护的分类数据不丢。
+    """
     logger.info("*** Setup Hazard Categories Site Structure ***")
-    msgid = u"HazardCategories Container"
-    default = u"Sample Properties"
-    FOLDER_TITLE_MSG = _hc(msgid, default=default)
+    setup = get_setup_folder(portal)
+    if setup is None:
+        raise RuntimeError("'%s' folder not found in the site" % SETUP_FOLDER_ID)
+
     with ploneapi.env.adopt_roles(["Manager"]):
-        existing = portal.get(FOLDER_ID)
-        if existing is not None:
-            existing_type = getattr(existing, "portal_type", "")
-            if existing_type == FOLDER_TYPE:
-                logger.info("Skip existing folder '%s' (%s)", FOLDER_ID, FOLDER_TYPE)
-                folder = existing
-            else:
-                logger.info(
-                    "Existing '%s' is type '%s', replacing with '%s'",
-                    FOLDER_ID, existing_type, FOLDER_TYPE)
-                folder = _replace_with_hazardcategories_fti(portal, existing)
-        else:
+        _migrate_from_site_root(portal, setup)
+
+        folder = setup._getOb(FOLDER_ID, None)
+        if folder is None:
             folder = ploneapi.content.create(
-                container=portal,
+                container=setup,
                 type=FOLDER_TYPE,
                 id=FOLDER_ID,
                 title=FOLDER_TITLE_MSG,
             )
-            logger.info("Created folder '%s' with type '%s'", FOLDER_ID, FOLDER_TYPE)
+            logger.info("Created '%s/%s' with type '%s'",
+                        SETUP_FOLDER_ID, FOLDER_ID, FOLDER_TYPE)
+        else:
+            existing_type = getattr(folder, "portal_type", "")
+            if existing_type == FOLDER_TYPE:
+                logger.info("Skip existing container '%s/%s' (%s)",
+                            SETUP_FOLDER_ID, FOLDER_ID, FOLDER_TYPE)
+            else:
+                logger.info(
+                    "Existing '%s/%s' is type '%s', replacing with '%s'",
+                    SETUP_FOLDER_ID, FOLDER_ID, existing_type, FOLDER_TYPE)
+                folder = _replace_with_hazardcategories_fti(setup, folder)
 
         current_layout = getattr(folder, "getLayout", lambda: None)()
         if current_layout != DEFAULT_LAYOUT:
@@ -523,36 +548,66 @@ def setup_site_structure(portal):
         return folder
 
 
-def _replace_with_hazardcategories_fti(portal, existing):
+def _migrate_from_site_root(portal, setup):
+    """把站点根目录下的旧容器搬进 setup（cut/paste，保留 UID 与子项）。"""
+    old = portal._getOb(FOLDER_ID, None)
+    if old is None or getattr(old, "portal_type", "") != FOLDER_TYPE:
+        return None
+
+    if setup._getOb(FOLDER_ID, None) is not None:
+        logger.warn("Both /%s and /%s/%s exist - leaving them alone, "
+                    "please merge manually", FOLDER_ID, SETUP_FOLDER_ID,
+                    FOLDER_ID)
+        return None
+
+    logger.info("Migrating /%s -> /%s/%s ...", FOLDER_ID, SETUP_FOLDER_ID,
+                FOLDER_ID)
+    try:
+        clipboard = portal.manage_cutObjects([FOLDER_ID])
+        setup.manage_pasteObjects(clipboard)
+    except Exception as exc:
+        logger.error("Migration failed: %s", exc)
+        return None
+
+    moved = setup._getOb(FOLDER_ID, None)
+    if moved is None:
+        logger.error("Migration failed: object not found after paste")
+        return None
+
+    logger.info("Migrated %d item(s) into /%s/%s",
+                len(moved.objectIds()), SETUP_FOLDER_ID, FOLDER_ID)
+    return moved
+
+
+def _replace_with_hazardcategories_fti(parent, existing):
     msgid = u"Hazard Categories Sample Properties"
     default = u"Sample Properties"
     FOLDER_TITLE_MSG = _hc(msgid, default=default)
-    folder_title = getattr(existing, "Title", lambda: None)() or None
     legacy_id = "{}_legacy".format(FOLDER_ID)
     idx = 1
-    while legacy_id in portal:
+    while legacy_id in parent:
         legacy_id = "{}_legacy_{}".format(FOLDER_ID, idx)
         idx += 1
 
     try:
-        portal.manage_renameObject(FOLDER_ID, legacy_id)
+        parent.manage_renameObject(FOLDER_ID, legacy_id)
         logger.info("Renamed legacy folder to '%s'", legacy_id)
     except Exception as exc:
         logger.warn("Rename failed, using clipboard move fallback: %s", exc)
-        cb = portal.manage_cutObjects([FOLDER_ID])
+        cb = parent.manage_cutObjects([FOLDER_ID])
         try:
             from Products.CMFCore.utils import getToolByName
-            mtool = getToolByName(portal, "portal_membership")
+            mtool = getToolByName(parent, "portal_membership")
             home = mtool.getHomeFolder()
             if home is not None:
                 home.manage_pasteObjects(cb)
             else:
-                portal.manage_delObjects([FOLDER_ID])
+                parent.manage_delObjects([FOLDER_ID])
         except Exception:
-            portal.manage_delObjects([FOLDER_ID])
+            parent.manage_delObjects([FOLDER_ID])
 
     folder = ploneapi.content.create(
-        container=portal,
+        container=parent,
         type=FOLDER_TYPE,
         id=FOLDER_ID,
         title=FOLDER_TITLE_MSG,
@@ -636,41 +691,18 @@ def setup_permissions(folder):
                 len(targets), api.get_path(folder))
 
 
-def setup_sidebar():
-    logger.info("*** Setup Hazard Categories Sidebar ***")
+def remove_from_sidebar(portal):
+    """确保容器不再出现在 BikaSetup 侧边栏的文件夹树里。
+
+    容器改由 Setup 菜单（``@@lims-setup`` / ``@@maitux-setup``）作为入口
+    tile 呈现，旧的 ``sidebar_folders`` 注册要主动摘除；幂等。
+    """
     setup_tool = api.get_senaite_setup()
     if setup_tool is None:
-        raise RuntimeError("SENAITE setup tool not found")
+        logger.warn("SENAITE setup tool not found, skip sidebar cleanup")
+        return
 
-    folders = list(setup_tool.getSidebarFolders())
-    if FOLDER_ID not in folders:
-        folders.append(FOLDER_ID)
-        setup_tool.setSidebarFolders(tuple(folders))
-        logger.info("Added '%s' to SENAITE sidebar folders", FOLDER_ID)
-    else:
-        logger.info("Skip existing sidebar folder '%s'", FOLDER_ID)
-
-    get_depth = getattr(setup_tool, "getSidebarNavigationDepth", None)
-    set_depth = getattr(setup_tool, "setSidebarNavigationDepth", None)
-    if callable(get_depth) and callable(set_depth):
-        current = get_depth()
-        if current is None or current < SIDEBAR_DEPTH:
-            set_depth(SIDEBAR_DEPTH)
-            logger.info("Set sidebar navigation depth to %s", SIDEBAR_DEPTH)
-        else:
-            logger.info("Skip sidebar depth update, current depth is %s", current)
-
-
-def uninstall(context):
-    logger.info("maitux.hazardcategories uninstall [BEGIN]")
-    portal = api.get_portal()
-    unregister_legacy_configlet(portal)
-
-    setup_tool = api.get_senaite_setup()
-    if setup_tool is None:
-        raise RuntimeError("SENAITE setup tool not found")
-
-    folders = list(setup_tool.getSidebarFolders())
+    folders = list(setup_tool.getSidebarFolders() or ())
     if FOLDER_ID in folders:
         folders.remove(FOLDER_ID)
         setup_tool.setSidebarFolders(tuple(folders))
@@ -678,4 +710,13 @@ def uninstall(context):
     else:
         logger.info("Skip missing sidebar folder '%s'", FOLDER_ID)
 
+
+def uninstall(context):
+    logger.info("maitux.hazardcategories uninstall [BEGIN]")
+    portal = api.get_portal()
+    unregister_legacy_configlet(portal)
+    remove_from_sidebar(portal)
+    logger.info("NOTE: the '%s/%s' container and its items are left in place "
+                "on purpose - deleting them would erase the maintained data.",
+                SETUP_FOLDER_ID, FOLDER_ID)
     logger.info("maitux.hazardcategories uninstall [DONE]")

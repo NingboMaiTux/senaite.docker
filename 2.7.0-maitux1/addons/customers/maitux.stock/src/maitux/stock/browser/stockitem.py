@@ -2,13 +2,13 @@
 import collections
 
 from bika.lims import api
+from maitux.stock import stockMessageFactory as _
 from bika.lims.utils import get_link
 from senaite.app.listing import ListingView
 from senaite.core.api import dtime
 from senaite.core.catalog import SETUP_CATALOG
 from senaite.core.i18n import translate
-
-from maitux.stock import _
+from maitux.stock.i18n import translate_stock
 
 
 class StockItemsView(ListingView):
@@ -27,46 +27,45 @@ class StockItemsView(ListingView):
         }
 
         self.context_actions = {
-            _(u"listing_stockitems_action_add", default=u"Add"): {
+            _(u"Add"): {
                 "url": "++add++Stock",
                 "permission": "cmf.AddPortalContent",
                 "icon": "senaite_theme/icon/plus",
             }
         }
 
-        self.title = translate(_(
-            u"listing_stockitems_title",
-            default=u"Stock Item"
-        ))
+        self.title = translate_stock(u"Stock Items")
         self.show_select_column = True
 
         self.columns = collections.OrderedDict((
             ("number", {
-                "title": _(u"listing_stockitems_column_number", default=u"Number"),
+                "title": _(u"Number"),
                 "index": "sortable_title"}),
             ("stock_type", {
-                "title": _(u"listing_stockitems_column_type", default=u"Type"),
+                "title": _(u"Type"),
                 "toggle": True}),
             ("sample_matrix", {
-                "title": _(u"listing_stockitems_column_name", default=u"Name"),
+                "title": _(u"Name"),
                 "toggle": True}),
             ("supplier", {
-                "title": _(u"listing_stockitems_column_supplier", default=u"Supplier"),
+                "title": _(u"Supplier"),
                 "toggle": True}),
             ("quantity", {
-                "title": _(u"listing_stockitems_column_quantity", default=u"Quantity"),
+                "title": _(u"Quantity"),
                 "toggle": True,
             }),
             ("unit", {
-                "title": _(u"listing_stockitems_column_unit", default=u"Unit"),
+                "title": _(u"Unit"),
                 "toggle": True,
             }),
             ("location", {
-                "title": _(u"listing_stockitems_column_location", default=u"Location"),
+                "title": _(u"Location"),
                 "toggle": True,
             }),
             ("expiry_date", {
-                "title": _(u"listing_stockitems_column_expiry", default=u"Expiry Date"),
+                # 中文注释：主数据上的到期日只是"新建批次时的默认值"，
+                # 列名要写清楚，避免被当成物料的权威到期日。
+                "title": translate_stock(u"Batch Default Expiry Date"),
                 "toggle": True,
             }),
         ))
@@ -74,7 +73,7 @@ class StockItemsView(ListingView):
         self.review_states = [
             {
                 "id": "default",
-                "title": _(u"listing_state_all", default=u"All"),
+                "title": _(u"All"),
                 "contentFilter": {},
                 "columns": self.columns.keys(),
             },

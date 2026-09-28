@@ -676,6 +676,9 @@ def check_addon(addon, findings):
     perm_uses = []          # [(file, permission)]
     has_perm_include = False
     profile_dirs = []       # [(file, directory)]
+    # 有没有 registerProfile（不管它带不带 directory）。R4b 用它判断这个包
+    # 到底有没有「安装」这一步。
+    has_profile = False
 
     for zpath in filter(None, [a.configure, a.overrides]):
         root, err = parse_xml(zpath)
@@ -693,8 +696,10 @@ def check_addon(addon, findings):
             if tag == "include" and el.get("package") == PERM_INCLUDE_PKG \
                     and is_configure:
                 has_perm_include = True
-            if tag == "registerProfile" and el.get("directory"):
-                profile_dirs.append((rel, el.get("directory")))
+            if tag == "registerProfile":
+                has_profile = True
+                if el.get("directory"):
+                    profile_dirs.append((rel, el.get("directory")))
             # 跨包冲突用：只收 configure.zcml 里的具名组件注册
             if is_configure and el.get("name") and tag in CONFLICTING_TAGS:
                 a.registrations.append({
@@ -728,8 +733,23 @@ def check_addon(addon, findings):
                 u"profile 目录 %s 缺 metadata.xml" % directory, "R4", rel)
 
     # --- R4b：卸载能力是硬要求，豁免要付代价 ---------------------------
-    uninstall = exact_case_exists(a.code_dir, "profiles/uninstall")
-    if not uninstall:
+    #
+    # 前提是这个包**有安装这一步**。没有任何 registerProfile 的包，站点侧
+    # 根本没装过它——它随镜像发布，ZCML 一加载就生效，portal_quickinstaller
+    # 里看不到，也没有 profile 可以卸。对这种包要求 profiles/uninstall/，
+    # 等于要求它卸载一个从没安装过的东西，只能逼人写一个空目录来骗过检查。
+    #
+    # 这不是给某个包开的后门，是规则的适用范围：addons/common 下随镜像发布
+    # 的包都属于这一类。要退出这一类，加一个 registerProfile 就行，那时候
+    # R4b 自动重新生效。
+    if not has_profile:
+        add(LEVEL_INFO, "I10_NO_PROFILE_NO_UNINSTALL",
+            u"没有 registerProfile —— 这个包不经站点安装（随镜像发布，"
+            u"ZCML 加载即生效），没有可卸载的 profile，R4b 不适用", "R4b")
+        uninstall = None
+    else:
+        uninstall = exact_case_exists(a.code_dir, "profiles/uninstall")
+    if has_profile and not uninstall:
         readme = (exact_case_exists(a.path, "README.md")
                   or exact_case_exists(a.path, "README.rst"))
         head = read_text(readme)[:800] if readme else u""

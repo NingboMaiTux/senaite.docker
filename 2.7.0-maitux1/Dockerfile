@@ -61,7 +61,7 @@ RUN echo '# 占位文件：容器启动时由 /gen-custom-addon.sh 整份覆盖�
 RUN echo '# 占位文件：真正的 common-addons.cfg 在后续层 COPY，构建阶段先留空壳。' > $SENAITE_INSTANCE_HOME/common-addons.cfg && echo '[buildout]' >> $SENAITE_INSTANCE_HOME/common-addons.cfg
 
 # Copy the build dependencies and startup scripts
-COPY build_deps.txt run_deps.txt docker-initialize.py docker-entrypoint.sh gen-custom-addon.sh /
+COPY build_deps.txt run_deps.txt docker-initialize.py docker-entrypoint.sh gen-custom-addon.sh compile-locales.py /
 
 # Copy the local translation overrides from the build context
 COPY senaite.impress.po senaite.impress.mo /tmp/install-lc-messages/
@@ -113,6 +113,11 @@ RUN set -eux; \
     cp -v /tmp/plone-installer/buildout_templates/buildout.cfg $SENAITE_INSTANCE_HOME/buildout-base.cfg; \
     sed -i 's|https://dist.plone.org/release/5.2.15/versions.cfg|versions.cfg|g' $SENAITE_INSTANCE_HOME/buildout-base.cfg; \
     rm -rf /tmp/plone-installer /Plone.tgz
+
+# 自建的 ZODB 包（版本号 5.8.1.post1，跟官方 5.8.1 区分开，避免 buildout
+# 从 PyPI 拿到官方版覆盖掉这份）。放在这一层、CACHEBUST 之前，改这个包
+# 只会让下面 buildout 那层重跑，不会连累前面 apt / Plone 安装。
+COPY vendor/ZODB-5.8.1.post1.tar.gz $WHEELHOUSE/
 
 ARG CACHEBUST=1
 ARG UPDATED_PACKAGES=
@@ -204,6 +209,19 @@ RUN --mount=type=cache,target=/root/.cache/pip \
         $SENAITE_INSTANCE_HOME/bin \
         $SENAITE_INSTANCE_HOME/parts; \
     exit $rc
+
+# common add-on 的翻译：.mo 是编译产物，构建时从 .po 生成，固化进这一层。
+# 本环境没开 zope.i18n 的自动编译（zope_i18n_compile_mo_files 到处都没设），
+# 启动时不会从 .po 重建；不在这儿编的话，干净 clone 出来 build 一切正常，
+# 只是界面中文静默变英文。--strict：构建阶段编不出来就让 build 红掉。
+#
+# customers 不在这里编：它在 compose 里是 bind mount，运行时会把镜像里这份
+# 整个盖掉，所以那边放在 docker-entrypoint.sh 里、等挂载生效之后再编。
+# --force 而不是增量：git checkout 出来的 .po 和 .mo mtime 是同一时刻，
+# 按时间戳判断可能把一份过期的 .mo 当成最新的留下。构建时全量重编几十个
+# 文件只要几毫秒，不值得为此冒险。
+RUN python /compile-locales.py /opt/addons/common --force --strict \
+    && chown -R senaite:senaite /opt/addons/common
 
 # Change working directory
 WORKDIR $SENAITE_INSTANCE_HOME

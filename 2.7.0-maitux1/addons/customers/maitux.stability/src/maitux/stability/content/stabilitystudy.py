@@ -4,7 +4,7 @@ from senaite.core.content.base import Item
 from zope import schema
 from zope.interface import implementer
 
-from maitux.stability import _
+from maitux.stability import stabilityMessageFactory as _
 from maitux.stability.interfaces import IStabilityStudy
 
 

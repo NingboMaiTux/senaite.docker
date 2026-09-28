@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from decimal import Decimal
 
+from maitux.stock import stockMessageFactory as _
 from bika.lims.interfaces import IDeactivable
 from plone.supermodel import model
 from senaite.core.content.base import Item
@@ -8,7 +9,6 @@ from senaite.core.schema import TextLineField
 from zope import schema
 from zope.interface import implementer
 
-from maitux.stock import _
 from maitux.stock.interfaces import IStockItem
 
 

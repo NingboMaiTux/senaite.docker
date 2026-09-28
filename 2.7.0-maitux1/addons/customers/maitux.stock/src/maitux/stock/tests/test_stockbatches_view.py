@@ -1,15 +1,34 @@
 # -*- coding: utf-8 -*-
-import importlib.util
 import os
 import sys
 import types
 import unittest
 
+class Namespace(object):
+    """Python 2.7 下替代 types.SimpleNamespace 的最小实现。"""
+
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+def load_module_from_path(file_path, name):
+    """按路径加载模块，兼容 Python 2.7（imp）与 3.x（importlib.util）。"""
+    try:
+        import importlib.util
+    except ImportError:
+        import imp
+        return imp.load_source(name, file_path)
+
+    spec = importlib.util.spec_from_file_location(name, file_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 
 def load_stockbatches_module():
     """加载 stockbatches 模块，并用最小桩替换外部依赖。"""
     uid_map = {}
-    api_module = types.SimpleNamespace(
+    api_module = Namespace(
         safe_unicode=lambda value: u"" if value is None else u"{}".format(value),
         get_path=lambda context: "/stub",
         get_url=lambda context: "/stub",
@@ -17,6 +36,12 @@ def load_stockbatches_module():
         get_object=lambda obj: obj,
         get_object_by_uid=lambda uid, default=None: uid_map.get(uid, default),
         get_review_status=lambda obj: getattr(obj, "review_state", u""),
+        # 中文注释："审核领用"入口会读当前用户（判断是不是审批角色），
+        # 桩里返回一个固定账号即可，测试本身不校验账号。
+        get_current_user=lambda: Namespace(
+            getId=lambda: u"reviewer"),
+        get_user_id=lambda: u"reviewer",
+        get_uid=lambda obj: getattr(obj, "uid", u""),
     )
 
     sys.modules["bika"] = types.ModuleType("bika")
@@ -47,7 +72,7 @@ def load_stockbatches_module():
     sys.modules["senaite.app.listing"] = listing_module
 
     dtime_module = types.ModuleType("senaite.core.api")
-    dtime_module.dtime = types.SimpleNamespace(to_ansi=lambda value, show_time=True: value)
+    dtime_module.dtime = Namespace(to_ansi=lambda value, show_time=True: value)
     sys.modules["senaite.core"] = types.ModuleType("senaite.core")
     sys.modules["senaite.core.api"] = dtime_module
 
@@ -63,6 +88,9 @@ def load_stockbatches_module():
     actions_module.ACTION_DESTROY = "stockbatch_destroy"
     actions_module.ACTION_STOCKTAKE = "stockbatch_stocktake"
     actions_module.ACTION_PRINT = "stockbatch_print"
+    # 中文注释：stockbatches.py 现在还会导入"审核领用"动作 id，
+    # 桩模块漏了它会导致 ImportError（测试直接报错，而不是断言失败）。
+    actions_module.ACTION_REVIEW_USAGE = "stockbatch_review_usage"
     actions_module.get_transition_items_for_action_ids = (
         lambda action_ids: [{"id": action_id, "title": action_id} for action_id in action_ids]
     )
@@ -79,11 +107,42 @@ def load_stockbatches_module():
     sys.modules["maitux.stock.browser.stockbatchactions"] = actions_module
     sys.modules["maitux.stock.stockbatchexpiry"] = expiry_module
 
+    # 中文注释：批次列表还会用到"领用申请"这一侧的三个函数（审核入口列/页签）。
+    # 这里给最小桩：默认没有待审核申请，相关列/页签即为空。
+    approval_module = types.ModuleType("maitux.stock.usageapproval")
+    approval_module.check_approver = (
+        lambda usage_request, user_id=None: (True, u"")
+    )
+    approval_module.find_pending_requests = lambda **kwargs: []
+    approval_module.find_pending_requests_for_batch = (
+        lambda batch, user_id=None, **kwargs: []
+    )
+    sys.modules["maitux.stock.usageapproval"] = approval_module
+
+    # 中文注释：列表视图现在通过 maitux.stock.i18n.translate_stock 取文案，
+    # 桩里给个"原样返回 msgid"的实现即可（测试不校验译文）。
+    i18n_module = types.ModuleType("maitux.stock.i18n")
+    i18n_module.translate_stock = (
+        lambda msgid, default=None, context=None:
+        (default if default is not None else msgid)
+    )
+    i18n_module.message = lambda msgid, default=None: msgid
+    sys.modules["maitux.stock.i18n"] = i18n_module
+
+    # 中文注释：批次列表还会用到"到期提醒"辅助函数（行着色 + 徽标）。
+    # 桩里给默认"不提醒"的实现，行着色逻辑另有 test_expiry_reminder.py 覆盖。
+    reminder_module = types.ModuleType("maitux.stock.expiryreminder")
+    reminder_module.get_batch_reminder = (
+        lambda batch, stock=None, now=None: {
+            "state": u"", "days_left": None, "row_class": u"",
+            "badge_text": u"", "badge_class": u""}
+    )
+    reminder_module.reminder_badge_html = lambda info: u""
+    sys.modules["maitux.stock.expiryreminder"] = reminder_module
+
     file_path = os.path.abspath(os.path.join(
         os.path.dirname(__file__), "..", "browser", "stockbatches.py"))
-    spec = importlib.util.spec_from_file_location("test_stockbatches_module", file_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module_from_path(file_path, "test_stockbatches_module")
     module._test_uid_map = uid_map
     return module
 

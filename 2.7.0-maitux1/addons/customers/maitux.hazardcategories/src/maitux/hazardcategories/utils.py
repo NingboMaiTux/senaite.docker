@@ -10,13 +10,15 @@ from zope.schema.vocabulary import SimpleTerm
 from zope.schema.vocabulary import SimpleVocabulary
 
 from maitux.hazardcategories import _
+from maitux.hazardcategories.config import CONTAINER_TYPE
+from maitux.hazardcategories.config import FOLDER_ID
 from maitux.hazardcategories.config import PROJECTNAME
+from maitux.hazardcategories.config import SETUP_FOLDER_ID
 from maitux.hazardcategories.config import DEFAULT_CATEGORIES
 from maitux.hazardcategories.translation import translate_with_fallback
 
 REGISTRY_KEY = "maitux.hazardcategories.categories"
 REGISTRY_JSON_KEY = "maitux.hazardcategories.categories.json"
-FOLDER_ID = "hazard_categories"
 
 SCOPE_REFERENCE = u"reference"
 SCOPE_AR = u"ar"
@@ -198,27 +200,44 @@ def save_registry_json(categories):
     return normalized
 
 
-def _get_hazard_folder():
+def _get_child(parent, child_id):
+    if parent is None:
+        return None
     try:
-        portal = ploneapi.portal.get()
-        if portal is None:
-            return None
+        return parent._getOb(child_id, None)
     except Exception:
         return None
-    folder = getattr(portal, FOLDER_ID, None)
-    if folder is None:
-        try:
-            folder = portal[FOLDER_ID]
-        except Exception:
-            return None
-    pt = getattr(folder, "portal_type", None)
-    if pt in ("HazardCategories", "Folder"):
-        return folder
+
+
+def get_container():
+    """定位 HazardCategories 容器。
+
+    容器现在建在 ``<site>/setup/hazard_categories``：senaite.core 的设置菜单
+    ``setupitems()`` 直接取 ``setup.objectValues()``，所以它会自动成为设置
+    主页的一个入口 tile（并由 maitux.setupmenu 按角色控制可见性）。
+
+    兼容旧站点：容器若仍在站点根 ``<site>/hazard_categories``，这里也能读到
+    （迁移由 setuphandlers 完成，读侧兜底保证迁移前后都能取到数据）。
+    """
+    try:
+        portal = ploneapi.portal.get()
+    except Exception:
+        return None
+    if portal is None:
+        return None
+
+    setup = _get_child(portal, SETUP_FOLDER_ID)
+    for parent in (setup, portal):
+        container = _get_child(parent, FOLDER_ID)
+        if container is None:
+            continue
+        if getattr(container, "portal_type", None) in (CONTAINER_TYPE, "Folder"):
+            return container
     return None
 
 
 def _get_categories_from_folder():
-    folder = _get_hazard_folder()
+    folder = get_container()
     if folder is None:
         return None
     try:

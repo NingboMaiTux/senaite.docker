@@ -2,13 +2,382 @@
 
 为 SENAITE LIMS 的计算公式（Calculation）模块增加三种新的 Interim Field 控件类型，支持 HPLC 含量测定、装量差异、杂质含量等复杂计算场景。
 
-**版本：** 1.12.3
+**版本：** 1.18.0
 **兼容：** SENAITE 2.x（实测 2.7.0 / Plone 5.2 / Python 2.7）
 
 > **关于 `ISSUES.md`**：本文多处写着「详见 `ISSUES.md` ISSUE-0xx」，但**该文件
 > 不在本仓库里**（2026-09-03 核实，git 全历史也没有提交记录）。那些
 > `ISSUE-0xx` 编号仍可作为问题标识使用，但**不要指望在本包目录下找到对应文档**。
 > 若有人手上留着这份台账，值得补进仓库。
+
+---
+
+<!-- BEGIN functions-table：由 tools/gen_function_table.py 从 src/maitux/calcenhance/functions.json 生成，勿手改 -->
+
+## 函数总表（引擎 1.18.0，96 个函数）
+
+下面这张表由 `src/maitux/calcenhance/functions.json`（引擎函数清单）**生成**，本 README 其余各节是按版本写的更新概要。
+
+- **机械可核**：函数名、在哪张表（✓）、数组路径 —— 与 `patches.py` 每次核对，漂了就在流水线（`calcfuncs.py --check`）、单测（`tests/test_function_manifest.py`）和实例日志（`function manifest mismatch`）三处报错。
+- **人定、门禁核不了**：返回形状、参数、用途、since —— 出处见 `Docs/Cal增加/maitux.calcenhance-函数清单-基线对账.md` §1b。定错了**不会报错**。
+- 返回形状指函数在**列表引擎**（calculatedlist）里返回什么：`scalar` 吃整列（或多个值），恒返回一个值；`column` 恒返回 list（每行一格，或行空间那一列）；`elementwise` 一个值进一个值出，或 list 进逐个 list 出 —— 形状跟着参数走；`opaque` 静态定不了，取决于源字段（LOOKUP / LOOKUP2）。
+- 参数写成 `名字:kind`，`[…]` 可省、`*` 可变参；kind 见清单 `kind_vocab`。
+
+| 函数 | calculated | calculatedlist | 返回形状 | 数组路径 | 参数 | 用途 | since |
+|---|:---:|:---:|---|:---:|---|---|---|
+| `abs` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `APPEND` |  | ✓ | column | ✓ | lst:column, value:literal | 跨AS聚合、行空间 | 1.10.0 |
+| `avg` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：x:column | 整列统计、平均 | 1.0.0 |
+| `AVG_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、平均 | 1.5.0 |
+| `BAND` | ✓ | ✓ | elementwise |  | value:scalar, low:scalar, high:scalar, inside:scalar | 限值判定 | 1.5.0 |
+| `BASELINE_BYlist` |  | ✓ | column | ✓ | values:column, sequence:column, *keys:column | 分组统计、基线比较 | 1.7.0 |
+| `ceil` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `COALESCE` | ✓ | ✓ | elementwise | ✓ | 标量：*values:scalar ／ 列表：*cols:column | 缺失回退 | 1.2.0 |
+| `COUNT_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、计数 | 1.1.0 |
+| `COUNT_VALUES_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、计数 | 1.5.0 |
+| `DISTINCT_AVG` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、平均 | 1.15.0 |
+| `DISTINCT_COUNT` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、计数 | 1.15.0 |
+| `DISTINCT_MAX` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、最大值 | 1.15.0 |
+| `DISTINCT_MIN` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、最小值 | 1.15.0 |
+| `DISTINCT_RANGE` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、极差 | 1.15.0 |
+| `DISTINCT_RSD` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、RSD | 1.15.0 |
+| `DISTINCT_SEQlist` |  | ✓ | column | ✓ | *key_arrays:column | 去重统计、序号 | 1.15.0 |
+| `EARLIEST_TIME` |  | ✓ | scalar |  | source_kw:as_name, field_kw:field_name | 时间、跨AS取值 | 1.17.0 |
+| `exp` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `floor` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `FORMAT` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 格式化 | 1.1.0 |
+| `GATE` | ✓ | ✓ | elementwise |  | value:scalar, threshold:scalar, below:scalar | 限值判定 | 1.5.0 |
+| `GROUP_AVG` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、平均 | 1.0.0 |
+| `GROUP_AVG_TOPlist` |  | ✓ | column | ✓ | values:column, reports:column, *key_arrays:column | 分组统计、最高档、平均 | 1.17.0 |
+| `GROUP_AVGlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、平均 | 1.0.0 |
+| `GROUP_CI_HIGH` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、置信区间 | 1.5.0 |
+| `GROUP_CI_HIGHlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、置信区间 | 1.1.0 |
+| `GROUP_CI_LOW` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、置信区间 | 1.5.0 |
+| `GROUP_CI_LOWlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、置信区间 | 1.1.0 |
+| `GROUP_COUNTlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、计数 | 1.1.0 |
+| `GROUP_MAX` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、最大值 | 1.0.0 |
+| `GROUP_MAXlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、最大值 | 1.0.0 |
+| `GROUP_MIN` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、最小值 | 1.0.0 |
+| `GROUP_MINlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、最小值 | 1.0.0 |
+| `GROUP_REPORT_TOPlist` |  | ✓ | column | ✓ | values:column, *key_arrays:column | 分组统计、最高档 | 1.15.0 |
+| `GROUP_RSDlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、RSD | 1.1.0 |
+| `GROUP_STDEVlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、标准差 | 1.0.0 |
+| `GROUP_SUM` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、求和 | 1.0.0 |
+| `GROUP_SUMlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、求和 | 1.0.0 |
+| `INDEX_BY` | ✓ | ✓ | scalar |  | target_arr:column, key_arr:column, match_val:scalar | 按键查找 | 1.0.0 |
+| `INDEX_BY_GROUP` |  | ✓ | column | ✓ | target_arr:column, key_arr:column, match_val:scalar, group_arr:column | 按键查找 | 1.14.0 |
+| `INTERCEPT` | ✓ | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.0.0 |
+| `INTERCEPT_CI_HIGH_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `INTERCEPT_CI_LOW_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `INTERCEPT_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.0.0 |
+| `INTERCEPT_SE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、标准误 | 1.5.0 |
+| `len` | ✓ | ✓ | scalar |  | s:column | 整列统计、计数 | 1.0.0 |
+| `log` | ✓ | ✓ | elementwise |  | x:scalar, [base:scalar] | 数学运算 | 1.0.0 |
+| `log10` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `LOOKUP` | ✓ | ✓ | opaque |  | source_kw:as_name, target_kw:field_name, key_kw:field_name, key_val:scalar, [default:literal] | 跨AS取值 | 1.0.0 |
+| `LOOKUP2` | ✓ | ✓ | opaque |  | source_kw:as_name, target_kw:field_name, key1_kw:field_name, key1_val:scalar, key2_kw:field_name, key2_val:scalar, [default:literal] | 跨AS取值 | 1.15.0 |
+| `max` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：iterable:column | 整列统计、最大值 | 1.0.0 |
+| `min` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：iterable:column | 整列统计、最小值 | 1.0.0 |
+| `pow` | ✓ | ✓ | elementwise |  | x:scalar, y:scalar, [z:scalar] | 数学运算 | 1.0.0 |
+| `RESULT_NUM` |  | ✓ | elementwise |  | value:scalar, [name:scalar], [main_name:literal] | 数值化 | 1.1.0 |
+| `RESULT_STATUS` |  | ✓ | column | ✓ | values:column, [loq:scalar], [lod:scalar] | 限值判定 | 1.0.0 |
+| `ROUND` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.1.0 |
+| `round` | ✓ | ✓ | elementwise |  | number:scalar, [ndigits:literal] | 修约 | 1.0.0 |
+| `ROUND_DOWN` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.9.0 |
+| `ROUND_EVEN` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.1.0 |
+| `ROUND_UP` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.8.0 |
+| `RSD_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、RSD | 1.0.0 |
+| `RSQ` | ✓ | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.0.0 |
+| `RSQ_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.0.0 |
+| `SHIFT` |  | ✓ | column | ✓ | values:column, [offset:literal] | 相邻行 | 1.3.0 |
+| `SLOPE` | ✓ | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.0.0 |
+| `SLOPE_CI_HIGH_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `SLOPE_CI_LOW_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `SLOPE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.0.0 |
+| `SLOPE_SE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、标准误 | 1.5.0 |
+| `sqrt` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `SSE` |  | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.1.0 |
+| `SSE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.1.0 |
+| `stdev` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：x:column | 整列统计、标准差 | 1.0.0 |
+| `STDEV_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、标准差 | 1.0.0 |
+| `sum` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：iterable:column, [start:scalar] | 整列统计、求和 | 1.0.0 |
+| `TIME_ELAPSED_HOURS` |  | ✓ | column | ✓ | times:column, [digits:literal], [base:scalar] | 时间 | 1.1.0 |
+| `XAGG_AVG` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、平均 | 1.11.0 |
+| `XAGG_AVG2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、平均 | 1.14.0 |
+| `XAGG_AVG_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、平均 | 1.12.0 |
+| `XAGG_COUNT` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、计数 | 1.11.0 |
+| `XAGG_COUNT2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、计数 | 1.14.0 |
+| `XAGG_COUNT_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、计数 | 1.12.0 |
+| `XAGG_KEYS` |  | ✓ | column | ✓ | field_kw:field_name, *source_kws:as_name | 跨AS聚合、行空间 | 1.10.0 |
+| `XAGG_KEYS2` |  | ✓ | column | ✓ | key1_kw:field_name, key2_kw:field_name, part:literal, *source_kws:as_name | 跨AS聚合、行空间 | 1.14.0 |
+| `XAGG_KEYS_WHERE2` |  | ✓ | column | ✓ | key1_kw:field_name, key2_kw:field_name, part:literal, all_sources:as_name, filter_kw:field_name, threshold:literal, filtered_sources:as_name | 跨AS聚合、行空间 | 1.14.0 |
+| `XAGG_MAX` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、最大值 | 1.11.0 |
+| `XAGG_MAX2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、最大值 | 1.14.0 |
+| `XAGG_MAX_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、最大值 | 1.12.0 |
+| `XAGG_MIN` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、最小值 | 1.11.0 |
+| `XAGG_MIN2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、最小值 | 1.14.0 |
+| `XAGG_MIN_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、最小值 | 1.12.0 |
+| `XAGG_NTH2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, sort_kw:field_name, nth:literal, *source_kws:as_name | 跨AS聚合、取第n份 | 1.14.0 |
+| `XAGG_RSD` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、RSD | 1.11.0 |
+| `XAGG_RSD2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、RSD | 1.14.0 |
+| `XAGG_RSD_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、RSD | 1.12.0 |
+
+另有内部名 `_Fixed`：两张表里都注册了、公式作者不写它（清单里 `internal: true`），不列在上表。
+
+<!-- END functions-table -->
+
+### ★ 加函数的纪律：同一个 commit 里登记清单
+
+往两张函数表（标量引擎 `safe_globals` / 列表引擎 `_SAFE`）加、删、改名一个函数，
+或者改 `_ARRAY_FN_RE`，**必须在同一个 commit 里**：
+
+1. 改 `src/maitux/calcenhance/functions.json`（名字、`tables`、`array_path`，以及人定的
+   `shape` / `params` / `purpose` / `since`；`purpose` 只能用文件顶部 `purpose_vocab` 里的词）；
+2. 重跑 `python tools/gen_function_table.py`，让上面的总表跟上；
+3. 跑 `tests/test_function_manifest.py`（容器里 `python`，见 `tests/harness.py` 顶部）。
+
+不登记的后果不是「文档旧了」，是三处一起红：流水线的
+`calcfuncs.py --check` ABORT、`test_function_manifest.py` 失败、实例日志每次重启打一条
+`maitux: function manifest mismatch`。**但 shape / params / purpose 写错不会红**
+（代码里没有等价物，门禁核不了）—— 这几格要给出处（代码行号或 harness 用例）。
+
+---
+
+## 1.18.0 更新概要（2026-09-25）
+
+**加的是引擎函数的机器可读清单，不改任何函数的行为。** 任何一格计算结果都不变。
+
+| 改了什么 | 在哪 |
+|---|---|
+| 引擎函数清单：96 个函数 + 1 个内部名，每个登记在哪张表、返回形状、走不走数组路径、参数、用途、since | `src/maitux/calcenhance/functions.json` |
+| 引擎首次求值时拿**真表**与清单比对（每进程每张表一次，只报不拦）：一致打 INFO `function manifest ok`，不一致打 ERROR `function manifest mismatch`，读不到清单打一条 WARN，计算照常 | `patches.py` 的 `_manifest_selfcheck` |
+| 单测：清单 ↔ 出货 `patches.py` 的文本级核对，逐名断言（392 项） | `tests/test_function_manifest.py` |
+| README 顶部的函数总表（生成物）与生成脚本（带 `--check`） | 上方总表、`tools/gen_function_table.py` |
+
+流水线侧（不在本包、在 `.claude` 个人仓库）：`calcfuncs.py` 是读清单的唯一入口；
+`check_v10.py` 第 7 节、`check_semantic.py` C 节改读清单（删掉了手抄的函数正则）；
+新增 `check_capability.py`（拆解流水线 §6.3：源表公式用到的函数 ⊆ 清单）。
+
+---
+
+## 1.17.0 更新概要（2026-09-24）
+
+需求与口径：`Docs/Cal增加/修约与显示口径.md`、`Docs/Cal增加/maitux.calcenhance-修约位数随值传递-需求与方案.md`；
+切片与验收证据：同目录 `…-修约位数随值传递-Backlog.md`。新函数来源：有关物质 20260923 轮裁决 §6。
+
+### ★ 行为变更：`ROUND` 家族现在自己保住位数（公式一个字不用改）
+
+`ROUND` / `ROUND_EVEN` / `ROUND_UP` / `ROUND_DOWN` 以前返回普通 float，公式里写的
+`digits` 在那一刻就丢了。现在返回一个**记得自己几位小数的数**：
+
+| 公式 | 以前显示 | 现在显示 |
+| ---- | -------- | -------- |
+| `ROUND_EVEN(1609.4, 0)` | `1609.0` | `1609` |
+| `ROUND_EVEN(3.1, 3)` | `3.1` | `3.100` |
+| `ROUND_EVEN(0.04, 3)` | `0.04` | `0.040` |
+| `BASELINE_BYlist([g_area],…)`（手输 `"1609"`）| `1609.0` | `1609`（原样搬运）|
+
+- 它仍然是**数**：比较、排序、`> 限度` 判定都照常；**参与运算后就是普通数**，位数不传染 ——
+  修约值再算一次，位数由外层新的 `ROUND` 决定
+- **修约过的 CalculatedList 列落库成定位数文本**（`["1609", "3.100"]`）；
+  **没修约的列逐字节不变**（仍是 JSON 数字，精度不丢）
+- 纯搬运（`LOOKUP` / `LOOKUP2` / `INDEX_BY_GROUP` / `BASELINE_BYlist` / `COALESCE` / `GROUP_MAX/MIN` /
+  `GROUP_REPORT_TOPlist` / 跨 AS 的 `XAGG_NTH2` …）把源里的写法原样带过来：手输 `"0.10"` 取回来还是 `0.10`
+- **`RESULT_STATUS` 的数字格带着位数透传**：`RESULT_STATUS([imp_pct_round], …)`（先修约、再分档）
+  的报告值显示 `0.10` / `97.00`，标签照旧 —— 裁决 H5「尾数是 0 也需要显示」就是这一条
+- **匹配键按值、不按位数**：手输的键列 `"1"` 与计算出来的 `1.0` 仍然能匹配上
+- **不再需要为了显示拆 `_disp` / `_calc` 两个字段、也不用在外面套 `FORMAT`**。
+  见下文「[ROUND / ROUND_EVEN / FORMAT](#round--round_even--format--修约与格式化)」
+
+**上线后要知道的三件事**
+
+1. **全站修约列的显示会统一变一次**（`digits=0` 去掉 `.0`、`digits≥2` 补齐尾随零）。
+   这是本次的目的，不是 bug。`digits=1` 的列多数看不出变化
+2. **首次重算时，这些列的落库文本会被改写一次**（数值不变），审计里会出现一批
+   「只改了写法」的记录。之后再算就稳定了（同样输入 → 同样字节）
+3. `INNOCARE.LabelAndReport` 的 `DataReport.pt` 直接打印落库的 JSON 原文：
+   以前是 `[1609.0, 1484.0]`，现在是 `["1609", "1484"]`（多了引号）。
+   那是该模板自己的既有缺陷，已另立任务
+
+### 新增函数（2 个）
+
+| 函数 | 用途 |
+| ---- | ---- |
+| `GROUP_AVG_TOPlist(值列, 报告值列, 键1[, 键2…])` | 同组**只取最高档那几针**求平均（平均单杂新口径，裁决 Q1-A）|
+| `EARLIEST_TIME(源AS, "字段")` | 另一个 AS 那一列的**最早时间**，作 `TIME_ELAPSED_HOURS` 的 base（裁决 Q3）|
+
+详见「[`GROUP_AVG_TOPlist` —— 只取最高档求平均](#group_avg_toplist--只取最高档求平均)」、
+「[`EARLIEST_TIME` —— 从所选那一段的最早进样起算](#earliest_time--从所选那一段的最早进样起算)」。
+
+### 函数表规模
+
+| | 条目 | = 常量 | + 函数 | + 内部 |
+| -- | ---- | ---- | ---- | ---- |
+| CalculatedList `_SAFE` | **100** | 3 | **96** | 1 |
+| 标量 `safe_globals` | **33** | 3 | 29 | 1 |
+
+较 v1.16.0：CalculatedList 97 -> 100（2 个新函数 + `_Fixed`），标量 32 -> 33（`_Fixed`）。
+`_Fixed` **不是给公式用的函数**：CalculatedList 引擎把整列按 `repr()` 内联进公式再求值，
+修约过的数 `repr` 出来是 `_Fixed(1609.0, 0)`，表里要有这个名字才能还原回来。
+
+不需要重建镜像（customers 层 bind-mount，`docker restart` 即可生效）。
+
+---
+
+## 1.16.0 更新概要（2026-09-24）
+
+问题与证据：`Docs/保存性能及重新计算/证据-代码路径与实测.md` §12。
+
+### 修复：跨分析传播会按字段写入顺序静默算错
+
+旧的传播是**深度优先 + visited 集合**：一次写入里每个分析最多被求值一次，而且是从源分析
+**自己的求值中途**出发的。一个分析若在它最后一个上游变化**之前**就被求值，之后不会再被求值。
+实测（lims-dev / AA260914015）：`imp_sys_suit` 一行 7 个字段保存，按生产环境的真实写入顺序，
+`imp_ip_stat` 有 4 个字段停在旧输入上（第 4 位有效数字，无报错无日志）；`imp_std_weigh` 按正序写也会错。
+
+现在是**结算循环**（worklist，`_settle`）：
+
+- 某分析读的东西一变就（重新）入队，允许重复访问 —— 所以它一定在最后一个上游变化**之后**再算一次，
+  结束状态就是不动点，**与字段写入顺序无关**；
+- 只在一个分析**算完之后**才向下游传播，只比较它**对外可读**的部分（可交叉引用字段 + Result）；
+- 下游识别一次建好整棵样品树的索引（`_TreeIndex`）：字面 LOOKUP/XAGG 源、运行时选源的 LOOKUP（保守）、
+  以及 interim 公式里的 `[AS关键字]`（读对方 Result，旧扫描不认识这一条）；
+- 每个分析访问次数有上限（`_MAX_SETTLE_VISITS`），真正互相依赖又不收敛时停下并打 warn。
+
+### 变更：已提交 / 已核验的分析不再被传播改写
+
+**与旧版行为相反**（旧版刻意不跳过，见下文「限制」一节的沿革）。上游变化时，结算循环只改
+**工作流仍允许编辑结果**的分析（`senaite_analysis_workflow` 在 registered / unassigned / assigned
+授予「Field: Edit Analysis Result」，to_be_verified 之后谁都没有）。判断看对象上的权限映射，
+**不看当前用户** —— 下游改不改不能取决于谁点了保存。被跳过的分析会打一行 INFO 日志列出来。
+
+理由：已提交/已核验的结果是签过字的记录，绕过流转在背后改写它，正是合规审计要抓的那类变更。
+上游在提交之后才变，走 retract → retest 这条受控路径。
+
+### 性能：一行保存只结算一次
+
+`senaite.app.listing` 的 `ajax_set_fields` 原来逐字段跑全链路（求值 + 整树传播 + 结果重算）。
+现在同一请求内的字段**先全部落库、最后结算一次**（`_apply_save_queue`；`ajax_set_fields` 的函数体
+按上游原样复制，只换掉循环，启动时校验上游函数体指纹，对不上就拒绝打补丁、退回逐字段 —— 结果一样，只是慢）。
+
+零写入探针实测（不含 commit）：
+
+| 场景 | 旧：逐字段（生产顺序） | 新：一行一次结算 |
+| ---- | ---- | ---- |
+| `imp_sys_suit` 7 字段 | 18.2–19.0s，❌ 4 处 | **1.2–1.3s**，✅ |
+| `imp_linearity` 11 字段 | 17.2s，✅ | **0.5s**，✅ |
+| `imp_std_weigh` 6 字段 | 1.5–1.8s（正序 ❌ 4 处）| **0.6–0.7s**，✅ |
+
+### ⚠️ 审计粒度变了
+
+传播产生的**中间态**不再各记一条审计快照。一行保存结束时，每个值变了的分析**恰好一条**快照，
+记录的是最终值。实测（同上两组，auditjournal 行数 = SENAITE 快照数）：
+
+| 场景 | 旧 | 新 |
+| ---- | ---- | ---- |
+| `imp_sys_suit` 7 字段 | 38 条（下游每个 2–6 条，其中 `imp_ip_stat` 3 条且最终值是错的）| **9 条**（每个变化的分析 1 条）|
+| `imp_std_weigh` 6 字段 | 7 条 | **4 条** |
+
+真实保存复核（WS-006，AA260914015 的 `imp_sys_suit` 一行 7 格）：`ajax_set_fields` 1.43s（不含 commit），
+9 个分析变化、audit_journal **9 行**，存储结果即不动点（再整树重算无任何变化）。
+
+不需要重建镜像（customers 层 bind-mount，`docker restart` 即可生效）。
+
+---
+
+## 1.15.0 更新概要（2026-09-21）
+
+需求来源：`Docs/maitux.calcenhance-V16引擎能力-第二批-任务指令.md`（去重族）。
+承接 1.14.0 那五项，同一条「有关物质」配置线。
+
+### 函数表规模
+
+| | 条目 | = 常量 | + 函数 |
+| -- | ---- | ---- | ---- |
+| CalculatedList `_SAFE` | **97** | 3 | **94** |
+| 标量 `safe_globals` | **32** | 3 | **29** |
+
+较 v1.14.0：CalculatedList 88 -> 97（新增 9 个）。标量表 31 -> 32
+（只多了 `LOOKUP2`，与 `LOOKUP` 一样两张表都进）。
+
+### 新增函数（9 个）
+
+| 函数 | 用途 |
+| ---- | ---- |
+| `DISTINCT_SEQlist(键1[, 键2…])` | **去重序号**：每个键组合首次出现的那行给序号，重复行留空 |
+| `GROUP_REPORT_TOPlist(报告值列, 键1[, 键2…])` | 每组**最高档**的报告值，只放在该组首行（与序号同行）|
+| `DISTINCT_RSD(值列, 去重键)` | 先按键去重、再算 RSD% |
+| `DISTINCT_RANGE(值列, 去重键)` | 同上：极差 |
+| `DISTINCT_MAX / _MIN / _AVG(值列, 去重键)` | 同上：最大 / 最小 / 平均 |
+| `DISTINCT_COUNT(值列, 去重键)` | 同上：去重后参与统计的个数（审计列）|
+| `LOOKUP2(源AS, 取值字段, 键1字段, 键1值, 键2字段, 键2值[, 默认])` | `LOOKUP` 的**双键**版 |
+
+详见下文「[`DISTINCT_SEQlist` / `GROUP_REPORT_TOPlist` —— 去重序号与单杂报告值](#distinct_seqlist--group_report_toplist--去重序号与单杂报告值)」、
+「[`DISTINCT_<OP>` —— 先去重再统计](#distinct_op--先去重再统计)」、
+「[`LOOKUP2` —— 双键跨 AS 取值](#lookup2--双键跨-as-取值)」。
+
+不需要重建镜像（customers 层 bind-mount，`docker restart` 即可生效）。
+
+---
+
+## 1.14.0 更新概要（2026-09-21）
+
+需求来源：`静态数据整理/原料药有关物质方法验证/产物/有关物质_20260918轮_评审反馈裁决.md` §7
+（「有关物质」方法验证 V16 配置卡住的 5 项引擎能力）。
+任务指令：`Docs/maitux.calcenhance-V16引擎能力-任务指令.md`。
+
+### 函数表规模
+
+| | 条目 | = 常量 | + 函数 |
+| -- | ---- | ---- | ---- |
+| CalculatedList `_SAFE` | **88** | 3 | **85** |
+| 标量 `safe_globals` | **31** | 3 | **28** |
+
+较 v1.12.0：CalculatedList 79 -> 88（新增 9 个）。
+★ 标量表那一栏上一版写的是 26，**记漏了** —— `ROUND` / `ROUND_EVEN` /
+`ROUND_UP` / `ROUND_DOWN` / `FORMAT` 上提到模块级时同时进了标量表，5 个没记账。
+本次一并改正（本版本没有往标量表加东西，9 个新函数全都只对整列有意义）。
+
+### 新增函数（9 个）
+
+| 函数 | 用途 |
+| ---- | ---- |
+| `XAGG_KEYS2(键1,键2,取第几段,*源AS)` | 行空间：「键1+键2」的去重组合，一次返回一段 |
+| `XAGG_KEYS_WHERE2(键1,键2,取第几段,全取源列表,筛选字段,阈值,按值筛源列表)` | 行空间：一组源全取、另一组按值筛，两组合并去重 |
+| `XAGG_NTH2(值,键1,键2,本行键值1,本行键值2,排序字段,第几份,*源AS)` | 取该行所在组的**第 n 份**原值（不是聚合值）|
+| `XAGG_AVG2(值,键1,键2,本行键值1,本行键值2,*源AS)` | 跨 AS 按**组合键**聚合：均值 |
+| `XAGG_RSD2(…)` | 同上：RSD% |
+| `XAGG_MAX2(…)` | 同上：最大值 |
+| `XAGG_MIN2(…)` | 同上：最小值 |
+| `XAGG_COUNT2(…)` | 同上：有效个数 |
+| `INDEX_BY_GROUP(取值列,键列,要匹配的键,分组列)` | `INDEX_BY` 的组内版：每行在**自己那一组**里查 |
+
+详见下文「[`XAGG_*2` —— 双字段组合键的跨 AS 取数](#xagg_2--双字段组合键的跨-as-取数)」与
+「[`INDEX_BY_GROUP` —— 组内查值](#index_by_group--组内查值)」。
+
+### ★ 行为变更：`RESULT_STATUS` 的两个档位文案（配置需要知道）
+
+按实验人员定的报告口径（裁决 G2）改的，**不是格式偏好**：
+
+| 档 | 旧输出 | 新输出 |
+| ---- | ---- | ---- |
+| ≥ 报告限 | 数值原样 | 不变 |
+| 积分限 ≤ x < 报告限 | `<LOQ` | **`＜0.05%`** —— 全角 `＜`，数字**跟着 loq 走**，带百分号 |
+| < 积分限 | `N.D.` | **`ND`** |
+
+**连带改了 `RESULT_NUM`**：它原先靠一张字面量表把限下标记折成 0，而
+`＜0.05%` 带着会变的数字，一张静态表覆盖不了。现在改成**前缀判定**
+（`<` 或 `＜` 开头即视为限下），`ND` / `N.D.` / `<LOQ` / `<LOD` / 空 照旧。
+
+> 不改这一条的后果是**静默的**：那一档在 `RESULT_NUM` 里落到 `---`，
+> **总杂（报告值之和）整列变 `---`，而且日志里什么都没有**。
+> 本次为这条耦合单独写了测试（`tests/test_v16_ops.py`
+> `test_result_status_feeds_result_num`）—— 两个函数各自都对、合起来是坏的。
+
+**百分号是文案的一部分**，因为这一列报的就是百分数；单位不是 % 的 AS
+不要用这两个档位文案。
+
+不需要重建镜像（customers 层 bind-mount，`docker restart` 即可生效）。
 
 ---
 
@@ -625,8 +994,9 @@ imp_rf_lookup = LOOKUP("imp_std_weigh", "imp_rf", "imp_name", [imp_name], "---")
 
 - 只能读取勾选了 Cross-ref 的 Interim Field
 - 源测定数据不存在时，LOOKUP 抛出异常但不阻断保存（公式容错）；匹配失败时若传了第 5 个参数 `默认值` 则返回该值，否则同样抛异常（均不阻断保存）
-- 源测定的 Cross-ref 字段保存后，引擎会自动重算引用它的分析，保证 LOOKUP 结果不滞后
-- 重算传播会跳过已 retract / reject / retest 的分析（与原生 `get_dependents()` 一致），但**不跳过已提交或已核验的分析**——与原生行为一致，避免样品内出现"对照品已更新、部分结果仍按旧值"的不一致
+- 源测定的 Cross-ref 字段保存后，引擎会自动重算引用它的分析（及其下游，直到整棵样品树不再变化），保证 LOOKUP 结果不滞后、且与字段写入顺序无关（v1.16.0）
+- 重算传播会跳过已 retract / reject / retest 的分析（与原生 `get_dependents()` 一致），**也跳过已提交或已核验的分析**（v1.16.0 起；工作流不再允许编辑结果的分析一律不改，日志 INFO 列出被跳过的分析）。
+  - 沿革：v1.15.0 及以前**刻意不跳过**已提交/已核验的分析（理由是避免样品内出现"对照品已更新、部分结果仍按旧值"的不一致）。v1.16.0 改为不改写签过字的记录：上游在提交之后才变化时，这种不一致会出现，应走 retract → retest 处理
 
 ---
 
@@ -891,13 +1261,24 @@ bin/instance restart
 | `GATE(value,threshold,below)`   | `>=` 阈值取原值，否则取 `below`    | `GATE([imp_pct], 0.05, 0)`            |
 | `RESULT_STATUS(vals,loq?,lod?)` | 逐行LOQ/LOD状态判定，**原样透传数值** | `RESULT_STATUS([val],[loq],[lod])`      |
 | `RESULT_NUM(val,name?,main?)`   | 逐元素数值化：主成分/限下标记→0     | `RESULT_NUM([rep],[name],[main_ref])`   |
-| `ROUND(x,n)`                    | 四舍五入，返回**数值**               | `ROUND([A], 3)`                         |
-| `ROUND_EVEN(x,n)`               | 四舍六入五留双（GB/T 8170），**数值** | `ROUND_EVEN([A], 3)`                    |
-| `ROUND_UP(x,n)`                 | 远离零只进不舍，**数值**             | `ROUND_UP([A], 1)`                      |
-| `ROUND_DOWN(x,n)`               | 朝零只舍不进，**数值**               | `ROUND_DOWN([A], 1)`                    |
+| `XAGG_KEYS2(k1,k2,段,*源AS)`    | 组合键行空间，一次返回一段           | `XAGG_KEYS2("imp_name","imp_pct_group",1,"std")` |
+| `XAGG_KEYS_WHERE2(…)`          | 组合键行空间 + 按值筛行              | 见「XAGG_*2」一节 |
+| `XAGG_NTH2(…)`                 | 取该行所在组的第 n 份**原值**        | 见「XAGG_*2」一节 |
+| `XAGG_AVG2/RSD2/MAX2/MIN2/COUNT2(…)` | 跨 AS 按**组合键**聚合         | 见「XAGG_*2」一节 |
+| `INDEX_BY_GROUP(值,键,匹配,分组)` | 组内按键索引（每行查自己那一组）   | `INDEX_BY_GROUP([g_rt],[imp_name],[imp_main_name_ref],[g_sample_id])` |
+| `DISTINCT_SEQlist(k1[,k2…])`   | 去重序号，重复行留空                 | `DISTINCT_SEQlist([imp_name],[imp_pct_group])` |
+| `GROUP_REPORT_TOPlist(v,k1[,k2…])` | 每组最高档报告值，只在首行       | `GROUP_REPORT_TOPlist([imp_report],[imp_name],[imp_pct_group])` |
+| `DISTINCT_RSD/RANGE/MAX/MIN/AVG/COUNT(v,k)` | 先去重再统计（标量）    | `DISTINCT_RSD([imp_total],[g_sample_id])` |
+| `LOOKUP2(源,取值,键1,值1,键2,值2[,默认])` | 双键跨 AS 取值              | `LOOKUP2("imp_rec_weigh","imp_weigh","imp_name",[imp_name],"imp_spike_level",[imp_spike_level])` |
+| `ROUND(x,n)`                    | 四舍五入，返回**数值（带位数，v1.17）** | `ROUND([A], 3)`                         |
+| `ROUND_EVEN(x,n)`               | 四舍六入五留双（GB/T 8170），**数值（带位数）** | `ROUND_EVEN([A], 3)` → `3.100`  |
+| `ROUND_UP(x,n)`                 | 远离零只进不舍，**数值（带位数）**   | `ROUND_UP([A], 1)`                      |
+| `ROUND_DOWN(x,n)`               | 朝零只舍不进，**数值（带位数）**     | `ROUND_DOWN([A], 1)`                    |
 | `FORMAT(x,n)`                   | 定位数格式化保留尾随零，返回**字符串** | `FORMAT([A], 4)` → `"0.0400"`        |
 | `TIME_ELAPSED_HOURS(t,n=1)`     | 距数组内最早时间的小时差（数组）     | `TIME_ELAPSED_HOURS([inj_time], 1)`     |
 | `GROUP_AVGlist(v,*k)`           | 按组平均（广播）                     | `GROUP_AVGlist([val],[grp])`            |
+| `GROUP_AVG_TOPlist(v,rep,*k)`   | 按组**只取最高档那几针**平均（广播，v1.17）| `GROUP_AVG_TOPlist([pct],[report],[grp])` |
+| `EARLIEST_TIME(src,"f")`        | 另一 AS 那一列的最早时间（原文，v1.17），作 `TIME_ELAPSED_HOURS` 第三参 | `EARLIEST_TIME([src], "imp_inj_time")` |
 | `GROUP_STDEVlist(v,*k)`         | 按组标准差（广播）                   | `GROUP_STDEVlist([val],[grp])`          |
 | `GROUP_SUMlist(v,*k)`           | 按组求和（广播）                     | `GROUP_SUMlist([val],[grp])`            |
 | `GROUP_MAXlist(v,*k)`           | 按组最大值（广播）                   | `GROUP_MAXlist([val],[grp])`            |
@@ -1044,7 +1425,8 @@ grouping column.
 **这不是本函数的怪癖，是所有走数组路径的函数共有的性质**，只是这里最容易撞上。
 
 引擎按**函数名**决定走哪条路（`_ARRAY_FN_RE`）：`GROUP_*` / `*_ROWS` /
-`RESULT_STATUS` / `TIME_ELAPSED_HOURS` / `COALESCE` / `SHIFT` / `BASELINE_BYlist`
+`RESULT_STATUS` / `TIME_ELAPSED_HOURS` / `COALESCE` / `SHIFT` / `BASELINE_BYlist` /
+`XAGG_*` / `APPEND` / `INDEX_BY_GROUP` / `DISTINCT_*`
 走**数组路径** —— 把**整列**替换进公式，**只 eval 一次**。于是
 
 ```
@@ -1404,6 +1786,101 @@ sum([NetWeight])
 
 ---
 
+## XAGG_*2 —— 双字段组合键的跨 AS 取数
+
+v1.14.0 新增。上面那套 `XAGG_*` 的键是**单字段**；这一套的键是
+**「键1 + 键2」的组合**，另外补了两件单键版做不到的事：**按值筛行**、
+**取第 n 份原值**。需求来自「有关物质」V16 的中间精密度统计表（AS-25，裁决 §7 ②③④）。
+
+### 为什么键要是一对
+
+两个**未知杂质可能同名**，只能靠「杂质分组」分开。键取单字段时它们会被
+合成一行、求出一个均值 —— **不报错，数字看着也合理**。
+
+### 组合键里的「空」是一个真实的键值，不是通配
+
+`指定杂质` 那几行来自「杂质对照品称量」，那张表**根本没有「杂质分组」这一列**，
+所以它们的第二段是**空**（裁决 §5-D1）。空只和空匹配，**不匹配任意值**。
+
+> ★ **配置侧必须跟着做的一件事**：色谱那几个源 AS 里，
+> **指定杂质的行「杂质分组」也要留空**，两边的组合键才对得上。
+> 那边填了、这边空着 → 该行统计量全是 `---`（不会报错）。
+
+### 行空间：`XAGG_KEYS2` / `XAGG_KEYS_WHERE2`
+
+一个 interim 字段只装一列，所以组合键要**调用两次、各取一段**；
+两次走的是同一份去重结果，因此两列**天然行对齐**：
+
+```
+imp_ip_name  = XAGG_KEYS2("imp_name", "imp_pct_group", 1, "imp_std_weigh")
+imp_ip_group = XAGG_KEYS2("imp_name", "imp_pct_group", 2, "imp_std_weigh")
+```
+
+带筛选的版本吃**两个源列表**：
+
+```
+imp_ip_name = XAGG_KEYS_WHERE2("imp_name", "imp_pct_group", 1,
+                               ["imp_std_weigh"],
+                               "imp_report", 0.05,
+                               ["imp_chrom", "imp_ip_spiked"])
+```
+
+- **`全取源列表`**：这些源的行**无条件**进表（指定杂质是因为称了对照品才上表的）；
+- **`按值筛源列表`**：只有 `筛选字段` **任一行** ≥ `阈值` 的组合才进表
+  （裁决 Q6b：12 针里任一针 ≥0.05% 就统，**不是平均值**）；
+- 非数值的报告值（`＜0.05%` / `ND`）按定义就在限下，**永远筛不进来**，
+  既不当 0 也不当错误；
+- 两组合并**去重一次**，输出顺序是「全取组在前」；
+- `阈值`是参数，0.05 是这个方法的数，不是引擎的数。
+
+> **为什么是两个列表，而不是一个列表加一个开关**：两组问的问题不一样。
+> 若改成「这个源没有报告值列就当全取」，那**忘勾一个
+> `cross_referenceable` 就会变成一张看着很完整、实际把所有杂质都收进来的表**。
+> 现在这种情况直接整列 `---` + 日志一行。
+
+### 统计量：`XAGG_<OP>2`
+
+★ **不只是行空间要改** —— 行按组合键生成了，数也必须按组合键取，否则
+行出来了、数取不到（或取到别人的）：
+
+```
+imp_ip_avg = XAGG_AVG2("imp_report", "imp_name", "imp_pct_group",
+                       [imp_ip_name], [imp_ip_group],
+                       "imp_chrom", "imp_ip_spiked")
+```
+
+缺失口径与单键版**完全一致**（复用同一个 `_group_apply`）：
+非数值格跳过、按幸存者算；**组合键在源里根本没出现 → `---`（COUNT2 也是）**；
+**出现了但没有一个数值 → COUNT2 给 `0`、其余给 `---`**。
+
+### 取第 n 份：`XAGG_NTH2`
+
+统计表要把同一杂质在源 AS 里**每一份的报告值**排成若干列，聚合函数给不了：
+
+```
+imp_ip_p1_v3 = XAGG_NTH2("imp_report", "imp_name", "imp_pct_group",
+                         [imp_ip_name], [imp_ip_group],
+                         "g_sample_id", 3, "imp_chrom")
+```
+
+- 前 5 个参数和 `XAGG_AVG2` 一样，所以 12 个单针列和旁边的统计量读的是同一批行；
+- `第几份`从 **1** 开始，顺序按 `排序字段` **升序**。
+  ★ 排序是**数字优先**的：样品编号常写成 `"1"/"2"/"10"`，按文本排会把 10 排到 2 前面；
+- 两个人的份号**不需要一一对应**，各自按自己的样品编号排（裁决 T1）；
+- 该组不足 n 份 → **只有那一行** `---`。不补 0，更不会把第 n-1 份顶上来；
+- **返回原值**：能解析成数字的回数字，`＜0.05%` / `ND` 原样回文本 ——
+  这是一列**混合数组**（引擎本来就允许）。要修约/补零请在**源 AS** 上做，
+  不要套在这个函数外面。
+
+### 都是数组路径函数
+
+这一族（连同 `INDEX_BY_GROUP`）返回的是**整列**，
+**不能内联进别的表达式**（`[g_area] / XAGG_AVG2(...)` 是 list 除 list，
+`TypeError` 把整列刷成 `---`，只在日志留一行）。写成独立字段，见
+「[为什么不能写成一行](#为什么不能写成一行)」。
+
+---
+
 ## INDEX_BY — AS 内部按键索引
 
 在 Calculated / CalculatedList 中使用 `INDEX_BY(target_arr, key_arr, match_val)` 在当前 AS 内部按名称查找对应值。与 LOOKUP（跨 AS 引用）不同，INDEX_BY 仅检索当前 AS 自身的 list 字段。
@@ -1469,6 +1946,48 @@ imp_sep_rrt = ROUND([imp_sep_rt] / INDEX_BY([imp_sep_rt], [imp_sep_name], "主�
 ```
 INDEX_BY: key '不存在的峰' not in key array [...]
 ```
+
+---
+
+## INDEX_BY_GROUP —— 组内查值
+
+v1.14.0 新增。`INDEX_BY` 是**整表查一个固定值**；`INDEX_BY_GROUP` 让**每一行
+在自己那一组里查**，一行一个结果。
+
+```
+INDEX_BY_GROUP(取值列, 键列, 要匹配的键, 分组列) → 整列
+```
+
+需求：**每一针算自己的 RRT**。主成分 RT 逐针都不一样，整表取一个固定值
+算出来的 RRT 是错的（裁决 G6）：
+
+```
+# 每针取本针的主成分 RT
+imp_main_rt = INDEX_BY_GROUP([g_rt], [imp_name], [imp_main_name_ref], [g_sample_id])
+
+# 再算 RRT（拆成两个字段，见下）
+imp_rrt     = FORMAT([g_rt] / [imp_main_rt], 2)
+```
+
+| | `INDEX_BY` | `INDEX_BY_GROUP` |
+| ---- | ---- | ---- |
+| 查找范围 | 整列 | **本行所在的组** |
+| 返回 | 一个值（广播） | **整列**，每行一个 |
+| 组内没有匹配行 | —— | 该行 `---`（**不**回退到全表、**不**取组内第一行）|
+| 组内匹配到多行 | —— | 取第一行 + 日志一行 |
+
+`要匹配的键`可以是一列（每行查自己的值），也可以是一个值广播到每行 ——
+标量 interim 到这里已经被引擎补齐成整列，两种写法行为一致。
+
+> **不能写成一行**：它是数组路径函数，`[g_rt] / INDEX_BY_GROUP(...)`
+> 是 list 除 list，`TypeError` 把整列刷成 `---`。和 `BASELINE_BYlist`
+> 同一个坑，拆成两个字段。
+
+> **为什么不用 `BASELINE_BYlist` 绕**：那个函数的基准行是**全表最小**，
+> 不是每组自己的最小（它的 docstring 明写着）。硬绕要额外造一个
+> 「是否主成分」的 0/1 列，那列要么手填（漏标不报错）、要么靠
+> `[imp_name] != [imp_main_name_ref]` 求值（同时踩中文字符串比较和
+> 占位符两个雷区）。新加一个函数更直白。
 
 ---
 
@@ -1702,6 +2221,7 @@ imp_cf_gated = BAND([imp_cf_lookup], [imp_cf_gate_low], [imp_cf_gate_high], 1.0)
 
 ```
 GROUP_*  |  *_ROWS  |  RESULT_STATUS  |  TIME_ELAPSED_HOURS  |  COALESCE  |  SHIFT
+BASELINE_BYlist  |  XAGG_*  |  APPEND  |  INDEX_BY_GROUP  |  DISTINCT_*
 ```
 
 | 路径 | 触发条件 | `[标量字段]` 被替换成 |
@@ -1863,9 +2383,18 @@ RESULT_STATUS(值数组, [LOQ阈值], [LOD阈值]) → 数值与字符串的混�
 | 条件                 | 输出                                  |
 | -------------------- | ------------------------------------- |
 | `val >= LOQ`       | **原样透传的数值**（不再格式化）      |
-| `LOD <= val < LOQ` | `"<LOQ"`                            |
-| `val < LOD`        | `"N.D."`（未检出）                  |
+| `LOD <= val < LOQ` | `"＜0.05%"` —— **全角 `＜`**，数字跟着 `LOQ` 走 |
+| `val < LOD`        | `"ND"`（未检出）                    |
 | `val` 为 None / 空 | `"—"`（主成分行等不适用场景）      |
+
+### ⚠️ 文案变更（2026-09-21，v1.14.0）
+
+`<LOQ` → `＜0.05%`、`N.D.` → `ND`，是实验人员定的报告口径（裁决 G2），
+不是格式偏好。中间档的数字**不是写死的 0.05**，而是本 AS 的 `LOQ`：
+`RESULT_STATUS([imp_pct], 0.1, 0.03)` 出的是 `＜0.1%`。
+
+**下游的 `RESULT_NUM` 跟着改成了前缀判定**（见该节）。两件事必须一起看：
+`RESULT_NUM` 认不出这一档时不会报错，只会让**总杂整列变 `---`**。
 
 ### ⚠️ 返回类型已变更（2026-08-19）
 
@@ -1881,7 +2410,11 @@ RESULT_STATUS(值数组, [LOQ阈值], [LOD阈值]) → 数值与字符串的混�
 1. **下游可以计算了。** 旧版整列是字符串，进不了 `list_arrays`，
    任何下游公式都无法引用；现在数值元素可参与计算 —— 这是总杂求和
    （`RESULT_NUM` → `GROUP_SUMlist`）能成立的前提。
-2. **尾随零不再自动补。** 需要固定位数展示的字段，**外面套一层 `FORMAT`**：
+2. **尾随零不再自动补。** 需要固定位数展示的字段，**外面套一层 `FORMAT`**
+   （★ v1.17.0 起更简单：**先修约、再分档** —— `RESULT_STATUS` 对数值原样透传，
+   所以源列是 `ROUND_EVEN([imp_pct], 4)` 时，`RESULT_STATUS([imp_pct_round], …)` 的数字格
+   本身就显示 `0.0400`，标签格照旧是 `＜0.05%` / `ND`。**反过来套不行**：
+   `ROUND_EVEN(RESULT_STATUS(…), 4)` 会把标签修约成 `---`。下面是当时的写法）：
 
 ```
 # 展示字段：恢复 4 位小数
@@ -1906,6 +2439,201 @@ imp_report = RESULT_STATUS([imp_pct], [imp_loq], [imp_lod])
 ```
 
 > **自动读取原理**：当省略 loq/lod 参数时，引擎通过 `self.getAnalysisService()` 读取 AS 的 `LLOQ`（Lower Limit of Quantification）和 `LLOD`（Lower Detection Limit）值。这意味着每个 AS 可以在其 Limits 标签页统一维护阈值，所有引用该 AS 的 Calculation 无需冗余定义 `tst_loq`/`tst_lod` 字段。
+
+---
+
+## DISTINCT_SEQlist / GROUP_REPORT_TOPlist —— 去重序号与单杂报告值
+
+v1.15.0 新增。两个函数写在一起，因为它们**必须在同样的行上有值**。
+
+### 这一列是用来「数」的，不是用来排版的
+
+「有关物质」的报告里同一个杂质占 6 行（6 针）。序号列去重之后：
+
+```
+序号   物质名称   报告值 …
+ 1     杂质A      0.12
+       杂质A      0.15
+       杂质A      0.11
+ 2     未知1      ND
+       未知1      ＜0.05%
+       未知1      0.06
+ 3     未知2      0.21
+       …
+```
+
+**最大的那个序号（3）就是本次要外报的杂质个数**，实验人员靠它核对报告完整性
+（2026-09-21 的原话：「序号是去"重"的结果……要不然实验人员根本不知道有多少个是
+需要外报的」）。把每行都填上它所属组的编号技术上更省事，但那恰好把这个信息抹掉
+了 —— 所以重复行留空是**需求**，不是排版偏好。
+
+### `DISTINCT_SEQlist(键1[, 键2…])`
+
+```
+imp_seq = DISTINCT_SEQlist([imp_pct_group])                  # AS-10 单键
+imp_seq = DISTINCT_SEQlist([imp_name], [imp_pct_group])      # AS-12 双键
+```
+
+| 行 | 返回 |
+| ---- | ---- |
+| 该键组合**首次出现** | 序号，1 起、按首次出现顺序 |
+| 重复出现 | **空字符串**，**不是 `---`** |
+
+> ★ 重复行是空字符串而**不是 `---`**：本包里 `---` 的含义是「算不出来 / 出错了」，
+> 拿它表示「这行故意不显示」会让人以为坏了。
+
+- **双键**是给 AS-12 用的：两个同名的未知杂质只能靠「杂质分组」分开，单键会把它们
+  并成一行、少数一个。
+- **键值为空的行也算一种身份**，照样参与编号。指定杂质那几行的「杂质分组」就是空的
+  （裁决 §5-D1），跳过它就会少数一个要外报的杂质。
+- 中文键走 `_norm_key` 归一（`str`/`unicode` 边界）——不归一会把同一个杂质拆成两组，
+  序号因此多数一个，**而且不报错**。
+
+### `GROUP_REPORT_TOPlist(报告值列, 键1[, 键2…])`
+
+每组取**最高档**的报告值，只放在该组首行，其余行空。
+
+报告值列是字符串混数字，档次从高到低：
+
+```
+数字   >   ＜<报告限>%   >   ND
+```
+
+| 组内情况 | 取 |
+| ---- | ---- |
+| 有任意数字 | 其中**最大的那个数字** |
+| 没有数字、有 `＜x%` | `＜x%`（同档多个时取里面那个数大的）|
+| 都是 `ND` | `ND`（原样，`N.D.` 不会被规整成 `ND`）|
+| 一个有效值都没有（全空 / 全 `---` / 全是认不出来的文本）| `---` —— 这是真的算不出来 |
+
+**`GROUP_MAXlist` 做不了这件事**：它用 `_num_or_none` 过滤非数字，整组都是
+`＜0.05%` 时它返回占位符，而正确答案是 `＜0.05%`。
+
+值**原样返回**。★ 注意一个类型细节：**本 AS 内**的混合列到引擎这里已经是**文本**了
+（calculatedlist 的收集器对「并非整列都能转数」的 list 字段整列转字符串，跟
+`_collect_cross_referenceable_data` 逐格定类型不同），所以这一列可能是
+`"0.15"` 而不是 `0.15`。显示一样，但**不要在它外面套计算**，要修约请在源列上做。
+
+### 两列必须同行
+
+`DISTINCT_SEQlist` 与 `GROUP_REPORT_TOPlist` 共用同一份「首次出现」判定
+（`_distinct_first_rows`）。各写一个 seen 循环迟早会在其中一方长出特例的那天分叉，
+而分叉的表现是「序号在这行、值在那行」—— 没人会把它当成报错看。
+
+### 都不能写成一行
+
+两个都是数组路径函数，返回整列，**必须单独占一个字段**。内联进别的表达式
+（`[x] * DISTINCT_SEQlist(...)`）会把整条公式推上数组路径，那里它是 list 乘 list，
+`TypeError` 把整列刷成 `---`，只在日志留一行 —— 与 `BASELINE_BYlist` 同一个坑。
+
+---
+
+## GROUP_AVG_TOPlist —— 只取最高档求平均
+
+```
+GROUP_AVG_TOPlist(值列, 报告值列, 键1[, 键2…]) → 数值数组（组内每行相同，广播）
+```
+
+平均单杂的口径（有关物质 20260923 裁决 Q1 勾 A）：同一个杂质的几针里
+
+1. 有报告值 **≥报告限**（报告值是数字）的 → **只平均这几针**
+2. 否则有 **≥积分限**（报告值是「＜x%」）的 → 只平均这几针
+3. **全是 ND** → 全部针参与
+
+平均的是**值列**（未修约的检测杂质原值），平均完再在外面修约：
+
+```
+# AS-10 单键
+imp_avg_single = ROUND_EVEN(GROUP_AVG_TOPlist([imp_pct_num],[imp_report],[imp_pct_group]), 4)
+# AS-12 双键
+imp_avg_single = ROUND_EVEN(GROUP_AVG_TOPlist([imp_pct_num],[imp_report],[imp_name],[imp_pct_group]), 4)
+```
+
+例：6 针报告值 `0.06 / 0.05 / ＜0.05% / ＜0.05% / ND / ND` → 只平均前两针的检测杂质。
+
+- **分档与 `GROUP_REPORT_TOPlist` 是同一份**（数字 > 「＜x%」> ND > 没数据），组键归一也同一份 ——
+  「哪一档最高」两列不可能各说各的
+- **边界 `≥` 由报告值那一列决定**：`RESULT_STATUS` 里等于报告限的那针已经是数字，自然进最高档
+- 一组里没有任何一针认得出档次（全空 / 全 `---`）→ 该组 `---`，**不是 0**
+- **`GROUP_AVGlist` 做不了这件事**：它平均整组所有针，最高档之外的针会把平均拉低，
+  而且拉低多少取决于 ND 针的检测杂质恰好是几 —— 一个看着合理的错数
+- 数组路径函数，**单独占一个字段**
+
+---
+
+## DISTINCT_<OP> —— 先去重再统计
+
+v1.15.0 新增，同一族的另一头，**返回标量**。
+
+```
+DISTINCT_RSD(值列, 去重键)      DISTINCT_RANGE(值列, 去重键)
+DISTINCT_MAX(值列, 去重键)      DISTINCT_MIN(值列, 去重键)
+DISTINCT_AVG(值列, 去重键)      DISTINCT_COUNT(值列, 去重键)
+```
+
+### 为什么不能直接用 GROUP_*
+
+「总杂」是 `GROUP_SUMlist([imp_num], [g_sample_id])` 广播出来的 ——
+**同一份样品的每一行都重复着同一个总杂值**。于是：
+
+- **极差没问题**：max/min 不受重复影响；
+- **RSD 是错的**：6 个样品的值各按它的杂质行数重复计入，n 虚高、离散度被稀释，
+  算出一个比真实值小的 RSD，**而且从结果上看不出来**。
+
+```
+imp_total_rsd   = DISTINCT_RSD([imp_total], [g_sample_id])
+imp_total_range = DISTINCT_RANGE([imp_total], [g_sample_id])
+imp_total_n     = DISTINCT_COUNT([imp_total], [g_sample_id])
+```
+
+### 边界
+
+- 非数值的格跳过，与 `GROUP_*` 家族的缺失值口径一致；
+- 一个有效值都没有 → `---`；`DISTINCT_RSD` 不足 2 个值也是 `---`（0.0 会读成
+  「完美重现」，是最误导的那个答案）；
+- **同一个去重键下的行如果并不共享同一个值**，取首行并 **warn** 一条：那通常意味着
+  去重键选错了，而选错的后果是「挑了其中一个」——一个看着完全合理的数；
+- `DISTINCT_COUNT` 是 RSD / 极差的审计列。没有它，「去重键选错、只剩一个值」与
+  「本来就只做了一份」在报告上长得一模一样（两者的 RSD 都是 `---`）。
+
+**标量函数**：放在 CalculatedList 字段里会得到**单元素数组**（与 `GROUP_AVG` 这类
+整列标量版同理）；要一个真标量就放 Calculated 字段。
+
+---
+
+## LOOKUP2 —— 双键跨 AS 取值
+
+v1.15.0 新增。`LOOKUP` 只能按一个键匹配；AS-18「加入杂质称样量」要按
+**物质名称 + 加标水平**去 `imp_rec_weigh` 取 —— 同一个杂质在源表里有好几个加标
+水平各一行，**单键取回来的是其中第一行**，一个看着完全合理的错数。
+
+```
+LOOKUP2(源AS, 取值字段, 键1字段, 键1值, 键2字段, 键2值[, 默认])
+
+imp_rec_spec_weigh = LOOKUP2("imp_rec_weigh", "imp_weigh",
+                             "imp_name", [imp_name],
+                             "imp_spike_level", [imp_spike_level])
+```
+
+语义与 `LOOKUP` 一致（源 AS 解析、「还没录入」的判定、元素级/标量两种调用形式、
+默认值），只是**两个键都要命中**。两处刻意不同：
+
+| | `LOOKUP` | `LOOKUP2` |
+| ---- | ---- | ---- |
+| 省略键 = 取那唯一一行 | 支持（32 处配置这么写）| **不支持** —— 用两个键就是为了消歧义 |
+| 命中多行 | 取第一个 | 取第一行 **+ warn 一条** |
+
+- 键值可以是列（逐行查）、也可以是一个值（广播到每行）；两列键值**行数不同**时
+  拒绝配对并报错，不截断到短的那个。
+- **取值字段是标量**时广播到每一行（整张表共用一个值，比如稀释体积）；但广播不等于
+  不用匹配，键对不上照样报错。
+- 中文键两边都过 `_safe_text` 再比 —— `str` 与 `unicode` 在 Python 2 里直接比
+  不报错、只是永远不相等。
+
+> ★ **依赖传播也认识它了**：`_LOOKUP_SRC_RE` 原来写的是 `LOOKUP\s*\(`，
+> 匹配不到 `LOOKUP2(`。只靠 LOOKUP2 引用别的 AS 的公式会被当成「没有跨 AS 依赖」，
+> 于是**算过一次就再也不刷新**，源数据改了屏幕上还是旧值 —— 没有 `---`、没有日志，
+> 正是 v1.5.0 为 LOOKUP 修掉的那个静默失败。现在两个名字都认。
 
 ---
 
@@ -1995,25 +2723,42 @@ rec_n     = GROUP_COUNTlist([rec], [level])    # → 2    ← 报表上要能看
 
 | 函数 | 返回 | 修约方式 |
 | ---- | ---- | -------- |
-| `ROUND(val, digits)` | **数值** | 四舍五入（round-half-up），逢五一律进位 |
-| `ROUND_EVEN(val, digits)` | **数值** | 四舍六入五留双（round-half-even），GB/T 8170 / 中国药典 |
+| `ROUND(val, digits)` | **数值（带位数）** | 四舍五入（round-half-up），逢五一律进位 |
+| `ROUND_EVEN(val, digits)` | **数值（带位数）** | 四舍六入五留双（round-half-even），GB/T 8170 / 中国药典 |
 | `FORMAT(val, digits)` | **字符串** | 同 `ROUND` 的方向，但**保留尾随零** |
 
-两者只在「正好一半」（被舍位为 5 且其后全 0）时不同：
+两者只在「正好一半」（被舍位为 5 且其后全 0）时不同（右边是**显示**，v1.17.0 起）：
 
 ```
 ROUND(1.25, 1)       → 1.3        ROUND_EVEN(1.25, 1)  → 1.2   （2 是偶数，五留双）
-ROUND(2.5, 0)        → 3.0        ROUND_EVEN(2.5, 0)   → 2.0
-                                  ROUND_EVEN(3.5, 0)   → 4.0
-ROUND_EVEN(1.35, 1)  → 1.4
+ROUND(2.5, 0)        → 3          ROUND_EVEN(2.5, 0)   → 2
+                                  ROUND_EVEN(3.5, 0)   → 4
+ROUND_EVEN(1.35, 1)  → 1.4        ROUND_EVEN(3.1, 3)   → 3.100
 FORMAT(0.04, 4)      → "0.0400"   FORMAT(2, 3)         → "2.000"
 ```
 
-### 为什么必须拆出 `FORMAT`
+### ★ v1.17.0 起：`ROUND` 自己保位数，展示不必再套 `FORMAT`
+
+**`ROUND` 家族的结果记得公式里写的 `digits`**：`ROUND_EVEN(x, 3)` 碰上 `3.1` 显示 `3.100`、
+`ROUND(x, 0)` 显示 `1609` 而不是 `1609.0`。它**仍然是数** —— 比较、排序、`> 限度`
+判定、`[a]/[b]*100` 都照常；**一参与运算就变回普通数**（位数不传染），所以
+`ROUND_EVEN(ROUND(x,3)/2, 1)` 显示几位只看外层的 `1`。
+
+落库：修约过的 CalculatedList 列存成定位数文本（`["1609", "3.100"]`），读回时还原位数；
+没修约的列仍是 JSON 数字、逐字节不变。标量 Calculated 本来就存文本，同样生效。
+
+**所以下面「展示归展示、计算归计算」那套拆字段的写法已经不需要了**：一个
+`ROUND_EVEN([x], 4)` 字段既能显示 `0.0400`、也能被下游引用。`FORMAT` 仍然可用，
+场景收窄到「就是要一个字符串」（比如拼进文本）。
+
+> 下面两小节是 v1.17.0 之前的背景，**保留作记录**。其中「`FORMAT` 的结果不能被下游引用」
+> 那句说得过宽（口径文档 §3.3 已记为文档口径问题），**本版未订正**，待单独核实后再改。
+
+### 为什么当初必须拆出 `FORMAT`（v1.17.0 之前）
 
 制药行业对有效数字有强制要求，而 `0.04` 与 `0.0400` 表达的精度不同。
-`ROUND` 返回数值 —— 数值没有「尾随零」这个概念，`0.0400` 存成数值就是 `0.04`。
-所以展示用 `FORMAT`（字符串，零保住了），计算用 `ROUND`（数值，可继续参与运算）。
+v1.17.0 之前 `ROUND` 返回普通数值 —— 普通数值没有「尾随零」这个概念，`0.0400` 存成数值就是 `0.04`。
+所以当时展示用 `FORMAT`（字符串，零保住了），计算用 `ROUND`（数值，可继续参与运算）。
 
 ### ⚠️ `FORMAT` 的结果不能被下游引用
 
@@ -2033,8 +2778,9 @@ imp_total = GROUP_SUMlist([imp_pct_disp], [sid])
 
 ### 修约的是你填的那个十进制数
 
-内部用 `Decimal(repr(值))` 而不是 `Decimal(浮点值)` —— 后者修约的是浮点二进制
+内部用 `Decimal(float.__repr__(值))` 而不是 `Decimal(浮点值)` —— 后者修约的是浮点二进制
 展开。这样保证修约对象是**分析员实际填进去的那个十进制数**。
+（v1.17.0 起写成 `float.__repr__` 而不是 `repr`：带位数的修约值 `repr` 出来是构造式，不是数字。）
 
 ### 也可以套在数组函数外面
 
@@ -2042,7 +2788,7 @@ imp_total = GROUP_SUMlist([imp_pct_disp], [sid])
 很自然的写法可用：
 
 ```
-rec_avg_r = ROUND(GROUP_AVGlist([rec], [level]), 1)     # → [102.3, 102.3, ...]
+rec_avg_r = ROUND(GROUP_AVGlist([rec], [level]), 1)     # → ["102.3", "102.3", ...]（v1.17.0 起落库为文本）
 rec_rsd_f = FORMAT(GROUP_RSDlist([rec], [level]), 2)    # → ["5.89", "5.89", ...]
 r2_r      = ROUND(RSQ_ROWS(...), 4)                     # → [1.0]
 ```
@@ -2061,9 +2807,15 @@ RESULT_NUM(值, 名称?, 主成分名?) → 数值
 | 输入 | 输出 |
 | ---- | ---- |
 | 名称 == 主成分名 | `0`（主成分不计入总杂） |
-| `N.D.` / `ND` / `<LOQ` / `<LOD` / 空 | `0`（限下结果贡献接近零） |
+| 以 `<` 或 `＜` 开头的任何文本（`<LOQ` / `＜0.05%` / `＜0.1%` …） | `0`（限下结果贡献接近零） |
+| `N.D.` / `ND` / `N.D` / `<LOD` / 空 | `0`（同上，固定字面量那一半） |
 | 数值 | 该数值 |
 | 其余非数值 | `---`（**未知**贡献，不能静默当 0 求和） |
+
+> **为什么是前缀判定而不是一张字面量表**（2026-09-21）：`RESULT_STATUS`
+> 的中间档文案是 `＜<报告限>%`，数字跟着每个 AS 自己的报告限走，一张静态表
+> 既列不全、也会在有人改限值的当天**悄悄失配**。失配的后果不是报错，是
+> 这一行落到 `---`、**总杂整列变 `---`**，日志里一行都没有。
 
 **标量签名、逐元素路径、拆成两步写** —— 不要嵌套：
 
@@ -2192,6 +2944,34 @@ TIME_ELAPSED_HOURS: base u'2026/5/12 20:13' is not a parsable timestamp
 在此之前，要拿到「距对照品进样」这个口径，只能把对照品的进样时间**当作一行
 数据塞进质控数组**。那行会连带出现在同一张表的其它列里（一个面积、一个
 回收率），将来做 RSD 或限度判定时就是个真实的污染源。有了基准参数就不必了。
+
+---
+
+## EARLIEST_TIME —— 从所选那一段的最早进样起算
+
+```
+EARLIEST_TIME(源AS, "字段") → 源 AS 那一列里最早的时间（原文）
+```
+
+**只作 `TIME_ELAPSED_HOURS` 的第三个参数（base）用**：
+
+```
+# 供试品溶液稳定性-2/-3：时间点(h) 从「稳定性来源」下拉所选那一段的最早进样起算
+imp_stab2_time = TIME_ELAPSED_HOURS([imp_stab2_inj_time], 1,
+                                    EARLIEST_TIME([imp_stab2_source], "imp_inj_time"))
+```
+
+- 源 AS 可以写字面量 `"imp_stability_cold"`，也可以写字段引用（下拉的值），与 `LOOKUP([src], …)` 同款。
+  源段的那个字段要勾 **cross_referenceable**
+- 时间的解析与 `TIME_ELAPSED_HOURS` 是**同一套**（见下一节）。源列里**有一格认不出来**
+  （比如斜杠写法 `2026/05/12 20:13`）→ **整列 `---`**：少读一格就可能少了真正最早的那一针
+- 源段一个进样时间都没有 / 下拉没选 → **整列 `---`，不回退到本段自己的最早时间**
+- 失败时本次写入的公式失败汇总日志里会留名（与 LOOKUP 取不到源同一条路）
+- 改了源段的进样时间，读它的 AS 会被重算（与动态源 `LOOKUP` 同一套依赖传播）
+
+> ⚠️ **不要让它单独占一个字段再引用。** 它失败时靠「报错」让整列变 `---`；
+> 单独占字段的话那一格是 `---`，而 `TIME_ELAPSED_HOURS` 收到 `---` 的 base
+> 会按「没给 base」**回退到本列最早时间** —— 正是这里要拒绝的那个静默回退。
 
 ---
 

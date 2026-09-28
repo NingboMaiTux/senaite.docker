@@ -1,0 +1,42 @@
+# 编译产物：.mo 由各包 tools/compile_mo.py 从同目录的 .po 生成。
+#
+# 为什么不跟踪：addons/customers 是 bind mount（compose:106），容器里任何
+# 重新编译都会直接落回宿主机的工作区，于是 git status 常年脏一片，真正的改动
+# 反而被淹掉。.po 才是源，.mo 是产物。
+#
+# ⚠️ 但**不要把磁盘上的 .mo 删掉**：本环境没有开启 zope.i18n 的自动编译
+# （zope_i18n_compile_mo_files 在 compose / Dockerfile / buildout 里都没设，
+# config.COMPILE_MO_FILES 默认 unset），启动时不会从 .po 重建。删了等于
+# 所有 addon 的中文标签直接没了。
+#
+# 新克隆仓库、或改了 .po 之后，在对应包目录下跑：
+#     python tools/compile_mo.py
+*.mo
+
+# 例外：这两个不是编译产物，是**构建输入**——Dockerfile:67 把它们 COPY 进镜像，
+# 用来覆盖 senaite.impress 的中文翻译（Dockerfile:165-168 install 到 locales 下）。
+# 忽略掉的话，新克隆的仓库里没有这两个文件，docker build 会直接失败。
+!2.7.0-maitux1/senaite.impress.mo
+!latest/senaite.impress.mo
+
+# 例外：addons/common 下的 .mo 也要跟踪。
+#
+# 上面那条「容器重编译会写脏工作区」的理由只对 addons/customers 成立——
+# 只有那个目录是 bind mount。common 是故意不挂载的（挂载会被外部污染），
+# 代码编译进镜像，容器里没有任何东西会写回它，所以根本没有噪音问题。
+#
+# 而不跟踪的代价是实打实的：干净 clone 出来没有 .mo，docker build 照样
+# 成功、容器照样起来、日志一行错都不报，页面静默地全变英文。这个坑
+# 2026-09-21 踩到过。
+!2.7.0-maitux1/addons/common/**/*.mo
+!latest/addons/common/**/*.mo
+
+# Python 编译产物
+*.pyc
+*.pyo
+__pycache__/
+*.egg-info/
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db

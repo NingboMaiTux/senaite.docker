@@ -4,6 +4,9 @@
     xmlns:i18n="http://namespaces.zope.org/i18n"
     i18n_domain="maitux.stability">
 
+  <!-- 中文注释：注册 locales 目录，否则本 addon 的 .po/.mo 不会被 zope.i18n 加载，
+       模板里的 i18n:translate 与运行时翻译都会退回英文 msgid（中文站显示英文）。
+       中英双语就是靠这里的目录 + i18n.py 的运行时翻译实现的。 -->
   <i18n:registerTranslations directory="locales" />
 
   <permission
@@ -36,6 +39,15 @@
       for="*
            zope.publisher.interfaces.browser.IBrowserRequest"
       factory="maitux.stability.browser.view.WorkflowActionCreatePlanAdapter"
+      provides="bika.lims.interfaces.IWorkflowActionAdapter"
+      permission="zope.Public" />
+
+  <!-- 稳定性方案列表页「复制计划」：跳到新建表单并按被复制方案预填 -->
+  <adapter
+      name="workflow_action_copy_plan"
+      for="*
+           zope.publisher.interfaces.browser.IBrowserRequest"
+      factory="maitux.stability.browser.view.WorkflowActionCopyPlanAdapter"
       provides="bika.lims.interfaces.IWorkflowActionAdapter"
       permission="zope.Public" />
 

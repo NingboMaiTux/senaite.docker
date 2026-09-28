@@ -1,6 +1,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml"
       xmlns:tal="http://xml.zope.org/namespaces/tal"
       xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
       metal:use-macro="here/main_template/macros/master"
       i18n:domain="maitux.stability">
 
@@ -23,7 +24,7 @@
             <th i18n:translate="">Task</th>
             <th i18n:translate="">Timepoint (Months)</th>
             <th i18n:translate="">Window (Days)</th>
-            <th><span i18n:translate="">Stock Batch</span> <span class="required">*</span></th>
+            <th i18n:translate="">Stock Batch</th>
           </tr>
         </thead>
         <tbody>
@@ -57,18 +58,17 @@
       </table>
 
       <div class="form-controls">
-        <input class="btn btn-primary btn-sm"
-               type="submit"
-               name="button_save"
-               value="Save"
-               i18n:attributes="value"/>
-        <input class="btn btn-secondary btn-sm"
-               type="submit"
-               name="button_cancel"
-               value="Cancel"
-               i18n:attributes="value"/>
+        <button type="submit"
+                class="btn btn-primary btn-sm"
+                name="button_save"
+                value="Save"
+                i18n:translate="">Save</button>
+        <button type="submit"
+                class="btn btn-secondary btn-sm"
+                name="button_cancel"
+                value="Cancel"
+                i18n:translate="">Cancel</button>
       </div>
     </form>
   </metal:content-core>
 </html>
-

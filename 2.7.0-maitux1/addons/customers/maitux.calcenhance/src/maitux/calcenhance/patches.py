@@ -762,6 +762,16 @@ def _patch_get_formatted_interim():
                     formatted = []
                     for v in arr:
                         try:
+                            # A fixed-point text cell is shown as stored:
+                            # float(v) is what turned "3.100" back into 3.1
+                            # on this screen (需求与方案 §3 #6).  A JSON
+                            # number is formatted exactly as before.
+                            if isinstance(v, basestring):
+                                fixed = _revive_fixed(v)
+                                if fixed is not None:
+                                    formatted.append(
+                                        formatDecimalMark(fixed, self.dmk))
+                                    continue
                             formatted.append(formatDecimalMark(float(v), self.dmk))
                         except (ValueError, TypeError):
                             formatted.append(unicode(v))
@@ -1249,8 +1259,14 @@ def _patch_set_interim_value():
             self.setInterimFields(interims)
             # --- End original save logic ---
 
-            # Re-evaluate every computed interim, in definition order
-            _evaluate_interims_ordered(self)
+            # The patched Analysis.setInterimFields evaluates this analysis
+            # and settles the sample tree by itself -- or, inside a listing
+            # save, defers both to the one settle at the end of the request.
+            # Evaluating again here would undo that deferral field by field,
+            # which is the per-field cost the batch exists to remove.  Only a
+            # class whose setInterimFields is not ours still needs it here.
+            if not getattr(self.setInterimFields, "_maitux_settles", False):
+                _evaluate_interims_ordered(self)
         finally:
             _fail_suppress_pop()
             _report_eval_failures(self)
@@ -1459,15 +1475,17 @@ def _patch_set_interim_fields():
     original = Analysis.__dict__["setInterimFields"]
 
     def patched_setInterimFields(self, interims):
-        # Snapshot current cross-referenceable field values, so we can detect
-        # changes and propagate LOOKUP re-evaluation to dependent siblings.
-        before = {}
-        try:
-            for _i in self.getInterimFields():
-                if _i.get("cross_referenceable"):
-                    before[_i.get("keyword")] = _i.get("value")
-        except Exception:
-            before = {}
+        # The evaluation engines store what they computed through this very
+        # method.  Such a write is part of an evaluation somebody else is
+        # driving -- the ordered driver, and above it the settle loop, which
+        # compares this analysis before and after and propagates from there
+        # -- so it only stores.  It used to propagate from right here, i.e.
+        # before the analysis had finished computing; see _settle.
+        nested = getattr(_eval_depth_local, "in_driver", False)
+
+        # What the other analyses can read off this one, before the write:
+        # the settle loop propagates only from what actually changed.
+        before = None if nested else _published_map(self)
 
         # Restore the stored value of locked interims.  This is the batch
         # write path and is also what the native Submit adapter feeds from the
@@ -1488,43 +1506,25 @@ def _patch_set_interim_fields():
         # 写入让已收集的兄弟数据过期（传播会在求值中途改写兄弟）。
         _ccr_cache_invalidate()
 
-        # Evaluate calculated interims, bounded against non-convergence
-        # (see _MAX_EVAL_DEPTH).
-        _depth = getattr(_eval_depth_local, "depth", 0)
-        if _depth >= _MAX_EVAL_DEPTH:
-            from bika.lims import logger as _depth_logger
-            _depth_logger.warn(
-                "maitux.calcenhance: interim evaluation did not converge "
-                "after %d passes on %s -- stopping.  A locked computed "
-                "interim whose stored value differs from the computed one "
-                "will do this." % (_depth, getattr(self, "id", "?")))
-        else:
-            _eval_depth_local.depth = _depth + 1
-            try:
-                _evaluate_interims_ordered(self)
-            finally:
-                _eval_depth_local.depth = _depth
+        if nested:
+            return
 
-        # If any cross-referenceable field actually changed, re-evaluate the
-        # sibling analyses whose LOOKUP() references this AS.
-        cross_ref_changed = False
-        for i in interims:
-            if not i.get("cross_referenceable"):
-                continue
-            if not _same_value(before.get(i.get("keyword")),
-                               i.get("value")):
-                cross_ref_changed = True
-                break
+        # Inside a listing save: store now, evaluate and propagate once at
+        # the end of the request (_apply_save_queue).
+        batch = _save_batch()
+        if batch is not None:
+            batch.note(self, before)
+            return
 
-        _local = _get_propagation_local()
-        is_top = getattr(_local, "visited", None) is None
+        # A write on its own: evaluate this analysis and bring everything
+        # that reads it, directly or not, to the fixed point.
         try:
-            if cross_ref_changed:
-                _propagate_lookup_recalc(self)
+            _settle([(self, before)])
         finally:
-            if is_top:
-                _finish_propagation()
-                _report_eval_failures(self)
+            _report_eval_failures(self)
+
+    # Read by patched_setInterimValue: this setter evaluates by itself.
+    patched_setInterimFields._maitux_settles = True
 
     setattr(Analysis, "setInterimFields", patched_setInterimFields)
     _s = __import__("sys")
@@ -1576,6 +1576,13 @@ def _patch_calculate_result():
             return False
 
     def patched_calculateResult(self, override=False, cascade=False):
+        # Inside a listing save the data manager calls this after every
+        # field, from interims that have not been evaluated yet.  The settle
+        # at the end of the save computes it once from settled ones
+        # (_apply_save_queue), so the per-field calls are skipped.
+        batch = _save_batch()
+        if batch is not None and batch.holds(self):
+            return False
         try:
             formula = self.getCalculationFormula() or ""
             if formula:
@@ -1758,6 +1765,11 @@ def _collect_cross_referenceable_data_uncached(analysis):
                         if isinstance(arr, list):
                             # Convert floatable string elements to float
                             # (frontend MultiValue submits text inputs → JSON strings)
+                            # A fixed-point literal comes back as a _Fixed:
+                            # a column carried across AS as-is (AS-25 第 n 份
+                            # 报告值, a LOOKUP'd correction factor) must keep
+                            # the places it was stored with (口径 ④,
+                            # 有关物质 20260923 裁决 §6-②).
                             import bika.lims.api as _api_ccr
                             typed = []
                             for v in arr:
@@ -1765,7 +1777,7 @@ def _collect_cross_referenceable_data_uncached(analysis):
                                     if isinstance(v, (int, float)):
                                         typed.append(float(v))
                                     elif isinstance(v, basestring) and _api_ccr.is_floatable(v):
-                                        typed.append(float(v))
+                                        typed.append(_stored_number(v))
                                     else:
                                         typed.append(v)
                                 except Exception:
@@ -1779,7 +1791,9 @@ def _collect_cross_referenceable_data_uncached(analysis):
                     try:
                         import bika.lims.api as _api
                         if _api.is_floatable(val):
-                            scalar = float(val)
+                            # Same as the array branch: a stored "1.00"
+                            # handed on by LOOKUP stays "1.00".
+                            scalar = _stored_number(val)
                         else:
                             # [PY2-UNICODE] _safe_text, not str().  See R13.
                             # RecordsField stores string subfields as unicode
@@ -2030,14 +2044,17 @@ _T_95 = {
 }
 
 
-# Re-entrancy bound for the interim evaluation chain.  Evaluation calls
-# setInterimFields again whenever a value changed, which re-enters
-# evaluation; dependency chains settle in one or two extra passes.  A value
-# that can never be stored -- a locked computed interim whose stored form
-# differs from the computed one -- keeps `changed` true on EVERY pass, and
-# the chain then recursed until the stack blew (RuntimeError: maximum
-# recursion depth exceeded), which made the object impossible to create.
-# Bounding the depth breaks that without forbidding legitimate re-entry.
+# Re-entrancy bound.  Evaluation stores what it computed through
+# setInterimFields, which used to re-enter evaluation (and propagation) from
+# inside the write.  A value that can never be stored -- a locked computed
+# interim whose stored form differs from the computed one -- then kept
+# `changed` true on every pass and recursed until the stack blew
+# (RuntimeError: maximum recursion depth exceeded), which made the object
+# impossible to create.  Writes from inside the ordered driver now only
+# store (patched_setInterimFields), so that recursion cannot start; the
+# number lives on as the per-analysis visit bound of the settle loop
+# (_MAX_SETTLE_VISITS), which is where a value that never settles now shows
+# up -- as a logged warning.
 _MAX_EVAL_DEPTH = 8
 _eval_depth_local = threading.local()
 
@@ -2208,6 +2225,49 @@ def _stringify_result(result):
     return str(result)
 
 
+# Markers that genuinely contribute zero to a total: a result below the limit
+# of quantification is known to be near zero.  Anything else non-numeric is an
+# UNKNOWN contribution, not a zero one, and must not be silently summed as 0.
+#
+# The EXACT-MATCH half.  RESULT_STATUS's below-report-limit label carries the
+# report limit inside it ('＜0.05%'), so it changes with the AS and cannot be
+# listed here -- see _is_zero_marker for the prefix rule that covers it.
+_ZERO_MARKERS = frozenset([
+    u"", u"N.D.", u"ND", u"N.D", u"<LOQ", u"< LOQ", u"<LOD", u"< LOD",
+])
+
+# Full-width ＜ as well as ASCII '<': the analysts write the full-width one,
+# and RESULT_STATUS now emits it.
+_BELOW_LIMIT_PREFIXES = (u"<", u"\uff1c")
+
+
+def _is_zero_marker(value):
+    """True when `value` is a below-limit marker, i.e. contributes 0.
+
+    Two rules, because one table cannot cover both shapes:
+
+    - the fixed labels in _ZERO_MARKERS (empty / ND / N.D. / <LOQ / <LOD);
+    - anything STARTING with '<' or '＜'.  RESULT_STATUS renders the middle
+      band as '＜0.05%', and that number follows the AS's own report limit --
+      a literal table would need one entry per AS and would stop matching the
+      day somebody changed a limit.  The silence is the whole failure mode: an
+      unmatched marker falls through to '---' in RESULT_NUM, and 总杂 (the sum
+      of the report values) then reads '---' for every row, with nothing in
+      the log (2026-09-21).
+
+    A bare '<' with nothing after it still reads as below-limit.
+
+    Module level, not nested in the calculatedlist engine, for the reason
+    _num_or_none is: a closure cannot be imported, and this predicate is the
+    single point where a wording change on one column silently zeroes -- or
+    silently blanks -- another.
+    """
+    text = _safe_text(value).strip()
+    if text[:1] in _BELOW_LIMIT_PREFIXES:
+        return True
+    return text.upper() in _ZERO_MARKERS
+
+
 def _num_or_none(v):
     """Coerce to float, or None when the cell is missing / not numeric.
 
@@ -2224,6 +2284,13 @@ def _num_or_none(v):
         return None
     if isinstance(v, bool):
         return float(v)
+    if isinstance(v, _Fixed):
+        # Already a number, and one that knows its places.  float() would
+        # throw them away, and every SELECTING function built on this --
+        # BASELINE_BYlist, GROUP_REPORT_TOPlist, GROUP_MAX/MIN -- would hand
+        # the analyst's "1609" back as 1609.0 (口径 ④).  Arithmetic on the
+        # result still gives a plain float, so nothing COMPUTED keeps them.
+        return v
     if isinstance(v, (int, float)):
         return float(v)
     try:
@@ -2235,6 +2302,147 @@ def _num_or_none(v):
         return float(s)
     except (ValueError, TypeError):
         return None
+
+
+class _Fixed(float):
+    """A float that remembers how many decimals it was rounded to.
+
+    The rounding family used to end in `float(d)`: at that moment
+    Decimal('3.100') held both the value and the number of places, and
+    float() kept only the value.  Everything downstream -- `1609.0` where
+    ROUND(x, 0) was asked for, `3.1` where ROUND_EVEN(x, 3) was asked for --
+    followed from that one discard (修约与显示口径.md §2).
+
+    A float SUBCLASS, not a Decimal and not a string (需求与方案 §2.1):
+
+      - Decimal / float raises TypeError on Py2, so `[a]/[b]*100` would
+        break on every rounded input;
+      - a string compares wrongly: on Py2 '3.100' > 5.0 is always True and
+        sorted(['10.0', '9.0']) comes out reversed, so `ROUND(x,1) > limit`
+        would silently give the wrong answer;
+      - a float subclass is `isinstance(x, float)`, so arithmetic,
+        comparison, sorting and every numeric check keep working, and the
+        result of any arithmetic is a PLAIN float -- the places do not
+        spread.  A rounded value used in a further calculation gets its
+        places from the next ROUND, not from this one.
+
+    str() / unicode() / u"%s" give the fixed-point text ("1609", "3.100").
+    repr() deliberately does NOT: the array engine inlines whole columns
+    into the formula text with repr() and eval()s it, and a bare "1609"
+    there is an int literal -- `1609/2` would become Py2 integer division.
+    repr() therefore spells a constructor call that the array engine's
+    _SAFE resolves back into a _Fixed, and for a plain-float column the
+    inlined text is exactly what it was before.
+
+    __reduce__ / __getnewargs__ are not optional: with __slots__ and no
+    state hook, deepcopy and pickle both raise TypeError, and
+    safe_format_interim deep-copies interim fields -- that would be a 500
+    on save, not a display glitch (需求与方案 §4.2).
+    """
+    __slots__ = ("digits",)
+
+    # "%.*f" refuses very large precisions on Py2; nothing rounds to more
+    # than a handful of places, so this only has to keep __str__ total.
+    _MAX_DIGITS = 15
+
+    def __new__(cls, value, digits):
+        obj = float.__new__(cls, value)
+        obj.digits = min(max(int(digits), 0), cls._MAX_DIGITS)
+        return obj
+
+    def __str__(self):
+        return "%.*f" % (self.digits, self)
+
+    def __unicode__(self):
+        return unicode(self.__str__())
+
+    def __repr__(self):
+        return "_Fixed(%s, %d)" % (float.__repr__(self), self.digits)
+
+    def __reduce__(self):
+        return (_Fixed, (float(self), self.digits))
+
+    def __getnewargs__(self):
+        return (float(self), self.digits)
+
+
+# A plain fixed-point literal: optional minus, digits, optional fraction.
+# Deliberately narrow (需求与方案 §6.3): "1,609", " 12", "1e3", "+5" do not
+# match and stay exactly what they are today.  Widening it to "revive as
+# much as possible" is how a label gets mistaken for a number.
+import re as _fixed_re
+_FIXED_LITERAL_RE = _fixed_re.compile(r"-?\d+(?:\.(\d+))?\Z")
+
+
+def _revive_fixed(value):
+    """The _Fixed a stored fixed-point literal stands for, or None.
+
+    The read-back half of storage form A' (需求与方案 §2.2 / §2.3): a
+    rounded column is stored as text ("1609", "3.100"), and reading it back
+    must give the places back, or the next pass writes "1609.0" again.
+    Hand-typed `list` fields are stored as text too, which is what makes a
+    pure carry (BASELINE_BYlist over g_area) come out as typed (口径 ④).
+
+    Only when the literal survives the round trip byte for byte: "007" or a
+    fraction longer than _Fixed can print would come back as a different
+    text, so those stay on the old path (a plain float).
+    """
+    if not isinstance(value, basestring):
+        return None
+    text = _safe_text(value)
+    match = _FIXED_LITERAL_RE.match(text)
+    if match is None:
+        return None
+    digits = len(match.group(1) or u"")
+    if digits > _Fixed._MAX_DIGITS:
+        return None
+    fixed = _Fixed(float(text), digits)
+    if unicode(fixed) != text:
+        return None
+    return fixed
+
+
+def _stored_number(value):
+    """float(value) for a stored array cell, keeping a fixed literal's places.
+
+    Every collector that turns a stored array back into numbers used to say
+    float(v); this is that, except that a fixed-point literal comes back as
+    the _Fixed it was written from.  A JSON number stays a plain float -- an
+    unrounded column is not touched (A').
+    """
+    fixed = _revive_fixed(value)
+    if fixed is not None:
+        return fixed
+    return float(value)
+
+
+def _key_text(value):
+    """Text of a value used as a MATCH KEY, spelling a _Fixed as before.
+
+    A key column typed as text ("1", "2") reads back as a _Fixed now, and
+    its text is "1".  The other side of the match is often a plain float --
+    the scalar engine reads its fields with float(), a computed key column
+    is JSON numbers -- whose text is "1.0".  Both sides used to be "1.0",
+    so matching on _safe_text would silently stop finding rows that it
+    finds today.  Keys match on the value, never on the places.
+    """
+    if isinstance(value, _Fixed):
+        value = float(value)
+    return _safe_text(value)
+
+
+def _dumps_fixed(values):
+    """json.dumps for a computed column, writing _Fixed cells as their text.
+
+    json.dumps renders floats with float.__repr__ and never consults the
+    subclass, so it has to be told.  Only _Fixed cells change: plain floats,
+    placeholders and labels serialise exactly as before -- the unrounded
+    columns' stored text must stay byte-identical (Backlog S2 criterion ②),
+    because Py2 str(float) keeps only 12 significant digits and turning
+    them into text would lose precision on every save.
+    """
+    return json.dumps([unicode(v) if isinstance(v, _Fixed) else v
+                       for v in values])
 
 
 def _dec_quantize(val, digits, rounding):
@@ -2260,7 +2468,9 @@ def _dec_quantize(val, digits, rounding):
         return None
     try:
         q = Decimal(1).scaleb(-d)
-        return Decimal(repr(n)).quantize(q, rounding=rounding)
+        # float.__repr__, not repr(): n may be a _Fixed, whose repr is a
+        # constructor call (see _Fixed), not a decimal literal.
+        return Decimal(float.__repr__(n)).quantize(q, rounding=rounding)
     except (InvalidOperation, ValueError, ArithmeticError):
         return None
 
@@ -2271,7 +2481,7 @@ def _round_half_up(val, digits=0):
         return [_round_half_up(v, digits) for v in val]
     from decimal import ROUND_HALF_UP
     d = _dec_quantize(val, digits, ROUND_HALF_UP)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _round_half_even(val, digits=0):
@@ -2283,7 +2493,7 @@ def _round_half_even(val, digits=0):
         return [_round_half_even(v, digits) for v in val]
     from decimal import ROUND_HALF_EVEN
     d = _dec_quantize(val, digits, ROUND_HALF_EVEN)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _round_up(val, digits=0):
@@ -2315,7 +2525,7 @@ def _round_up(val, digits=0):
         return [_round_up(v, digits) for v in val]
     from decimal import ROUND_UP
     d = _dec_quantize(val, digits, ROUND_UP)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _round_down(val, digits=0):
@@ -2344,7 +2554,7 @@ def _round_down(val, digits=0):
         return [_round_down(v, digits) for v in val]
     from decimal import ROUND_DOWN
     d = _dec_quantize(val, digits, ROUND_DOWN)
-    return _PLACEHOLDER if d is None else float(d)
+    return _PLACEHOLDER if d is None else _Fixed(d, digits)
 
 
 def _format_digits(val, digits=0):
@@ -2750,7 +2960,7 @@ def _make_lookup(sibling_data):
                 return v
             if isinstance(v, str):
                 return v.decode("utf-8", "replace")
-            return unicode(v)
+            return _key_text(v)
 
         if key_values is not None:
             # Element-wise lookup: match each key, return array
@@ -2791,7 +3001,168 @@ def _make_lookup(sibling_data):
                 u"LOOKUP: key '%s' not found in '%s' array of '%s'"
                 % (key_val, key_kw, source_kw))
 
-    return lookup
+    def lookup2(source_kw, target_kw, key1_kw, key1_val, key2_kw, key2_val,
+                default=_NO_DEFAULT):
+        """LOOKUP with a TWO-field key: both have to match.
+
+            LOOKUP2(源AS, 取值字段, 键字段1, 键值1, 键字段2, 键值2 [, 默认])
+
+            imp_rec_spec_weigh = LOOKUP2("imp_rec_weigh", "imp_weigh",
+                                         "imp_name", [imp_name],
+                                         "imp_spike_level", [imp_spike_level])
+
+        AS-18 「加入杂质称样量」要按「物质名称 + 加标水平」取：同一个
+        杂质在源表里有好几个加标水平各一行，单键 LOOKUP 取回来的是其中
+        第一行 —— 一个看着完全合理的错数。
+
+        除了「两个键都要命中」，语义与 LOOKUP 一致：源 AS 的解析、
+        「还没录入」的判定、元素级 / 标量两种调用形式、默认值的含义都一样。
+        两处刻意不同：
+
+        - **不提供 LOOKUP 那条「省略键 = 取那唯一一行」的捷径**。用两个键
+          就是为了消歧义，遇到单行源就把键忽略掉，恰好把消歧义丢了。
+        - **命中多行取第一行并 warn**（与导入器的 `matches %d existing
+          objects` 同款）。两个键还撞上，说明源表里真有重复行 ——
+          那是数据问题，不该在这里静默地挑一个。
+
+        [PY2-UNICODE] 两边的键都过 _safe_text 再比 —— 杂质名大量是中文，
+        str 与 unicode 直接比在 Python 2 里不报错、只是永远不相等。
+        """
+        for label, value in ((u"source_kw", source_kw),
+                             (u"target_kw", target_kw),
+                             (u"key1_kw", key1_kw),
+                             (u"key2_kw", key2_kw)):
+            if not isinstance(value, basestring):
+                raise TypeError("LOOKUP2 %s must be a string" % label)
+
+        if source_kw not in sibling_data:
+            raise KeyError(
+                "LOOKUP2: source service '%s' not found or has no "
+                "cross-referenceable fields" % source_kw)
+
+        data = sibling_data[source_kw]
+        columns = {}
+        for label, field_kw in ((u"target", target_kw), (u"key1", key1_kw),
+                                (u"key2", key2_kw)):
+            arr = data.get(field_kw)
+            if arr is None:
+                raise KeyError(
+                    "LOOKUP2: %s field '%s' not found in '%s'"
+                    % (label.encode("ascii"), field_kw, source_kw))
+            if isinstance(arr, list):
+                # Same rule as LOOKUP: a field that has not been captured
+                # yet must not read as a value.  Raising lets the caller
+                # emit '---' instead of a blank that looks like a result.
+                if not arr:
+                    raise KeyError(
+                        "LOOKUP2: field '%s' of '%s' has no data yet"
+                        % (field_kw, source_kw))
+                columns[label] = list(arr)
+            elif arr == "":
+                raise KeyError(
+                    "LOOKUP2: field '%s' of '%s' has no data yet"
+                    % (field_kw, source_kw))
+            else:
+                # A SCALAR field on a keyed source is one value that belongs
+                # to every row of it -- a dilution factor for the whole
+                # prep, say.  Broadcasting it is the only reading that does
+                # not depend on WHICH row matched: taking it as a one-row
+                # column would answer for key row 0 and raise for key row 3,
+                # from the same stored value.
+                columns[label] = [arr]
+
+        # Broadcast a scalar VALUE column to the key length (see above).  A
+        # scalar KEY column stays one row long: it cannot tell two rows
+        # apart, which is the whole point of this function, so it should
+        # match one row and no more.
+        rows = min(len(columns[u"key1"]), len(columns[u"key2"]))
+        if len(columns[u"target"]) == 1 and rows > 1:
+            columns[u"target"] = columns[u"target"] * rows
+
+        target_arr = columns[u"target"]
+        key1_arr = [_key_text(v) for v in columns[u"key1"]]
+        key2_arr = [_key_text(v) for v in columns[u"key2"]]
+
+        import json as _l2_json
+
+        def _as_column(value):
+            """The key argument as a list, or None when it is one value."""
+            if isinstance(value, list):
+                return list(value)
+            if isinstance(value, basestring):
+                try:
+                    parsed = _l2_json.loads(_safe_text(value))
+                except Exception:
+                    return None
+                if isinstance(parsed, list):
+                    return parsed
+            return None
+
+        wanted1 = _as_column(key1_val)
+        wanted2 = _as_column(key2_val)
+        element_wise = not (wanted1 is None and wanted2 is None)
+        if not element_wise:
+            pairs = [(key1_val, key2_val)]
+        else:
+            if wanted1 is None:
+                wanted1 = [key1_val] * len(wanted2)
+            if wanted2 is None:
+                wanted2 = [key2_val] * len(wanted1)
+            if len(wanted1) != len(wanted2):
+                # Two key columns of different lengths cannot be paired by
+                # position; zipping them would ask for a row that nobody
+                # wrote.  Refuse rather than truncate to the shorter one.
+                raise ValueError(
+                    "LOOKUP2: key values have different row counts "
+                    "(%d vs %d) -- the two columns are not aligned"
+                    % (len(wanted1), len(wanted2)))
+            pairs = list(zip(wanted1, wanted2))
+
+        results = []
+        ambiguous = []
+        for value1, value2 in pairs:
+            want1 = _key_text(value1)
+            want2 = _key_text(value2)
+            hits = [index for index in range(rows)
+                    if key1_arr[index] == want1 and key2_arr[index] == want2]
+            if not hits:
+                if default is not _NO_DEFAULT:
+                    results.append(default)
+                    continue
+                raise KeyError(
+                    u"LOOKUP2: key ('%s', '%s') not found in '%s'/'%s' of "
+                    u"'%s'" % (want1, want2, key1_kw, key2_kw, source_kw))
+            if len(hits) > 1 and (want1, want2) not in ambiguous:
+                ambiguous.append((want1, want2))
+            if hits[0] >= len(target_arr):
+                # key columns longer than the value column
+                if default is not _NO_DEFAULT:
+                    results.append(default)
+                    continue
+                raise KeyError(
+                    u"LOOKUP2: '%s' of '%s' has no value on the row key "
+                    u"('%s', '%s') matched" % (target_kw, source_kw,
+                                               want1, want2))
+            results.append(target_arr[hits[0]])
+
+        if ambiguous:
+            from bika.lims import logger as _l2_logger
+            for want1, want2 in ambiguous:
+                _l2_logger.warn((
+                    u"maitux.calcenhance: LOOKUP2 on '%s': key "
+                    u"('%s', '%s') matches more than one row of '%s'/'%s' "
+                    u"-- using the first.  Two keys still colliding means "
+                    u"the source table really holds duplicate rows."
+                    % (source_kw, want1, want2, key1_kw, key2_kw)
+                ).encode("utf-8"))
+
+        return results if element_wise else results[0]
+
+    # Both, because LOOKUP2 needs the same `sibling_data` closure and the
+    # same _NO_DEFAULT sentinel.  A second factory would have to duplicate
+    # the source-resolution rules, and two copies of "has this been
+    # captured yet" is exactly how the two spellings drift apart.
+    return lookup, lookup2
 
 
 # ==============================================================================
@@ -2799,13 +3170,24 @@ def _make_lookup(sibling_data):
 # ==============================================================================
 
 import re as _lookup_re
-_LOOKUP_SRC_RE = _lookup_re.compile(r'LOOKUP\s*\(\s*["\']([^"\']+)["\']')
+# LOOKUP2? -- LOOKUP2's source AS sits in the same first argument, and a
+# formula whose only cross-AS reference is a LOOKUP2 would otherwise look
+# dependency-free: the downstream value would be computed once and then never
+# refreshed when the source changes (the stale-value failure v1.5.0 fixed for
+# LOOKUP).  No log line, no '---' -- just an old number.
+#
+# EARLIEST_TIME reads another AS the same way (source first), so it rides
+# both regexes: without that, editing the selected stability segment's
+# injection times would leave the hours column measured from the old t0.
+_LOOKUP_SRC_RE = _lookup_re.compile(
+    r'''(?:LOOKUP2?|EARLIEST_TIME)\s*\(\s*["']([^"']+)["']''')
 
 # LOOKUP whose source service is a [keyword] reference rather than a literal,
 # e.g. LOOKUP([imp_src_as], "imp_correction_factor", "imp_name", [imp_name]).
 # The value only exists at evaluation time, so _LOOKUP_SRC_RE -- which reads
 # quoted literals -- finds nothing and the formula looks dependency-free.
-_LOOKUP_DYNAMIC_SRC_RE = _lookup_re.compile(r'LOOKUP\s*\(\s*\[')
+_LOOKUP_DYNAMIC_SRC_RE = _lookup_re.compile(
+    r'(?:LOOKUP2?|EARLIEST_TIME)\s*\(\s*\[')
 
 # Cross-AS aggregation (XAGG_*) reads its source AS from string-literal
 # arguments too, but unlike LOOKUP the source is not a fixed position:
@@ -2865,22 +3247,6 @@ def _lookup_has_dynamic_source(formula):
     return bool(_LOOKUP_DYNAMIC_SRC_RE.search(formula))
 
 
-def _is_cross_referenceable_source(analysis):
-    """Whether this analysis exposes anything a LOOKUP could read.
-
-    Bounds the conservative branch above.  Without it, a dynamic-source
-    formula would be treated as depending on every analysis on the sample,
-    and each unrelated edit would drag it through a recalculation.  Only
-    analyses that actually publish cross-referenceable fields can be a
-    LOOKUP source, so only those need the benefit of the doubt.
-    """
-    try:
-        return any(i.get("cross_referenceable")
-                   for i in analysis.getInterimFields())
-    except Exception:
-        return False
-
-
 def _is_dead_analysis(analysis):
     """Whether an analysis must be skipped when propagating a recalculation.
 
@@ -2889,10 +3255,9 @@ def _is_dead_analysis(analysis):
     analyses are superseded records and must keep the result they were closed
     with.  Recalculating them would rewrite history.
 
-    Note this deliberately does NOT skip submitted or verified analyses: the
-    native recalculation does not either, and skipping them would leave the
-    sample internally inconsistent (a changed reference standard with sample
-    results still derived from the old one).
+    Submitted and verified analyses are not "dead" and are not caught here;
+    the settle loop leaves them alone for a different reason, see
+    _result_editable.
     """
     try:
         from bika.lims.api.analysis import is_rejected
@@ -2905,53 +3270,6 @@ def _is_dead_analysis(analysis):
                     or is_retested(analysis))
     except Exception:
         return False
-
-
-def _dependent_sibling_analyses(analysis):
-    """Return sibling analyses whose LOOKUP() directly references this AS.
-
-    Direct references only (no transitive closure).  Handles both Calculated
-    and CalculatedList formulas, since both store the formula on the interim
-    field dict.
-
-    Scope is the whole sample tree, partitions included (see
-    _sample_tree_analyses), so editing a reference standard on one partition
-    re-evaluates the tests that LOOKUP it from another.
-    """
-    dependents = []
-    siblings = _sample_tree_analyses(analysis)
-
-    try:
-        svc = analysis.getAnalysisService()
-        own_kw = svc.getKeyword() if svc else ""
-    except Exception:
-        own_kw = ""
-    if not own_kw:
-        return dependents
-
-    # A formula that chooses its source at run time might be pointing here,
-    # and there is no way to tell from the text.  Give it the benefit of the
-    # doubt, but only if this analysis could be a LOOKUP source at all.
-    may_be_dynamic_source = _is_cross_referenceable_source(analysis)
-
-    for sibling in siblings:
-        try:
-            if sibling.UID() == analysis.UID():
-                continue
-            if _is_dead_analysis(sibling):
-                continue
-            for interim in sibling.getInterimFields():
-                formula = interim.get("formula", "") or ""
-                if not formula:
-                    continue
-                if (own_kw in _extract_lookup_sources(formula)
-                        or (may_be_dynamic_source
-                            and _lookup_has_dynamic_source(formula))):
-                    dependents.append(sibling)
-                    break
-        except Exception:
-            continue
-    return dependents
 
 
 def _interim_value_map(analysis):
@@ -3073,6 +3391,7 @@ def _patch_listing_set_field():
         return False
 
     if getattr(AjaxListingView.set_field, "_maitux_patched", False):
+        _patch_listing_set_fields_guarded()
         return True
 
     original = AjaxListingView.__dict__["set_field"]
@@ -3115,6 +3434,279 @@ def _patch_listing_set_field():
     setattr(AjaxListingView, "set_field", patched_set_field)
     _s = __import__("sys")
     _s.stderr.write("maitux: set_field patch applied OK\n")
+    _s.stderr.flush()
+    _patch_listing_set_fields_guarded()
+    return True
+
+
+def _patch_listing_set_fields_guarded():
+    try:
+        return _patch_listing_set_fields()
+    except Exception as _lsfs_err:
+        _s = __import__("sys")
+        _s.stderr.write(
+            "maitux: ajax_set_fields patch FAILED: %s -- saves stay "
+            "per-field\n" % _lsfs_err)
+        return False
+
+
+# --- One settle per listing save -------------------------------------------
+#
+# senaite.app.listing's ajax_set_fields writes a save queue field by field
+# (`for name, value in data.iteritems()` -- hash order, not the order on
+# screen), and every field went through the whole chain: evaluate the
+# analysis, propagate across the sample tree, recalculate the Result.  The
+# lab saves a whole row at a time (maitux.worksheet as_grouped.js: one
+# request per row, 7 to 11 fields), so a row paid for 7 to 11 full chains,
+# ~17-19s on lims-dev, of which all but the last were thrown away.
+#
+# Inside a save the interim writes now only store (patched_setInterimFields
+# notes the analysis in the batch), the data manager's per-field
+# calculateResult is skipped for those analyses (patched_calculateResult),
+# and one settle runs at the end.  Correctness does not depend on this: the
+# per-field path settles to the same fixed point, only slower.
+_batch_local = threading.local()
+
+
+class _SaveBatch(object):
+    """The analyses one listing save has written so far."""
+
+    def __init__(self):
+        self.order = []
+        self.objects = {}
+        self.before = {}
+
+    def note(self, analysis, before):
+        try:
+            uid = analysis.UID()
+        except Exception:
+            return
+        if uid in self.objects:
+            return
+        self.order.append(uid)
+        self.objects[uid] = analysis
+        # Published state before the FIRST write of the save: the settle
+        # loop propagates from what changed over the whole save.
+        self.before[uid] = before
+
+    def holds(self, analysis):
+        try:
+            return analysis.UID() in self.objects
+        except Exception:
+            return False
+
+
+def _save_batch():
+    return getattr(_batch_local, "batch", None)
+
+
+def _apply_save_queue(set_field, save_queue):
+    """The loop of ajax_set_fields, followed by one settle.
+
+    `set_field(obj, name, value)` is the listing view's own set_field (so
+    the permission checks of the data manager and the LOOKUP sibling
+    reporting of patched_set_field stay in the path); `save_queue` is the
+    payload's {uid: {field: value}}, iterated exactly as upstream does.
+
+    Returns the updated objects, one per UID -- the ones ajax_set_fields
+    notifies and re-renders.
+    """
+    import bika.lims.api as api
+
+    updated = {}
+
+    def _add(objs):
+        for obj in objs or []:
+            try:
+                updated.setdefault(obj.UID(), obj)
+            except Exception:
+                continue
+
+    def _write_all():
+        for uid, data in save_queue.iteritems():
+            obj = api.get_object_by_uid(uid)
+            for name, value in data.iteritems():
+                _add(set_field(obj, name, value))
+
+    if _save_batch() is not None:
+        # A save inside a save: the outer one settles.
+        _write_all()
+        return list(updated.values())
+
+    batch = _SaveBatch()
+    _batch_local.batch = batch
+    try:
+        _write_all()
+    finally:
+        _batch_local.batch = None
+    if not batch.order:
+        return list(updated.values())
+
+    seeds = [(batch.objects[uid], batch.before[uid]) for uid in batch.order]
+    _drain_propagated_siblings()
+    try:
+        _settle(seeds, recalc_seed_results=True, notify=False)
+    finally:
+        _report_eval_failures(seeds[0][0])
+    siblings = _drain_propagated_siblings()
+
+    # What the data manager did after every field, once: the seed's Result
+    # was computed inside the settle, this is the native dependency chain
+    # (Calculation formulas naming the service, getDependents()).
+    recalculated = []
+    try:
+        from senaite.core.interfaces import IDataManager
+        from zope.component import queryAdapter
+    except ImportError:
+        IDataManager = None
+    if IDataManager is not None:
+        for analysis, _ in seeds:
+            datamanager = queryAdapter(analysis, interface=IDataManager)
+            recalc = getattr(datamanager, "recalculate_results", None)
+            if callable(recalc):
+                recalculated.extend(recalc(analysis) or [])
+
+    # set_field reindexed the seeds in the middle of the save, before their
+    # computed fields were; everything else changed behind its back.
+    reindexed = set()
+    for obj in [a for a, _ in seeds] + list(siblings) + recalculated:
+        try:
+            uid = obj.UID()
+        except Exception:
+            continue
+        _add([obj])
+        if uid in reindexed:
+            continue
+        reindexed.add(uid)
+        try:
+            obj.reindexObject()
+        except Exception:
+            from bika.lims import logger as _batch_logger
+            _batch_logger.warn(
+                "maitux.calcenhance: could not reindex %s after a save"
+                % getattr(obj, "id", "?"))
+    return list(updated.values())
+
+
+# Fingerprint of the upstream ajax_set_fields body the replacement below was
+# written against: senaite.app.listing rev 1bd8490 (buildout.cfg).  A rev
+# bump that changes the body makes the patch refuse to apply -- loudly, at
+# startup -- rather than quietly replace new upstream behaviour with this old
+# copy.  Saves then stay per-field: same results, the old speed.
+_UPSTREAM_SET_FIELDS_SHA1 = "2fd1b4af3cc4554b427109510fcd00330f3c1351"
+_UPSTREAM_SET_FIELDS_NAMES = (
+    "all", "api", "contentFilter", "format", "get", "get_folderitems",
+    "get_json", "get_object_by_uid", "get_uid", "iteritems", "join",
+    "json_message", "len", "map", "notify_edited", "set", "set_field",
+    "update")
+
+
+def _innermost(func):
+    """The function under a stack of functools.wraps decorators.
+
+    Python 2's wraps does not set __wrapped__, so walk the closures.
+    """
+    for _ in range(10):
+        inner = None
+        for cell in (getattr(func, "__closure__", None) or ()):
+            try:
+                contents = cell.cell_contents
+            except ValueError:
+                continue
+            if hasattr(contents, "__code__"):
+                inner = contents
+                break
+        if inner is None:
+            return func
+        func = inner
+    return func
+
+
+def _patch_listing_set_fields():
+    """Replace ajax_set_fields with a copy whose loop is _apply_save_queue.
+
+    Only the body can carry the change: the settle has to run after the
+    loop and before notify_edited / get_folderitems, and upstream offers no
+    hook in between.  Everything else is the upstream body line for line,
+    under the same three decorators -- `inject_runtime` keeps logging
+    "Execution of 'ajax_set_fields' took Xs", which is what save timings are
+    read from.
+    """
+    import hashlib
+
+    from senaite.app.listing.ajax import AjaxListingView
+    from senaite.app.listing.decorators import inject_runtime
+    from senaite.app.listing.decorators import returns_safe_json
+    from senaite.app.listing.decorators import set_application_json_header
+
+    _s = __import__("sys")
+    current = AjaxListingView.__dict__.get("ajax_set_fields")
+    if current is None:
+        _s.stderr.write(
+            "maitux: ajax_set_fields not found on AjaxListingView, skip\n")
+        return False
+    if getattr(current, "_maitux_patched", False):
+        return True
+    body = _innermost(current).__code__
+    digest = hashlib.sha1(body.co_code).hexdigest()
+    if (digest != _UPSTREAM_SET_FIELDS_SHA1
+            or tuple(sorted(body.co_names)) != _UPSTREAM_SET_FIELDS_NAMES):
+        _s.stderr.write(
+            "maitux: ajax_set_fields patch FAILED: the upstream body is not "
+            "the one this copy was made from (sha1 %s) -- saves stay "
+            "per-field\n" % digest)
+        return False
+
+    import bika.lims.api as api
+
+    @set_application_json_header
+    @returns_safe_json
+    @inject_runtime
+    def ajax_set_fields(self):
+        """Set multiple fields
+
+        The POST Payload needs to provide the following data:
+
+        :save_queue: A mapping of {UID: {fieldname: fieldvalue, ...}}
+        """
+
+        # Get the HTTP POST JSON Payload
+        payload = self.get_json()
+
+        required = ["save_queue"]
+        if not all(map(lambda k: k in payload, required)):
+            return self.json_message("Payload needs to provide the keys {}"
+                                     .format(", ".join(required)), status=400)
+
+        save_queue = payload.get("save_queue")
+
+        # maitux.calcenhance: the upstream loop, plus one settle at the end
+        updated_objects = _apply_save_queue(self.set_field, save_queue)
+
+        if not updated_objects:
+            return self.json_message("Failed to set field of save queue '{}'"
+                                     .format(save_queue), 500)
+
+        # notify object edited
+        map(self.notify_edited, updated_objects)
+
+        # get the updated folderitems
+        updated_uids = map(api.get_uid, updated_objects)
+        self.contentFilter["UID"] = updated_uids
+        folderitems = self.get_folderitems()
+
+        # prepare the response object
+        data = {
+            "count": len(folderitems),
+            "uids": updated_uids,
+            "folderitems": folderitems,
+        }
+
+        return data
+
+    ajax_set_fields._maitux_patched = True
+    setattr(AjaxListingView, "ajax_set_fields", ajax_set_fields)
+    _s.stderr.write("maitux: ajax_set_fields patch applied OK\n")
     _s.stderr.flush()
     return True
 
@@ -4097,53 +4689,372 @@ def _patch_instrument_import_unicode_deferred(event=None):
             "maitux: deferred instrument import unicode patch failed\n")
 
 
-def _propagate_lookup_recalc(analysis):
-    """Re-evaluate siblings that LOOKUP-reference `analysis` (transitively).
+from collections import deque
 
-    A thread-local visited set (keyed by analysis UID) breaks cycles such as
-    mutually-referencing analyses (A LOOKUP B and B LOOKUP A).
+# ==============================================================================
+# SETTLE -- bring the sample tree to its fixed point after a write
+# ==============================================================================
+#
+# What went wrong before (Docs/保存性能及重新计算/证据-代码路径与实测.md §12):
+# propagation was a depth-first walk with a visited set, so every analysis
+# was evaluated at most once per write -- and the walk started from inside
+# the source's own evaluation, before the source had finished computing.  An
+# analysis reached through one upstream before another upstream had been
+# re-evaluated kept the value computed from the stale one and was never
+# visited again.  On lims-dev / AA260914015, saving seven fields of
+# imp_sys_suit left four imp_ip_stat fields off the fixed point, silently,
+# depending on nothing but the order the fields happened to be written in.
+#
+# The settle loop is a worklist instead:
+#   * an analysis is (re-)queued whenever something it reads has changed,
+#     however many times that happens, so it is always evaluated again after
+#     its LAST upstream change -- which is what makes the end state the fixed
+#     point, whatever the write order;
+#   * it propagates only from finished evaluations, comparing what the
+#     analysis publishes (cross-referenceable interims and Result) before and
+#     after -- an evaluation that changed nothing another analysis can read
+#     queues nothing;
+#   * it never touches an analysis whose results can no longer be edited
+#     (_result_editable), nor a retracted / rejected / retested one
+#     (_is_dead_analysis).
+#
+# A visit bound per analysis stops a genuine cycle (A reads B reads A with
+# values that never agree); hitting it is logged, never silent.
+_MAX_SETTLE_VISITS = _MAX_EVAL_DEPTH
+
+# Key of the Result in the maps below; a tuple cannot collide with an interim
+# keyword.
+_RESULT_KEY = ("__result__",)
+
+_settle_local = threading.local()
+
+
+def _published_map(analysis):
+    """What the other analyses on the sample can read off this one.
+
+    LOOKUP / XAGG read cross-referenceable interims only (see
+    _collect_cross_referenceable_data_uncached); a [KEYWORD] reference in an
+    interim formula reads the Result.  Propagating on anything else would
+    only buy evaluations that cannot change a thing.
     """
-    local = _get_propagation_local()
-    visited = getattr(local, "visited", None)
-    if visited is None:
-        visited = set()
-        local.visited = visited
-        visited.add(analysis.UID())
-    elif analysis.UID() in visited:
-        return
-    else:
-        visited.add(analysis.UID())
+    out = {}
+    try:
+        for interim in analysis.getInterimFields() or []:
+            keyword = interim.get("keyword")
+            if keyword and interim.get("cross_referenceable"):
+                out[keyword] = _safe_text(interim.get("value", ""))
+    except Exception:
+        pass
+    getter = getattr(analysis, "getResult", None)
+    if callable(getter):
+        try:
+            out[_RESULT_KEY] = _safe_text(getter())
+        except Exception:
+            pass
+    return out
 
-    for sibling in _dependent_sibling_analyses(analysis):
-        before_values = _interim_value_map(sibling)
-        _evaluate_interims_ordered(sibling)
-        # Writing a sibling here used to leave no audit trail at all:
-        # the snapshot is taken by the auditlog subscriber, which only
-        # runs on an event, and nothing on this path fired one.  The
-        # Audit Log tab therefore kept reporting the pre-propagation
-        # value -- actively contradicting the stored one -- with no
-        # record of who or what changed it.
-        #
-        # An Analysis is an Archetypes object, and for those the
-        # subscriber is registered on Products.Archetypes
-        # IObjectEditedEvent, NOT zope.lifecycleevent
-        # IObjectModifiedEvent (that one is bound to Dexterity
-        # content only), so IObjectEditedEvent is the event to fire.
-        if not _same_value_map(before_values,
-                               _interim_value_map(sibling)):
-            _record_propagated_sibling(sibling)
+
+def _stored_map(analysis):
+    """Every interim plus the Result -- what an audit snapshot records."""
+    out = _interim_value_map(analysis)
+    getter = getattr(analysis, "getResult", None)
+    if callable(getter):
+        try:
+            out[_RESULT_KEY] = _safe_text(getter())
+        except Exception:
+            pass
+    return out
+
+
+def _result_editable(analysis):
+    """Whether the workflow still lets anyone edit this analysis' results.
+
+    Propagation used to recalculate submitted and verified analyses too, on
+    the grounds that the native recalculation does.  It must not: a
+    to_be_verified or verified result is a signed record, and rewriting it
+    behind the reviewer's back -- no transition, no new submission -- is the
+    kind of change a compliance audit exists to catch.  Such an analysis
+    keeps the value it was submitted with; if an upstream changes after
+    that, the lab retracts and retests, which is the controlled path.
+
+    Asked of the workflow's permission mapping on the object, NOT of the
+    current user: whether a dependent gets updated must not depend on who
+    happened to press Save.  senaite_analysis_workflow grants
+    "senaite.core: Field: Edit Analysis Result" in registered / unassigned /
+    assigned and to nobody from to_be_verified on.
+    """
+    try:
+        from AccessControl.Permission import Permission
+        from senaite.core.permissions import FieldEditAnalysisResult
+    except ImportError:
+        # Only the offline test harness gets here: no Zope, no workflow.
+        return True
+    try:
+        for item in analysis.ac_inherited_permissions(1):
+            name, value = item[:2]
+            if name != FieldEditAnalysisResult:
+                continue
+            roles = Permission(name, value, analysis).getRoles()
+            # A list means "acquired from the container": the workflow has
+            # not locked this state down, so it is not a closed record.
+            if isinstance(roles, list):
+                return True
+            return bool(roles)
+    except Exception:
+        pass
+    # Cannot tell -- leave it alone.  Not writing is the safe side for a
+    # record, and the settle loop logs every analysis it left alone.
+    return False
+
+
+def _as_keyword(analysis):
+    try:
+        service = analysis.getAnalysisService()
+        return service.getKeyword() if service else ""
+    except Exception:
+        return ""
+
+
+class _TreeIndex(object):
+    """Who reads whom on one sample tree, built once per settle.
+
+    Three ways one analysis reads another:
+
+      * a literal LOOKUP / XAGG source (_extract_lookup_sources);
+      * a LOOKUP that picks its source at run time
+        (_lookup_has_dynamic_source).  Which analysis it reads cannot be told
+        from the text, so it is assumed to read every analysis that publishes
+        cross-referenceable fields -- the conservative branch, see
+        _lookup_has_dynamic_source for why that trade is not close;
+      * a [KEYWORD] in an interim formula naming another analysis' service,
+        which _evaluate_calculated_interims (step 3b) resolves to that
+        analysis' Result.  The old per-step scan did not know this one.
+
+    The old scan re-read every formula of the tree (428 on a 27-analysis
+    tree) at every propagation step; this reads them once.
+    """
+
+    def __init__(self, tree):
+        self.members = {}
+        self._by_source = {}
+        self._by_result = {}
+        self._dynamic = []
+        for analysis in tree:
             try:
-                _notify_event(_ATObjectEditedEvent(sibling))
+                uid = analysis.UID()
+                interims = analysis.getInterimFields() or []
             except Exception:
-                from bika.lims import logger as _prop_logger
-                _prop_logger.exception(
-                    "maitux.calcenhance: could not notify edit of %s"
-                    % getattr(sibling, "id", "?"))
-        _propagate_lookup_recalc(sibling)
+                continue
+            self.members[uid] = analysis
+            local = set(i.get("keyword") for i in interims)
+            sources = set()
+            refs = set()
+            dynamic = False
+            for interim in interims:
+                formula = interim.get("formula", "") or ""
+                if not formula:
+                    continue
+                sources.update(_extract_lookup_sources(formula))
+                dynamic = dynamic or _lookup_has_dynamic_source(formula)
+                refs.update(token for token in _ORDER_TOKEN_RE.findall(formula)
+                            if token not in local)
+            for keyword in sources:
+                self._by_source.setdefault(keyword, []).append(analysis)
+            for keyword in refs:
+                self._by_result.setdefault(keyword, []).append(analysis)
+            if dynamic:
+                self._dynamic.append(analysis)
+
+    def readers(self, analysis, before, after):
+        """Analyses that read something that differs between the two maps."""
+        own_kw = _as_keyword(analysis)
+        if not own_kw:
+            return []
+        keys = (set(before) | set(after)) - set([_RESULT_KEY])
+        xref_changed = any(before.get(k) != after.get(k) for k in keys)
+        result_changed = before.get(_RESULT_KEY) != after.get(_RESULT_KEY)
+        out = []
+        if xref_changed:
+            out.extend(self._by_source.get(own_kw, ()))
+            # Gated on a cross-referenceable change: without the gate every
+            # unrelated edit would drag the dynamic-source readers along.
+            out.extend(self._dynamic)
+        if result_changed:
+            out.extend(self._by_result.get(own_kw, ()))
+        return out
 
 
-def _finish_propagation():
-    _get_propagation_local().visited = None
+class _Settle(object):
+    """One run of the worklist.  See the block comment above."""
+
+    def __init__(self, recalc_seed_results):
+        self.recalc_seed_results = recalc_seed_results
+        self.queue = deque()
+        self.queued = set()
+        self.seeds = set()
+        self.before = {}        # uid -> published map to compare against
+        self.initial = {}       # uid -> stored map before its first visit
+        self.visited = []       # non-seed analyses, in first-visit order
+        self.visits = {}
+        self.indexes = {}       # member uid -> _TreeIndex
+        self.touchable = {}     # uid -> bool
+        self.skipped = []       # ids left alone: dead or no longer editable
+        self.overflow = []      # ids that hit _MAX_SETTLE_VISITS
+
+    def add_seed(self, analysis, before):
+        uid = analysis.UID()
+        self.seeds.add(uid)
+        if before is not None and uid not in self.before:
+            self.before[uid] = before
+        self._enqueue(analysis, uid)
+
+    def _enqueue(self, analysis, uid):
+        if uid in self.queued:
+            return
+        self.queued.add(uid)
+        self.queue.append(analysis)
+
+    def _index_for(self, analysis, uid):
+        index = self.indexes.get(uid)
+        if index is None:
+            index = _TreeIndex(_sample_tree_analyses(analysis))
+            for member in index.members:
+                self.indexes[member] = index
+            self.indexes[uid] = index
+        return index
+
+    def _can_touch(self, analysis, uid):
+        ok = self.touchable.get(uid)
+        if ok is None:
+            ok = (not _is_dead_analysis(analysis)
+                  and _result_editable(analysis))
+            self.touchable[uid] = ok
+            if not ok:
+                self.skipped.append(getattr(analysis, "id", "?"))
+        return ok
+
+    def run(self):
+        while self.queue:
+            analysis = self.queue.popleft()
+            uid = analysis.UID()
+            self.queued.discard(uid)
+            visits = self.visits.get(uid, 0) + 1
+            self.visits[uid] = visits
+            if visits > _MAX_SETTLE_VISITS:
+                if visits == _MAX_SETTLE_VISITS + 1:
+                    self.overflow.append(getattr(analysis, "id", "?"))
+                continue
+            before = self.before.pop(uid, None)
+            if before is None:
+                before = _published_map(analysis)
+            if uid not in self.seeds and uid not in self.initial:
+                self.initial[uid] = _stored_map(analysis)
+                self.visited.append(analysis)
+
+            _evaluate_interims_ordered(analysis)
+            if self.recalc_seed_results and uid in self.seeds:
+                # A listing save deferred the data manager's per-field
+                # calculateResult (see patched_calculateResult); the Result
+                # is computed here once, from settled interims, before
+                # anything that reads it is evaluated.
+                recalc = getattr(analysis, "calculateResult", None)
+                if callable(recalc):
+                    try:
+                        recalc(override=True)
+                    except Exception:
+                        from bika.lims import logger as _settle_logger
+                        _settle_logger.exception(
+                            "maitux.calcenhance: calculateResult failed on %s"
+                            % getattr(analysis, "id", "?"))
+
+            after = _published_map(analysis)
+            if after == before:
+                continue
+            index = self._index_for(analysis, uid)
+            for reader in index.readers(analysis, before, after):
+                try:
+                    reader_uid = reader.UID()
+                except Exception:
+                    continue
+                if reader_uid == uid:
+                    continue
+                if not self._can_touch(reader, reader_uid):
+                    continue
+                self._enqueue(reader, reader_uid)
+
+
+def _settle(seeds, recalc_seed_results=False, notify=True):
+    """Evaluate `seeds` and bring everything that reads them to the fixed point.
+
+    `seeds` is [(analysis, published map before the write)]; the map may be
+    None, in which case the current state is the baseline.
+
+    Returns the non-seed analyses whose stored values ended up different --
+    compared once, at the end, so an analysis re-evaluated three times on the
+    way gets one audit snapshot of its final state, not three of the
+    intermediate ones.  With `notify` those get their edit event here; the
+    listing save (_apply_save_queue) passes False because ajax_set_fields
+    notifies everything it re-renders anyway, and a second event would be a
+    second, identical snapshot.
+    """
+    state = getattr(_settle_local, "state", None)
+    if state is not None:
+        # A top-level write while a settle is running: hand it to the loop
+        # that is already going instead of starting a second one.
+        for analysis, before in seeds:
+            state.add_seed(analysis, before)
+        return []
+
+    state = _Settle(recalc_seed_results)
+    _settle_local.state = state
+    try:
+        for analysis, before in seeds:
+            state.add_seed(analysis, before)
+        state.run()
+    finally:
+        _settle_local.state = None
+
+    changed = []
+    for analysis in state.visited:
+        try:
+            if _stored_map(analysis) != state.initial.get(analysis.UID()):
+                changed.append(analysis)
+        except Exception:
+            continue
+    for analysis in changed:
+        _record_propagated_sibling(analysis)
+        if not notify:
+            continue
+        # Writing a sibling here used to leave no audit trail at all: the
+        # snapshot is taken by the auditlog subscriber, which only runs on an
+        # event, and nothing on this path fired one.  An Analysis is an
+        # Archetypes object, and for those the subscriber is registered on
+        # Products.Archetypes IObjectEditedEvent, NOT zope.lifecycleevent
+        # IObjectModifiedEvent (that one is bound to Dexterity content only).
+        try:
+            _notify_event(_ATObjectEditedEvent(analysis))
+        except Exception:
+            from bika.lims import logger as _prop_logger
+            _prop_logger.exception(
+                "maitux.calcenhance: could not notify edit of %s"
+                % getattr(analysis, "id", "?"))
+
+    if state.overflow or state.skipped:
+        from bika.lims import logger as _settle_logger
+        if state.overflow:
+            _settle_logger.warn(
+                "maitux.calcenhance: %s did not settle after %d evaluations "
+                "each -- the analyses read each other with values that never "
+                "agree; left as they are" % (", ".join(state.overflow),
+                                             _MAX_SETTLE_VISITS))
+        if state.skipped:
+            _settle_logger.info(
+                "maitux.calcenhance: left %d analysis(es) unchanged although "
+                "an upstream changed, because their results are no longer "
+                "editable (submitted / verified / retracted / rejected / "
+                "retested): %s" % (len(state.skipped),
+                                   ", ".join(state.skipped)))
+    return changed
 
 
 # ==============================================================================
@@ -4188,6 +5099,10 @@ def _bind_formula_values(expr, token_re, resolve):
         name = _VAR_PREFIX + keyword
         expr = expr.replace("[%s]" % keyword, name)
         if isinstance(value, bool):
+            variables[name] = value
+        elif isinstance(value, _Fixed):
+            # A pure carry (`[g_area]`, `COALESCE`-free passthrough) must
+            # hand the places on; arithmetic drops them by itself.
             variables[name] = value
         elif isinstance(value, (int, float)):
             variables[name] = float(value)
@@ -4357,6 +5272,104 @@ def _evaluate_interims_ordered(self):
     finally:
         _ccr_cache_end()
         _eval_depth_local.in_driver = False
+
+
+# ==============================================================================
+# FUNCTION MANIFEST SELF-CHECK (functions.json, 1.18.0) — report, never block
+# ==============================================================================
+#
+# functions.json 登记了两张函数表（标量引擎 safe_globals / 列表引擎 _SAFE）
+# 里的每一个名字。宿主侧 calcfuncs.py --check 与 tests/test_function_manifest.py
+# 都是**文本解析** patches.py；这里是唯一拿**真表**比的一处：两个 _evaluate_*
+# 把表建好之后调一次，每进程每张表只比一次。
+#
+# 只报不拦：不一致打一条 ERROR（grep `function manifest mismatch`），一致打一条
+# INFO（`function manifest ok`），读不到清单打一条 WARN，自检自己崩了打
+# traceback —— 哪种情况都**原样返回**，
+# 调用方照常求值，任何计算结果都不受影响。
+#
+# 清单路径与 calcfuncs.py 同约定：CALCENHANCE_MANIFEST 覆盖，缺省是本文件同目录。
+
+_FM_NOT_FUNCTIONS = frozenset(["True", "False", "None"])
+_fm_lock = threading.Lock()
+_fm_state = {"loaded": False, "functions": None, "checked": set()}
+
+
+def _fm_names(names):
+    # Py2: json 读出来的键是 unicode，表里的键是 str —— 日志一律拼 utf-8 str。
+    return ", ".join(
+        n.encode("utf-8") if isinstance(n, unicode) else n
+        for n in sorted(names)) or "-"
+
+
+def _fm_logger():
+    try:
+        from bika.lims import logger
+        if logger is not None:
+            return logger
+    except ImportError:
+        pass
+    import logging
+    return logging.getLogger("maitux.calcenhance")
+
+
+def _fm_load(logger):
+    """Read functions.json once per process; None when it cannot be read."""
+    import os
+    path = os.environ.get("CALCENHANCE_MANIFEST") or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "functions.json")
+    try:
+        with open(path, "rb") as f:
+            functions = json.load(f)["functions"]
+        if not isinstance(functions, dict):
+            raise ValueError("'functions' is not an object")
+        return functions
+    except Exception as err:
+        logger.warn(
+            "maitux: function manifest unreadable, self-check skipped "
+            "(calculation unaffected): %s: %s" % (
+                path, _fm_names([repr(err)])))
+        return None
+
+
+def _manifest_selfcheck(table, builtins):
+    """Compare a live eval table with functions.json, once per process.
+
+    table:    "scalar" (safe_globals) or "list" (_SAFE)
+    builtins: that table's "__builtins__" dict, fully built
+    """
+    if table in _fm_state["checked"]:
+        return
+    logger = _fm_logger()
+    try:
+        with _fm_lock:
+            if table in _fm_state["checked"]:
+                return
+            _fm_state["checked"].add(table)
+            if not _fm_state["loaded"]:
+                _fm_state["loaded"] = True
+                _fm_state["functions"] = _fm_load(logger)
+            functions = _fm_state["functions"]
+        if functions is None:
+            return
+        want = set(name for name, entry in functions.items()
+                   if table in (entry or {}).get("tables", ()))
+        have = set(builtins) - _FM_NOT_FUNCTIONS
+        if want != have:
+            logger.error(
+                "maitux: function manifest mismatch [%s table]: "
+                "in engine, not in functions.json: %s; "
+                "in functions.json, not in engine: %s" % (
+                    table, _fm_names(have - want), _fm_names(want - have)))
+        else:
+            # 一致也留一行：日志里「没有 mismatch」分不清是一致还是根本没比。
+            logger.info("maitux: function manifest ok [%s table]: %d names"
+                        % (table, len(have)))
+    except Exception:
+        import traceback
+        logger.error(
+            "maitux: function manifest self-check crashed [%s table] "
+            "(calculation unaffected): %s" % (table, traceback.format_exc()))
 
 
 def _evaluate_calculated_interims(self, only=None, chain=True):
@@ -4606,7 +5619,7 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
 
     # --- Step 3c: collect cross-referenceable sibling data for LOOKUP ---
     sibling_data = _collect_cross_referenceable_data(self)
-    LOOKUP = _make_lookup(sibling_data)
+    LOOKUP, LOOKUP2 = _make_lookup(sibling_data)
 
     def _scalar_coalesce(*values):
         """First present value.  See the list engine's _coalesce."""
@@ -4671,6 +5684,9 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
             "log10": __import__("math").log10,
             "exp": __import__("math").exp,
             "LOOKUP": LOOKUP,
+            # Two-field key.  In BOTH tables, exactly like LOOKUP: a
+            # scalar Calculated field is its most common home.
+            "LOOKUP2": LOOKUP2,
             # Registered in BOTH tables.  A scalar Calculated field is just as
             # entitled to gate a correction factor as a CalculatedList one,
             # and a name missing from one table fails as NameError -> "---",
@@ -4718,7 +5734,10 @@ def _evaluate_calculated_interims(self, only=None, chain=True):
             "ROUND_UP": _round_up,
             "ROUND_DOWN": _round_down,
             "FORMAT": _format_digits,
+            # repr(_Fixed) spells this constructor; see _Fixed.
+            "_Fixed": _Fixed,
         }}
+        _manifest_selfcheck("scalar", safe_globals["__builtins__"])
 
         # Step 4b: bind the remaining [keyword] references (averaged value_map)
         expr, variables = _bind_formula_values(expr, _TOKEN_RE, value_map.get)
@@ -4937,6 +5956,12 @@ def _evaluate_calculatedlist_interims(self, only=None):
                     # placeholder rows so downstream element-wise formulas stay
                     # row-aligned.  Store them in list_arrays with numbers as
                     # floats and "---" as a string.
+                    #
+                    # A fixed-point TEXT cell ("1609", "3.100") is read back
+                    # as a _Fixed: that is either a rounded column written by
+                    # _dumps_fixed or a hand-typed list, and in both cases the
+                    # places are part of the value (storage form A').  A JSON
+                    # number is read exactly as before.
                     if any(v == _PLACEHOLDER for v in arr):
                         typed = []
                         for v in arr:
@@ -4944,13 +5969,16 @@ def _evaluate_calculatedlist_interims(self, only=None):
                                 typed.append(_PLACEHOLDER)
                             elif v is not None and v != "" and (
                                     isinstance(v, (int, float)) or api.is_floatable(v)):
-                                typed.append(float(v))
+                                typed.append(_stored_number(v))
                             else:
                                 typed.append(_to_unicode(v))
                         list_arrays[kw] = typed
                     else:
                         # Try to interpret as numeric array first
-                        nums = [float(str(v)) for v in arr
+                        # (not `_revive_fixed(v) or ...`: _Fixed(0.0, 2) is
+                        # falsy, and "0.00" would lose its places)
+                        nums = [_stored_number(v) if isinstance(v, basestring)
+                                else float(str(v)) for v in arr
                                 if v is not None and v != "" and (
                                     isinstance(v, (int, float)) or api.is_floatable(v))]
                         if nums and len(nums) == len(arr):
@@ -4991,7 +6019,7 @@ def _evaluate_calculatedlist_interims(self, only=None):
 
     # Collect cross-referenceable sibling data for LOOKUP
     sibling_data = _collect_cross_referenceable_data(self)
-    _LOOKUP = _make_lookup(sibling_data)
+    _LOOKUP, _LOOKUP2 = _make_lookup(sibling_data)
 
     # Every service keyword actually present in this sample, UNFILTERED by
     # the cross_referenceable flag -- XAGG_* needs this to tell "that
@@ -5037,6 +6065,13 @@ def _evaluate_calculatedlist_interims(self, only=None):
         """Normalise a group key to unicode so CJK keys compare correctly."""
         if isinstance(k, str):
             k = k.decode("utf-8", "replace")
+        if isinstance(k, _Fixed):
+            # Spell a number the way it was spelled before _Fixed existed.
+            # A key column read back from text ("0", "2") is a _Fixed now
+            # and would print "0", while the same key computed elsewhere is
+            # a plain 0.0 -> "0.0"; the two groups would silently stop
+            # meeting.  Grouping is about the value, not the places.
+            k = float(k)
         return unicode(k) if k is not None else u""
 
     def _group_apply(values, key_arrays, agg, empty=_PLACEHOLDER):
@@ -5345,6 +6380,311 @@ def _evaluate_calculatedlist_interims(self, only=None):
             _baseline_duplicate_warn(floor, repeated, repeated_order)
 
         return [baseline.get(key, _PLACEHOLDER) for key in row_keys]
+
+    # ---- 去重族: DISTINCT_* / GROUP_REPORT_TOPlist -----------------------
+    #
+    # 一个杂质在报告里占 6 行（6 针），而实验人员要的是能
+    # **数得出来有几个杂质需要外报** —— 序号列去重之后，最大的
+    # 那个序号就是这个数（2026-09-21 的原话）。把值铺满每一行技术
+    # 上更省事，但那恰好抹掉了这一列存在的理由。重复行留空是需求，
+    # 不是排版偏好。
+    #
+    # 序号（DISTINCT_SEQlist）与单杂报告值（GROUP_REPORT_TOPlist）共用
+    # 同一份「首次出现」判定：两列必须在**同样的行**上有值，各写一个
+    # seen 循环迟早会在其中一方长出特例的那天分叉，而分叉的表现是
+    # “序号在这行、值在那行”，没人会当成报错看。
+    #
+    # DISTINCT_<OP> 是同一族的另一头：总杂那一列是 GROUP_SUMlist 广播
+    # 出来的，同一份样品的每一行都重复着同一个值。直接对它求 RSD，
+    # 6 个样品的值会各按它的杂质行数重复计入，离散度被稀释 ——
+    # 算出一个比真实值小的 RSD，而且从结果上看不出来。
+
+    def _distinct_first_rows(key_arrays, count=None):
+        """(row_keys, first_seen): 每行的键元组 + 每个键首次出现的行号.
+
+        `count` 强制行数；省略时取最长的那一列。标量键广播到全长，
+        短一截的列补 None（经 _norm_key 变成空串）。一个键也不给时每行的
+        键都是空元组，也就是「整列算一组」—— 与 GROUP_*list 不传键时一致。
+
+        [PY2-UNICODE] 键一律过 _norm_key：杂质名大量是中文，而同一个
+        名字可能一半以 str、一半以 unicode 到达（前者来自公式里的字面量）。
+        不归一就会把一个杂质拆成两组，序号因此多数一个 —— 不报错。
+        """
+        arrays = list(key_arrays)
+        if count is None:
+            count = 0
+            for arr in arrays:
+                if isinstance(arr, (list, tuple)):
+                    count = max(count, len(arr))
+        columns = []
+        for arr in arrays:
+            if not isinstance(arr, (list, tuple)):
+                columns.append([arr] * count)
+                continue
+            column = list(arr)
+            if len(column) < count:
+                column = column + [None] * (count - len(column))
+            columns.append(column[:count])
+        row_keys = [tuple(_norm_key(column[index]) for column in columns)
+                    for index in range(count)]
+        first_seen = {}
+        for index, key in enumerate(row_keys):
+            if key not in first_seen:
+                first_seen[key] = index
+        return row_keys, first_seen
+
+    def _distinct_seqlist(*key_arrays):
+        """1, 2, 3 … on each key's FIRST row; an empty string on the repeats.
+
+            DISTINCT_SEQlist([imp_pct_group])
+            DISTINCT_SEQlist([imp_name], [imp_pct_group])
+
+        这一列存在的理由是「数得出来有几个」：同一个杂质占 6 针 6 行，
+        而**本列最大的那个序号 = 本次要外报的杂质个数**，实验人员靠它核对
+        报告完整性。把每行都填上它所属组的编号（技术上更简单）恰好把这个
+        信息抹掉，所以重复行是空的。
+
+        空字符串 u"" 而不是 '---'：本包里 '---' 的含义是「算不出来 /
+        出错了」，拿它表示「这行故意不显示」会让人以为坏了。
+
+        键值为空的行也是一种身份，照样参与编号，不跳过、也不并进别的组。
+        空本身可能就是一个真实的分组（指定杂质那几行的杂质分组就是空的，
+        裁决 §5-D1），把它跳过就会少数一个要外报的杂质。
+
+        数组路径函数，返回的是整列，**必须单独占一个字段**。内联进别的
+        表达式（`[x] * DISTINCT_SEQlist(...)`）会把整条公式推上数组路径，那里
+        它是 list 乘 list，TypeError 把整列刷成 '---'，只在日志留一行 ——
+        与 BASELINE_BYlist 同一个坑。
+        """
+        if not key_arrays:
+            # 不给键就没有「去重」可言；整列算一组会得到孤零零的一个 1，
+            # 那看着像算出来了。宁可说不知道。
+            return [_PLACEHOLDER]
+        row_keys, first_seen = _distinct_first_rows(key_arrays)
+        if not row_keys:
+            return [_PLACEHOLDER]
+        order = {}
+        for key in row_keys:
+            if key not in order:
+                order[key] = len(order) + 1
+        return [order[key] if first_seen[key] == index else u""
+                for index, key in enumerate(row_keys)]
+
+    def _report_rank(value):
+        """(档次, 档内大小) of one report cell -- bigger wins.
+
+            3  数字            档内比大小
+            2  「＜x%」限下标记  档内比标记里的那个数（一般全组相同）
+            1  ND / N.D.       档内不分高低，取首次出现的那个写法
+            0  没数据（空 / '---' / 认不出来的文本）
+
+        档次来自实验人员的「不在同一象限，取大值」（Q4a）。认不出来的
+        文本（比如 'N/A'）不给它分档：排在 ND 下面等于替实验室定义了一个
+        没人认同的档，所以当成「没数据」，整组都是它时出 '---'。
+        """
+        number = _num_or_none(value)
+        if number is not None:
+            return (3, number)
+        text = _safe_text(value).strip()
+        if not text or text == _PLACEHOLDER:
+            return (0, 0.0)
+        if text[:1] in _BELOW_LIMIT_PREFIXES:
+            import re as _rr_re
+            found = _rr_re.search(r"[-+]?\d*\.?\d+", text)
+            if found:
+                try:
+                    return (2, float(found.group(0)))
+                except ValueError:
+                    return (2, 0.0)
+            return (2, 0.0)
+        if _is_zero_marker(text):
+            return (1, 0.0)
+        return (0, 0.0)
+
+    def _group_report_toplist(values, *key_arrays):
+        """每组最高档的报告值，**只放在该组首行**，其余行空。
+
+            GROUP_REPORT_TOPlist([imp_report], [imp_name], [imp_pct_group])
+
+        报告值那一列是字符串混数字（数字 / 「＜0.05%」/ 'ND'），所以
+        「最大」得先分档再比：有数字取最大的数字；没数字但有「＜x%」取
+        它；全是 ND 就是 ND（实验人员 Q4a：「不在同一象限，取大值」）。
+        分档见 _report_rank。
+
+        **GROUP_MAXlist 做不了这件事**：它用 _num_or_none 过滤非数字，整组
+        都是「＜0.05%」时它返回占位符，而正确答案是「＜0.05%」。
+
+        值**原样返回**：数字回数字、标记回它在源表里的字面，所以这是一列
+        混合数组（引擎本来就允许）。不要在它外面套计算，要修约请在源列上做。
+
+        **有值的行与 DISTINCT_SEQlist 完全一致** —— 两者走同一份
+        _distinct_first_rows。序号有值的行就是报告值有值的行，这是配置侧
+        能把两列并排着看的前提。
+
+        整组一个有效值都没有（全空 / 全 '---' / 全是认不出来的文本）时，
+        首行出 '---'：那是真的算不出来，不是「故意不显示」。
+
+        数组路径函数，与 DISTINCT_SEQlist 一样**必须单独占一个字段**。
+        """
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        values = list(values)
+        row_keys, first_seen = _distinct_first_rows(key_arrays, len(values))
+        best = {}
+        for index, key in enumerate(row_keys):
+            rank = _report_rank(values[index])
+            if rank[0] == 0:
+                continue
+            current = best.get(key)
+            if current is None or rank > current[0]:
+                best[key] = (rank, values[index])
+        out = []
+        for index, key in enumerate(row_keys):
+            if first_seen[key] != index:
+                out.append(u"")
+                continue
+            chosen = best.get(key)
+            out.append(_PLACEHOLDER if chosen is None else chosen[1])
+        return out
+
+    def _group_avg_toplist(values, reports, *key_arrays):
+        """同组只取**最高档那几针**求平均，广播到该组每一行。
+
+            GROUP_AVG_TOPlist([imp_pct_num], [imp_report], [imp_pct_group])
+            GROUP_AVG_TOPlist([imp_pct_num], [imp_report],
+                              [imp_name], [imp_pct_group])
+
+        平均单杂的口径（有关物质 20260923 裁决 Q1 勾 A）：同一个杂质的几针里，
+        有报告值 ≥报告限的 → 只平均这几针；否则有 ≥积分限（「＜x%」）的 →
+        只平均这几针；全是 ND → 全部针参与。平均的是 `values`（未修约的检测
+        杂质原值），平均完再由外层 ROUND 修约。
+
+            报告值  0.06 / 0.05 / ＜0.05% / ＜0.05% / ND / ND
+            → 只平均前两针的检测杂质
+
+        **分档与 GROUP_REPORT_TOPlist 是同一份**：档次来自 _report_rank，组键
+        来自 _distinct_first_rows —— 「哪一档最高」与报告值那一列取出来的是
+        同一档，两列不可能各说各的。边界 `≥` 不在这里判：报告值那一列是
+        RESULT_STATUS 出的，等于报告限的那针在那里就已经是数字（第 3 档）。
+
+        GROUP_AVGlist 做不了这件事：它平均整组所有针，最高档之外的针把平均
+        拉低，而且拉低多少取决于 ND 针的检测杂质恰好是几 —— 算出一个看着
+        合理的错数。
+
+        - 一组里没有任何一针认得出档次（全空 / 全 '---'）→ 该组 '---'
+        - 选中的针里 `values` 一个数值都没有 → 该组 '---'（不是 0）
+        - 「全是 ND → 全部针参与」按字面：该组**每一行**都参与，包括报告值
+          缺失的那几行；它们的 `values` 若也不是数，照常被跳过
+
+        数组路径函数，与 GROUP_*list 一样**单独占一个字段**。
+        """
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        values = list(values)
+        count = len(values)
+        if not isinstance(reports, (list, tuple)):
+            reports = [reports] * count
+        reports = list(reports) + [None] * (count - len(reports))
+        row_keys, _ = _distinct_first_rows(key_arrays, count)
+
+        top = {}
+        for index, key in enumerate(row_keys):
+            band = _report_rank(reports[index])[0]
+            if band > top.get(key, 0):
+                top[key] = band
+        members = {}
+        for index, key in enumerate(row_keys):
+            band = top.get(key, 0)
+            if band == 0:
+                continue
+            if band == 1 or _report_rank(reports[index])[0] == band:
+                members.setdefault(key, []).append(values[index])
+        means = {}
+        for key, cells in members.items():
+            nums = _nums_only(cells)
+            means[key] = sum(nums) / len(nums) if nums else _PLACEHOLDER
+        return [means.get(key, _PLACEHOLDER) for key in row_keys]
+
+    def _distinct_values(fn_label, values, key_array):
+        """每个键只留一个数值，按首次出现顺序。
+
+        同一个键的各行应该是同一个值（它们本来就是广播出来的）。
+        真不一样时取首行并 warn 一条：那说明去重键选错了，而选错了的后果
+        是“挑了其中一个”—— 一个看着完全合理的数，不说就没人会发现。
+
+        非数值的格跳过，与 GROUP_* 家族的缺失值口径一致。
+        """
+        if not isinstance(values, (list, tuple)):
+            values = [values]
+        values = list(values)
+        row_keys, first_seen = _distinct_first_rows((key_array,), len(values))
+        picked = {}
+        order = []
+        disagreed = []
+        for index, key in enumerate(row_keys):
+            number = _num_or_none(values[index])
+            if number is None:
+                continue
+            if key not in picked:
+                picked[key] = number
+                order.append(key)
+            elif picked[key] != number and key not in disagreed:
+                disagreed.append(key)
+        if disagreed:
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: 去重键 %s 下的行并不共享同一个"
+                u"值，已取首行 —— 这通常意味着去重键选错了，统计值会"
+                u"看着合理却不对。"
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   u", ".join(u"/".join(part for part in key) or u"(空)"
+                              for key in disagreed)))
+        return [picked[key] for key in order]
+
+    def _distinct_agg(fn_label, values, key_array, agg):
+        """先按键去重，再统计。标量返回。
+
+        总杂那一列是 `GROUP_SUMlist([imp_num], [g_sample_id])` 广播出来的 ——
+        同一份样品的每一行都重复着同一个总杂值。极差不受重复影响（max/min
+        照旧），**RSD 受**：6 个样品的值各按它的杂质行数重复计入，n 虚高、
+        离散度被稀释，算出一个比真实值小的 RSD，而且从结果上看不出来。
+
+        标量函数：放在 CalculatedList 字段里会得到**单元素数组**（与
+        GROUP_AVG 这类整列标量版同理）；要一个真标量就放 Calculated 字段。
+        """
+        nums = _distinct_values(fn_label, values, key_array)
+        if not nums:
+            return _PLACEHOLDER
+        return agg(nums)
+
+    def _distinct_rsd(values, key_array):
+        """去重后的 RSD%。不足 2 个值时为 '---'（见 _agg_rsd）。"""
+        return _distinct_agg("DISTINCT_RSD", values, key_array, _agg_rsd)
+
+    def _distinct_range(values, key_array):
+        """去重后的极差（max - min）。"""
+        return _distinct_agg("DISTINCT_RANGE", values, key_array,
+                             lambda ns: max(ns) - min(ns))
+
+    def _distinct_max(values, key_array):
+        """去重后的最大值。"""
+        return _distinct_agg("DISTINCT_MAX", values, key_array, max)
+
+    def _distinct_min(values, key_array):
+        """去重后的最小值。"""
+        return _distinct_agg("DISTINCT_MIN", values, key_array, min)
+
+    def _distinct_avg(values, key_array):
+        """去重后的平均值。"""
+        return _distinct_agg("DISTINCT_AVG", values, key_array,
+                             lambda ns: sum(ns) / len(ns))
+
+    def _distinct_count(values, key_array):
+        """去重后参与统计的个数 —— RSD / 极差 的审计列。
+
+        没有它时，「去重键选错、只剩一个值」与「本来就只做了一份」在
+        报告上长得一模一样（两者的 RSD 都是 '---'）。
+        """
+        return _distinct_agg("DISTINCT_COUNT", values, key_array, len)
 
     # ---- cross-AS aggregation (XAGG_*) ----------------------------------
     #
@@ -5701,19 +7041,522 @@ def _evaluate_calculatedlist_interims(self, only=None):
         return _xagg_ofsum("XAGG_COUNT_OFSUM", value_kw, group_kw, key_kw,
                             whitelist_kw, source_kws, len, True)
 
+    # ---- cross-AS aggregation: 双字段组合键 / 按值筛行 / 取第 n 份 ------
+    #
+    # 「有关物质」V16 的中间精密度统计表 (AS-25) needs three things the
+    # single-key family above cannot express (裁决 §7 ②③④):
+    #
+    #   ④ the row key is 「物质名称 + 杂质分组」, because two unnamed
+    #     impurities can carry the same name and are only told apart by
+    #     their group.  Every op needs the pair, not just the row-space
+    #     builder: rows keyed on a pair but MATCHED on one field merge two
+    #     different impurities into one number, and the number looks fine.
+    #   ③ the row space is 指定杂质 (all of them) plus the non-specified
+    #     impurities whose report value reaches 0.05% on ANY injection.
+    #   ② each of those rows then shows the six individual report values
+    #     per operator, ordered by sample id -- an aggregate cannot say
+    #     what the third injection read.
+    #
+    # Mixed keys are the norm here, not an edge case: 指定杂质 come from
+    # 「杂质对照品称量」(imp_std_weigh), a table that HAS no 杂质分组 column
+    # at all, so those rows carry an EMPTY second segment (裁决 §5-D1).
+    # Empty is a key value like any other: it matches other empties and
+    # nothing else.  It must never behave as a wildcard, or every specified
+    # impurity would quietly match every group.
+
+    def _xagg_as_column(value):
+        """`value` as a list, whatever _collect_cross_referenceable_data gave."""
+        if isinstance(value, list):
+            return list(value)
+        return [value]
+
+    def _xagg_collect_columns(fn_label, source_kws, required_kws,
+                              optional_kws=()):
+        """Several fields at once, collected SIDE BY SIDE and row-aligned.
+
+        Returns {keyword: [value, ...]} -- every column the same length,
+        sources concatenated in argument order -- or _XAGG_FAIL.
+
+        _xagg_collect above collects ONE field at a time and its callers zip
+        the results, which is right only while every field is present on
+        every source.  A field that exists on one source and not on another
+        (杂质分组 on the chromatography AS but not on 杂质对照品称量) makes
+        those flat lists different lengths, and zipping them then pairs a
+        value with ANOTHER source's key -- a plausible wrong number.  So
+        this pads per source instead:
+
+        - a `required_kws` field missing from a source that EXISTS is the
+          configuration mistake _xagg_collect already fails on (the field
+          was never flagged cross_referenceable) -- fail, warn, name it;
+        - an `optional_kws` field missing from a source that exists is
+          expected: that source's rows get u"" in that column, plus one
+          WARN line.  Empty is a real key segment, not a wildcard;
+        - two columns of DIFFERENT length within one source cannot be
+          paired by position at all -- fail and warn, the way _xagg_op
+          refuses a mismatched zip.
+
+        One deliberate difference from _xagg_collect: when NO source exists
+        in this sample yet, this returns EMPTY columns rather than
+        _XAGG_FAIL.  The dual-key callers build a row space out of several
+        source groups, and "that operator has not run yet" must leave the
+        other group's rows on the table instead of blanking all of it.  A
+        row with no data behind it still ends up '---', so nothing is
+        invented -- see _xagg_keys_where2.
+        """
+        sources = _xagg_resolve_sources(fn_label, source_kws)
+        wanted = []
+        for kw in list(required_kws) + list(optional_kws):
+            if kw and kw not in wanted:
+                wanted.append(kw)
+        optional = [kw for kw in optional_kws if kw and kw not in required_kws]
+        out = {}
+        for kw in wanted:
+            out[kw] = []
+        not_flagged = []
+        defaulted = []
+        for src_kw in sources:
+            if src_kw not in _xagg_existing_services:
+                continue
+            src_data = sibling_data.get(src_kw) or {}
+            cols = {}
+            incomplete = False
+            for kw in required_kws:
+                if kw not in src_data:
+                    if (src_kw, kw) not in not_flagged:
+                        not_flagged.append((src_kw, kw))
+                    incomplete = True
+                    continue
+                cols[kw] = _xagg_as_column(src_data[kw])
+            if incomplete:
+                continue
+            lengths = set(len(c) for c in cols.values())
+            if len(lengths) > 1:
+                _xagg_warn(
+                    u"maitux.calcenhance: %s on %s: fields %s on %s hold "
+                    u"different row counts (%s) -- the columns are not "
+                    u"aligned, refusing to guess which row belongs to "
+                    u"which."
+                    % (fn_label, _safe_text(getattr(self, "id", "?")),
+                       u", ".join(_safe_text(k) for k in sorted(cols)),
+                       _safe_text(src_kw),
+                       u", ".join(unicode(n) for n in sorted(lengths))))
+                return _XAGG_FAIL
+            count = lengths.pop() if lengths else 0
+            for kw in optional:
+                if kw in src_data:
+                    col = _xagg_as_column(src_data[kw])
+                    if len(col) != count:
+                        _xagg_warn(
+                            u"maitux.calcenhance: %s on %s: field '%s' on "
+                            u"%s holds %d row(s) against %d in the key "
+                            u"column -- not aligned, refusing to pair them."
+                            % (fn_label,
+                               _safe_text(getattr(self, "id", "?")),
+                               _safe_text(kw), _safe_text(src_kw),
+                               len(col), count))
+                        return _XAGG_FAIL
+                    cols[kw] = col
+                else:
+                    if (src_kw, kw) not in defaulted:
+                        defaulted.append((src_kw, kw))
+                    cols[kw] = [u""] * count
+            for kw in wanted:
+                out[kw].extend(cols[kw])
+        if not_flagged:
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: %s -- fix the interim field "
+                u"config, this is not a missing-data problem."
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   u"; ".join(u"field '%s' is not flagged "
+                              u"cross_referenceable on %s"
+                              % (_safe_text(kw), _safe_text(src))
+                              for src, kw in not_flagged)))
+            return _XAGG_FAIL
+        if defaulted:
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: %s -- those rows get an "
+                u"EMPTY second key segment, which matches only other empty "
+                u"ones.  Intended for 指定杂质 (裁决 §5-D1); if the column "
+                u"does exist there, it is the cross_referenceable flag "
+                u"that is missing."
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   u"; ".join(u"field '%s' does not exist on %s"
+                              % (_safe_text(kw), _safe_text(src))
+                              for src, kw in defaulted)))
+        return out
+
+    def _xagg_dual_collect(fn_label, source_kws, value_kws, key1_kw, key2_kw):
+        """_xagg_collect_columns plus the "键字段2 may be absent" rule.
+
+        Returns (columns, key2_column) or _XAGG_FAIL.  An EMPTY 键字段2
+        argument means "this table has no second segment at all": every row
+        gets u"", which is exactly what a single-key call would do, so the
+        dual-key functions cover the single-key case without a second
+        family of names.
+        """
+        required = [key1_kw]
+        for kw in value_kws:
+            if kw and kw not in required:
+                required.append(kw)
+        optional = (key2_kw,) if key2_kw else ()
+        cols = _xagg_collect_columns(fn_label, source_kws, required, optional)
+        if cols is _XAGG_FAIL:
+            return _XAGG_FAIL
+        count = len(cols[key1_kw])
+        if key2_kw and key2_kw in cols:
+            key2_col = cols[key2_kw]
+        else:
+            key2_col = [u""] * count
+        return cols, key2_col
+
+    def _xagg_pairs(key1_col, key2_col):
+        """The normalised (key1, key2) pair of every row."""
+        return [(_norm_key(a), _norm_key(b))
+                for a, b in zip(key1_col, key2_col)]
+
+    def _xagg_row_pairs(row_keys1, row_keys2):
+        """THIS analysis's own row space as normalised (key1, key2) pairs.
+
+        Either side may arrive as a single value -- a scalar interim, or a
+        literal written into the formula -- and is then broadcast to the
+        other's length.  A genuinely shorter column is padded with u""
+        rather than truncated: a row that exists on the report has to come
+        back with SOMETHING, and an empty key matches nothing, so it reads
+        '---' instead of borrowing the next row's number.
+        """
+        a = list(row_keys1) if isinstance(row_keys1, (list, tuple)) \
+            else [row_keys1]
+        b = list(row_keys2) if isinstance(row_keys2, (list, tuple)) \
+            else [row_keys2]
+        count = max(len(a), len(b))
+        if len(a) == 1:
+            a = a * count
+        if len(b) == 1:
+            b = b * count
+        a = a + [u""] * (count - len(a))
+        b = b + [u""] * (count - len(b))
+        return _xagg_pairs(a, b)
+
+    def _xagg_part(fn_label, part):
+        """Validate the 取第几段 argument; None when it is not 1 or 2."""
+        given = part
+        if isinstance(part, (list, tuple)):
+            part = part[0] if part else None
+            given = part
+        try:
+            part = int(part)
+        except (TypeError, ValueError):
+            part = None
+        if part not in (1, 2):
+            # `given`, not `part`: by now part is None, and a WARN line that
+            # says "got None" tells the reader nothing about what they wrote.
+            _xagg_warn(
+                u"maitux.calcenhance: %s on %s: 取第几段 must be 1 or 2, got "
+                u"%s -- returning '---'."
+                % (fn_label, _safe_text(getattr(self, "id", "?")),
+                   _safe_text(given)))
+            return None
+        return part
+
+    def _xagg_keys2(key1_kw, key2_kw, part, *source_kws):
+        """Distinct 「键1 + 键2」 combinations across the source AS.
+
+            XAGG_KEYS2(键字段1, 键字段2, 取第几段, 源AS1 [, 源AS2 ...])
+
+        取第几段 is 1 or 2 and says WHICH half to return, because one
+        interim field holds one column.  Call it twice, once per segment:
+        the combinations are deduplicated once, in first-seen order, and
+        both calls walk that same list, so the two columns line up row for
+        row by construction.
+
+            imp_ip_name  = XAGG_KEYS2("imp_name", "imp_pct_group", 1,
+                                      "imp_std_weigh")
+            imp_ip_group = XAGG_KEYS2("imp_name", "imp_pct_group", 2,
+                                      "imp_std_weigh")
+
+        键字段2 may be "" (or simply not exist on a given source): those
+        rows carry an empty second segment, which matches only other empty
+        ones -- see _xagg_collect_columns.
+
+        Like XAGG_KEYS this takes only literal arguments, so it lands on the
+        engine's "no array deps" path and its RESULT is the whole column.
+        """
+        part = _xagg_part("XAGG_KEYS2", part)
+        if part is None:
+            return [_PLACEHOLDER]
+        collected = _xagg_dual_collect("XAGG_KEYS2", list(source_kws), (),
+                                       key1_kw, key2_kw)
+        if collected is _XAGG_FAIL:
+            return [_PLACEHOLDER]
+        cols, key2_col = collected
+        seen = []
+        for pair in _xagg_pairs(cols[key1_kw], key2_col):
+            if pair not in seen:
+                seen.append(pair)
+        if not seen:
+            return [_PLACEHOLDER]
+        return [pair[part - 1] for pair in seen]
+
+    def _xagg_keys_where2(key1_kw, key2_kw, part, all_sources,
+                          filter_kw, threshold, filtered_sources):
+        """Row space from TWO groups of source AS, one of them filtered by value.
+
+            XAGG_KEYS_WHERE2(键字段1, 键字段2, 取第几段,
+                             全取的源AS列表, 筛选字段, 阈值,
+                             按值筛的源AS列表)
+
+            imp_ip_name = XAGG_KEYS_WHERE2(
+                "imp_name", "imp_pct_group", 1,
+                ["imp_std_weigh"],
+                "imp_report", 0.05, ["imp_chrom", "imp_ip_spiked"])
+
+        TWO source lists rather than one list plus a flag, because the two
+        groups are asked DIFFERENT questions and the answer must not depend
+        on whether a column happens to exist: 指定杂质 are on the table
+        because a reference standard was weighed for them, full stop;
+        everything else is on it only if it was actually seen at or above
+        the threshold.  Reading "no 筛选字段 column here" as "then take all
+        of this source's rows" would turn one forgotten
+        cross_referenceable flag into a complete-looking table with every
+        impurity on it (R9).
+
+        A row qualifies when ANY SINGLE row of the filtered sources reaches
+        阈值 -- not the mean, not the sum (裁决 Q6b: 12 针里任一针的报告值
+        ≥0.05% 就统).  A non-numeric report value ('＜0.05%', 'ND') is
+        below the limit by construction, so it never qualifies a row: it is
+        skipped, neither counted as 0 nor treated as an error.
+
+        阈值 is an argument, not a constant -- 0.05 is this method's
+        number, not the engine's.
+
+        Output order: the unfiltered group first, in argument order, then
+        the qualifying rows of the filtered group in first-seen order, so
+        指定杂质 head the table.  Both groups feed ONE deduplication, so an
+        impurity that is both specified and above the threshold gets one
+        row, not two.  Both lists may be written as a bare string when
+        there is only one source.
+        """
+        part = _xagg_part("XAGG_KEYS_WHERE2", part)
+        if part is None:
+            return [_PLACEHOLDER]
+        limit = _num_or_none(threshold)
+        if limit is None:
+            _xagg_warn(
+                u"maitux.calcenhance: XAGG_KEYS_WHERE2 on %s: 阈值 '%s' is "
+                u"not a number -- returning '---' rather than guessing a "
+                u"cut-off."
+                % (_safe_text(getattr(self, "id", "?")),
+                   _safe_text(threshold)))
+            return [_PLACEHOLDER]
+
+        def _as_sources(value):
+            if isinstance(value, (list, tuple)):
+                return [s for s in value if s]
+            return [value] if value else []
+
+        seen = []
+        always = _as_sources(all_sources)
+        if always:
+            collected = _xagg_dual_collect("XAGG_KEYS_WHERE2", always, (),
+                                           key1_kw, key2_kw)
+            if collected is _XAGG_FAIL:
+                return [_PLACEHOLDER]
+            cols, key2_col = collected
+            for pair in _xagg_pairs(cols[key1_kw], key2_col):
+                if pair not in seen:
+                    seen.append(pair)
+
+        filtered = _as_sources(filtered_sources)
+        if filtered:
+            collected = _xagg_dual_collect(
+                "XAGG_KEYS_WHERE2", filtered, (filter_kw,), key1_kw, key2_kw)
+            if collected is _XAGG_FAIL:
+                return [_PLACEHOLDER]
+            cols, key2_col = collected
+            values = cols.get(filter_kw, [])
+            for pair, value in zip(_xagg_pairs(cols[key1_kw], key2_col),
+                                   values):
+                number = _num_or_none(value)
+                if number is None or number < limit:
+                    continue
+                if pair not in seen:
+                    seen.append(pair)
+
+        if not seen:
+            return [_PLACEHOLDER]
+        return [pair[part - 1] for pair in seen]
+
+    def _xagg_op2(fn_label, value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                  source_kws, agg, empty):
+        """Shared body for XAGG_AVG2 / _RSD2 / _MAX2 / _MIN2 / _COUNT2.
+
+            XAGG_<OP>2(值字段, 键字段1, 键字段2,
+                       本行键值1, 本行键值2, 源AS1 [, 源AS2 ...])
+
+        Exactly _xagg_op's two-step shape -- aggregate the concatenated
+        source rows with _group_apply, THEN look the result up by this
+        row's own key -- with a PAIR as the key on both sides.  Reusing
+        _group_apply keeps the missing-value contract identical to
+        GROUP_*list's rather than inventing a second one that could drift:
+        non-numeric cells are skipped and the aggregate is computed from
+        the survivors.
+
+        The two failures _xagg_op keeps apart stay apart here: a row whose
+        PAIR never appears among the source rows gets '---' for every op
+        including COUNT, while a pair that does appear with nothing numeric
+        behind it gets whatever _group_apply's `empty` says (COUNT -> 0,
+        the rest -> '---').
+        """
+        rows = _xagg_row_pairs(row_keys1, row_keys2)
+        collected = _xagg_dual_collect(fn_label, list(source_kws),
+                                       (value_kw,), key1_kw, key2_kw)
+        if collected is _XAGG_FAIL:
+            return [_PLACEHOLDER] * len(rows)
+        cols, key2_col = collected
+        src_values = cols.get(value_kw, [])
+        src_pairs = _xagg_pairs(cols[key1_kw], key2_col)
+        grouped = _group_apply(src_values,
+                               ([p[0] for p in src_pairs],
+                                [p[1] for p in src_pairs]),
+                               agg, empty=empty)
+        by_key = {}
+        for pair, value in zip(src_pairs, grouped):
+            by_key[pair] = value
+        return [by_key.get(pair, _PLACEHOLDER) for pair in rows]
+
+    def _xagg_avg2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                   *source_kws):
+        return _xagg_op2("XAGG_AVG2", value_kw, key1_kw, key2_kw, row_keys1,
+                          row_keys2, source_kws,
+                          lambda ns: sum(ns) / len(ns), _PLACEHOLDER)
+
+    def _xagg_rsd2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                   *source_kws):
+        return _xagg_op2("XAGG_RSD2", value_kw, key1_kw, key2_kw, row_keys1,
+                          row_keys2, source_kws, _agg_rsd, _PLACEHOLDER)
+
+    def _xagg_max2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                   *source_kws):
+        return _xagg_op2("XAGG_MAX2", value_kw, key1_kw, key2_kw, row_keys1,
+                          row_keys2, source_kws, max, _PLACEHOLDER)
+
+    def _xagg_min2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                   *source_kws):
+        return _xagg_op2("XAGG_MIN2", value_kw, key1_kw, key2_kw, row_keys1,
+                          row_keys2, source_kws, min, _PLACEHOLDER)
+
+    def _xagg_count2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                     *source_kws):
+        # empty=0 for the same reason as XAGG_COUNT: a pair that DOES appear
+        # among the source rows but with nothing numeric behind it has a
+        # definite count -- zero.  Only a pair absent altogether falls
+        # through to _xagg_op2's own '---'.
+        return _xagg_op2("XAGG_COUNT2", value_kw, key1_kw, key2_kw, row_keys1,
+                          row_keys2, source_kws, len, 0)
+
+    def _xagg_sort_key(value):
+        """Ascending order over a column that may hold numbers or text.
+
+        Numbers first, in numeric order, then text in unicode order.  Sample
+        ids are usually numeric-ish strings ("1", "2", "10"), and sorting
+        those as text puts 10 between 1 and 2; Python 2 would compare a
+        float against a unicode string without complaining at all, in an
+        order nobody can predict, so the type tag is explicit.
+        """
+        number = _num_or_none(value)
+        if number is not None:
+            return (0, number, u"")
+        return (1, 0.0, _norm_key(value))
+
+    def _xagg_nth2(value_kw, key1_kw, key2_kw, row_keys1, row_keys2,
+                   sort_kw, nth, *source_kws):
+        """The n-th value of each row's own key group, ordered by 排序字段.
+
+            XAGG_NTH2(值字段, 键字段1, 键字段2, 本行键值1, 本行键值2,
+                      排序字段, 第几份, 源AS1 [, 源AS2 ...])
+
+            imp_ip_p1_v3 = XAGG_NTH2("imp_report", "imp_name",
+                                     "imp_pct_group", [imp_ip_name],
+                                     [imp_ip_group], "g_sample_id", 3,
+                                     "imp_chrom")
+
+        The first five arguments are XAGG_AVG2's, so the twelve individual
+        columns and the statistics beside them read the same rows.  第几份
+        is 1-based, and the order is 排序字段 ascending -- 样品编号 for
+        AS-25, because the two operators' 份号 do not correspond to each
+        other and each side is simply sorted on its own (裁决 T1).  Rows
+        that tie on 排序字段 keep the order they were collected in.
+
+        Values come back AS STORED, which makes this a MIXED column:
+        _collect_cross_referenceable_data turns a floatable cell into a
+        float and leaves everything else alone, so a group reads
+        [0.11, '＜0.05%', 'ND'].  That is deliberate -- '＜0.05%' and 'ND'
+        are results, not failures, and coercing them to numbers would erase
+        the distinction the report is making.  Mixed columns are legal here
+        (the engine's own array branch says so); what does NOT work is
+        computing on one, so put ROUND / FORMAT on the source AS rather
+        than on top of this.
+
+        A group with fewer than n rows yields '---' for that row alone.
+        Not 0, and above all not the (n-1)-th value shifted up: a blank
+        cell says "this operator has five injections", a shifted one says
+        the sixth read the same as the fifth.
+
+        Several sources in one call are merged and then sorted together,
+        which is only meaningful when 排序字段 is comparable across them;
+        AS-25 passes ONE source per column for that reason.
+        """
+        rows = _xagg_row_pairs(row_keys1, row_keys2)
+        if isinstance(nth, (list, tuple)):
+            nth = nth[0] if nth else None
+        try:
+            index = int(nth)
+        except (TypeError, ValueError):
+            index = 0
+        if index < 1:
+            _xagg_warn(
+                u"maitux.calcenhance: XAGG_NTH2 on %s: 第几份 must be 1 or "
+                u"more, got %s -- returning '---'."
+                % (_safe_text(getattr(self, "id", "?")), _safe_text(nth)))
+            return [_PLACEHOLDER] * len(rows)
+        collected = _xagg_dual_collect("XAGG_NTH2", list(source_kws),
+                                       (value_kw, sort_kw), key1_kw, key2_kw)
+        if collected is _XAGG_FAIL:
+            return [_PLACEHOLDER] * len(rows)
+        cols, key2_col = collected
+        src_values = cols.get(value_kw, [])
+        src_sort = cols.get(sort_kw, [])
+        groups = {}
+        for position, pair in enumerate(_xagg_pairs(cols[key1_kw], key2_col)):
+            groups.setdefault(pair, []).append(position)
+        out = []
+        for pair in rows:
+            members = groups.get(pair)
+            if not members:
+                out.append(_PLACEHOLDER)
+                continue
+            members = sorted(
+                members,
+                key=lambda position: (_xagg_sort_key(src_sort[position]),
+                                      position))
+            if len(members) < index:
+                out.append(_PLACEHOLDER)
+                continue
+            value = src_values[members[index - 1]]
+            out.append(_PLACEHOLDER if value is None or value == u""
+                       else value)
+        return out
+
     # ---- rounding / formatting helpers -------------------------------
     #
     # Hoisted to module level (see _dec_quantize / _round_* / _format_digits
     # near _num_or_none) so the scalar engine's safe_globals can reference
     # them too, not just this array engine's _SAFE.
 
-    # Markers that genuinely contribute zero to a total: a result below the
-    # limit of quantification is known to be near zero.  Anything else
-    # non-numeric is an UNKNOWN contribution, not a zero one, and must not
-    # be silently summed as 0.
-    _ZERO_MARKERS = frozenset([
-        u"", u"N.D.", u"ND", u"N.D", u"<LOQ", u"< LOQ", u"<LOD", u"< LOD",
-    ])
+    # _ZERO_MARKERS / _is_zero_marker are module level (see their own
+    # comments there): a nested predicate is unreachable from the test
+    # harness, and this one decides whether 总杂 adds a row or blanks the
+    # whole column.
 
     def _result_num(value, name=None, main_name=None):
         """The numeric contribution of ONE row.  Scalar, per-element.
@@ -5740,7 +7583,7 @@ def _evaluate_calculatedlist_interims(self, only=None):
         n = _num_or_none(value)
         if n is not None:
             return n
-        if _norm_key(value).strip().upper() in _ZERO_MARKERS:
+        if _is_zero_marker(value):
             return 0
         return _PLACEHOLDER
 
@@ -5893,6 +7736,86 @@ def _evaluate_calculatedlist_interims(self, only=None):
                    else "the earliest row"))
         return out
 
+    def _earliest_time(source_kw, field_kw):
+        """The earliest timestamp in another AS's column, as that AS stores it.
+
+            TIME_ELAPSED_HOURS([imp_stab2_inj_time], 1,
+                               EARLIEST_TIME([imp_stab2_source], "imp_inj_time"))
+
+        供试品溶液稳定性-2/-3 的「时间点(h)」要从「稳定性来源」下拉所选那一段
+        （冷藏 / 室温第 1 次）的**最早进样时间**起算（有关物质 20260923 裁决
+        Q3 子问 1）。进样时间是文本，XAGG_MIN 只认数值、BASELINE_BYlist 会先
+        数值化，拼不出这件事。
+
+        - `source_kw` 可以是字面量，也可以是字段引用（下拉的值）—— 与
+          LOOKUP([imp_cf_source], …) 同款。数组路径会把标量字段内联成整列，
+          所以这里收到的可能是一列同样的值；各行**不一样**就报错，不猜。
+        - 解析与 TIME_ELAPSED_HOURS 是同一个 _parse_dt。源列里有一格认不出来
+          （比如 `2026/05/12 20:13` 斜杠写法）→ 报错：少一格就可能少了真正
+          最早的那一针，算出来的整列 t0 都是错的，而且看不出来。
+        - 源段一个进样时间都没有 → 报错，**不回退到本段自己的最早时间**。
+
+        「报错」在这里就是引擎的约定：数组路径整列写 '---'，并在本次写入的
+        公式失败汇总里留名（与 LOOKUP 取不到源时同一条路）。★ 所以它要直接写在
+        TIME_ELAPSED_HOURS 的第三个参数里：单独占一个字段的话，失败时那个
+        字段是 '---'，而 TIME_ELAPSED_HOURS 收到 '---' 的 base 会按「没给
+        base」回退到本列最早时间 —— 正是这里要拒绝的那个静默回退。
+
+        返回源里那一格的**原文**，TIME_ELAPSED_HOURS 再按同一套规则解析它，
+        时区标签也就原样参与它的一致性检查。
+        """
+        if isinstance(source_kw, (list, tuple)):
+            picked = set(_safe_text(v).strip() for v in source_kw
+                         if v is not None)
+            picked.discard(u"")
+            if len(picked) > 1:
+                raise ValueError(
+                    u"EARLIEST_TIME: the source AS differs by row (%s) -- "
+                    u"one column can only be measured from one segment"
+                    % u", ".join(sorted(picked)))
+            source_kw = picked.pop() if picked else u""
+        source_kw = _safe_text(source_kw).strip()
+        if not source_kw or source_kw == _PLACEHOLDER:
+            raise KeyError(u"EARLIEST_TIME: no source AS selected")
+        data = sibling_data.get(source_kw)
+        if data is None:
+            raise KeyError(
+                u"EARLIEST_TIME: source service '%s' not found or has no "
+                u"cross-referenceable fields" % source_kw)
+        cells = data.get(field_kw)
+        if cells is None:
+            raise KeyError(
+                u"EARLIEST_TIME: field '%s' not found in '%s' (is it "
+                u"cross-referenceable?)" % (_safe_text(field_kw), source_kw))
+        if not isinstance(cells, (list, tuple)):
+            cells = [cells]
+        texts = [c for c in cells
+                 if _safe_text(c).strip() not in (u"", _PLACEHOLDER)]
+        if not texts:
+            raise KeyError(
+                u"EARLIEST_TIME: '%s' of '%s' has no injection time yet"
+                % (_safe_text(field_kw), source_kw))
+        parsed = []
+        unreadable = []
+        for cell in texts:
+            moment, label = _parse_dt(cell)
+            if moment is None:
+                unreadable.append(_safe_text(cell))
+            else:
+                parsed.append((moment, label, _safe_text(cell)))
+        if unreadable:
+            raise ValueError(
+                u"EARLIEST_TIME: %d value(s) in '%s' of '%s' are not a "
+                u"timestamp (e.g. %r) -- write it as 2026-05-12 20:13"
+                % (len(unreadable), _safe_text(field_kw), source_kw,
+                   unreadable[0]))
+        labels = set(label for _, label, _ in parsed)
+        if len(labels) > 1:
+            raise ValueError(
+                u"EARLIEST_TIME: inconsistent timezone labels %s in '%s' of "
+                u"'%s'" % (sorted(labels), _safe_text(field_kw), source_kw))
+        return min(parsed)[2]
+
     def _coalesce_conflict(row_index, chosen, disagreeing):
         """Report a row whose sources disagree.  Never resolves it."""
         from bika.lims import logger as _co_logger
@@ -5989,9 +7912,39 @@ def _evaluate_calculatedlist_interims(self, only=None):
                 results.append(chosen)
         return results
 
+    def _fmt_limit(value):
+        """The report limit as it reads inside the '＜0.05%' label.
+
+        %g rather than str(): 0.05 prints as 0.05, and a limit that arrives
+        as 0.050000000000000003 does not put its own float error on the
+        report.  Trailing zeros go for the same reason -- '＜0.050%' would
+        claim a precision the limit does not carry.
+        """
+        try:
+            return u"%g" % float(value)
+        except (TypeError, ValueError):
+            return _safe_text(value)
+
     def _result_status(values, loq=None, lod=None):
-        """Element-wise LOQ/LOD status: >=LOQ→numeric, >=LOD→'<LOQ', <LOD→'N.D.'
+        """Element-wise LOQ/LOD status: >=LOQ→numeric, >=LOD→'＜<loq>%', <LOD→'ND'
         When loq/lod omitted (or None), auto-read from AS Limits tab.
+
+        The two labels are the analysts' own report wording (裁决 G2,
+        2026-09-21), not a format this engine is free to choose:
+
+            ≥ 报告限              the number, untouched
+            积分限 ≤ x < 报告限   '＜0.05%' -- FULL-WIDTH ＜, and the
+                                 number is the AS's own report limit, so
+                                 it follows `loq` instead of being frozen
+                                 into the text
+            < 积分限              'ND'
+
+        The percent sign is part of the label because this column reports a
+        percentage; an AS whose unit is not % should not use these labels.
+
+        Anything that reaches RESULT_NUM downstream has to keep folding to
+        zero, which is why _is_zero_marker matches on the '＜' prefix rather
+        than on a list of literals -- see its docstring.
         """
         # Auto-read from AS Limits if not explicitly provided
         if loq is None:
@@ -6031,11 +7984,18 @@ def _evaluate_calculatedlist_interims(self, only=None):
                 # requirement, and (b) turned the whole column into strings,
                 # so no downstream formula could compute with it.  Rounding
                 # is ROUND / ROUND_EVEN's job and display is FORMAT's.
-                results.append(fv)
+                #
+                # "Untouched" includes the places: a rounded input (a _Fixed,
+                # the usual RESULT_STATUS([imp_pct_round], ...) spelling)
+                # goes out as itself.  float(v) here stripped them, so the
+                # report column showed 0.1 where ROUND_EVEN(x, 2) had given
+                # 0.10 -- the one display the analysts asked for (有关物质
+                # 20260923 裁决 H5, r219/259/264-268).
+                results.append(v if isinstance(v, _Fixed) else fv)
             elif fv >= lod:
-                results.append(u"<LOQ")
+                results.append(u"\uff1c%s%%" % _fmt_limit(loq))
             else:
-                results.append(u"N.D.")
+                results.append(u"ND")
         return results
 
     def _index_by(target_arr, key_arr, match_val):
@@ -6066,6 +8026,9 @@ def _evaluate_calculatedlist_interims(self, only=None):
                 return v
             if isinstance(v, str):
                 return v.decode("utf-8", "replace")
+            if isinstance(v, _Fixed):
+                # match on the pre-_Fixed spelling, as _norm_key does
+                v = float(v)
             return unicode(v)
 
         str_key_arr = [_to_u(v) for v in key_arr]
@@ -6086,6 +8049,100 @@ def _evaluate_calculatedlist_interims(self, only=None):
         except IndexError:
             # key array longer than the target array
             return _PLACEHOLDER
+
+    def _index_by_group(target_arr, key_arr, match_val, group_arr):
+        """INDEX_BY, but the lookup stays inside each row's OWN group.
+
+            INDEX_BY_GROUP(取值列, 键列, 要匹配的键, 分组列)
+
+            imp_main_rt = INDEX_BY_GROUP([g_rt], [imp_name],
+                                         [imp_main_name_ref], [g_sample_id])
+
+        For every row: among the rows sharing that row's 分组列 value, find
+        the one whose 键列 equals 要匹配的键 and return ITS 取值列.  One
+        value per row, so the main peak's retention time follows the
+        injection instead of being one number for the whole table -- which
+        is what an RRT computed per injection needs (裁决 G6).
+
+        An ARRAY-path function: it returns a whole column, and a per-element
+        view cannot see the other rows of its own group.  It must therefore
+        be the WHOLE formula of its own field.  Inlining it into an
+        expression -- `[g_rt] / INDEX_BY_GROUP(...)` -- puts the expression
+        on the array path, where that is a list divided by a list: TypeError,
+        and the entire column reads '---' with one line in the log.  Same
+        trap as BASELINE_BYlist; split it across two fields.
+
+        要匹配的键 may be a column (each row looks up its own value) or one
+        value broadcast to every row -- a scalar interim arrives already
+        padded to the row count, so both shapes get here as a list and
+        behave the same.
+
+        No match inside a row's group -> '---' for that row.  Deliberately
+        NOT a fall back to the whole table and NOT the group's first row:
+        both return a number that looks perfectly reasonable and belongs to
+        a different injection.  More than one match -> the first, with one
+        WARN line naming the group, the way LOOKUP reports its own
+        ambiguity.
+        """
+        import sys as _ibg_sys
+
+        def _col(arr, count):
+            """`arr` as a column of exactly `count` cells."""
+            if not isinstance(arr, (list, tuple)):
+                return [arr] * count
+            arr = list(arr)
+            if len(arr) == 1:
+                return arr * count
+            if len(arr) < count:
+                return arr + [None] * (count - len(arr))
+            return arr[:count]
+
+        lengths = [len(a) for a in (target_arr, key_arr, group_arr)
+                   if isinstance(a, (list, tuple))]
+        if not lengths:
+            _ibg_sys.stderr.write(
+                "maitux:   INDEX_BY_GROUP: needs list fields -- write it as "
+                "INDEX_BY_GROUP([values], [keys], key, [group])\n")
+            return _PLACEHOLDER
+        count = max(lengths)
+        targets = _col(target_arr, count)
+        keys = _col(key_arr, count)
+        wants = _col(match_val, count)
+        groups = [_norm_key(g) for g in _col(group_arr, count)]
+
+        members = {}
+        for index in range(count):
+            members.setdefault(groups[index], []).append(index)
+
+        out = []
+        missing = []
+        ambiguous = []
+        for index in range(count):
+            want = _norm_key(wants[index])
+            hits = [j for j in members[groups[index]]
+                    if _norm_key(keys[j]) == want]
+            if not hits:
+                if (groups[index], want) not in missing:
+                    missing.append((groups[index], want))
+                out.append(_PLACEHOLDER)
+                continue
+            if len(hits) > 1 and (groups[index], want) not in ambiguous:
+                ambiguous.append((groups[index], want))
+            value = targets[hits[0]]
+            out.append(_PLACEHOLDER if value is None else value)
+        for group, want in missing:
+            _xagg_warn(
+                u"maitux.calcenhance: INDEX_BY_GROUP on %s: no row with "
+                u"key '%s' inside group '%s' -- that group's rows read "
+                u"'---'."
+                % (_safe_text(getattr(self, "id", "?")), want, group))
+        for group, want in ambiguous:
+            _xagg_warn(
+                u"maitux.calcenhance: INDEX_BY_GROUP on %s: key '%s' "
+                u"matches more than one row inside group '%s' -- using the "
+                u"first."
+                % (_safe_text(getattr(self, "id", "?")), want, group))
+        return out
 
     def _slope(y, x):
         """Linear regression slope by least squares."""
@@ -6375,6 +8432,21 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "log10": __import__("math").log10,
         "exp": __import__("math").exp,
         "LOOKUP": _LOOKUP,
+        "LOOKUP2": _LOOKUP2,
+        # 去重族 —— see the "去重族" block just before the XAGG_* one.
+        # DISTINCT_SEQlist 与 GROUP_REPORT_TOPlist 必须在同样的行上有值，
+        # 它们共用 _distinct_first_rows。DISTINCT_<OP> 是标量，先去重再统计
+        # —— 直接对广播列求 RSD 会把离散度稀释，而且看不出来。
+        "DISTINCT_SEQlist": _distinct_seqlist,
+        "GROUP_REPORT_TOPlist": _group_report_toplist,
+        # Rides the GROUP_\w+ entry in _ARRAY_FN_RE; no regex change.
+        "GROUP_AVG_TOPlist": _group_avg_toplist,
+        "DISTINCT_RSD": _distinct_rsd,
+        "DISTINCT_RANGE": _distinct_range,
+        "DISTINCT_MAX": _distinct_max,
+        "DISTINCT_MIN": _distinct_min,
+        "DISTINCT_AVG": _distinct_avg,
+        "DISTINCT_COUNT": _distinct_count,
         "GROUP_AVG": _group_avg,
         "GROUP_SUM": _group_sum,
         "GROUP_MAX": _group_max,
@@ -6422,17 +8494,41 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "XAGG_MAX_OFSUM": _xagg_max_ofsum,
         "XAGG_MIN_OFSUM": _xagg_min_ofsum,
         "XAGG_COUNT_OFSUM": _xagg_count_ofsum,
+        # Cross-AS aggregation, dual-key branch: the row key is a PAIR
+        # (物质名称 + 杂质分组), the row space can be filtered by value,
+        # and XAGG_NTH2 reads one individual injection instead of an
+        # aggregate -- see the "双字段组合键" block above _xagg_keys2 for
+        # why single-key matching silently merges two impurities.
+        # They ride S1's XAGG_\w+ entry in _ARRAY_FN_RE, so no regex change.
+        "XAGG_KEYS2": _xagg_keys2,
+        "XAGG_KEYS_WHERE2": _xagg_keys_where2,
+        "XAGG_NTH2": _xagg_nth2,
+        "XAGG_AVG2": _xagg_avg2,
+        "XAGG_RSD2": _xagg_rsd2,
+        "XAGG_MAX2": _xagg_max2,
+        "XAGG_MIN2": _xagg_min2,
+        "XAGG_COUNT2": _xagg_count2,
         "RESULT_STATUS": _result_status,
         "COALESCE": _coalesce,
         "SHIFT": _shift,
         "TIME_ELAPSED_HOURS": _time_elapsed_hours,
+        # Only meaningful as TIME_ELAPSED_HOURS's base -- see its docstring.
+        "EARLIEST_TIME": _earliest_time,
         "RESULT_NUM": _result_num,
         "ROUND": _round_half_up,
         "ROUND_EVEN": _round_half_even,
         "ROUND_UP": _round_up,
         "ROUND_DOWN": _round_down,
         "FORMAT": _format_digits,
+        # Columns are inlined with repr(), and repr(_Fixed) spells this
+        # constructor -- without it a rounded column feeding another
+        # array formula raises NameError and reads "---".  See _Fixed.
+        "_Fixed": _Fixed,
         "INDEX_BY": _index_by,
+        # Named in _ARRAY_FN_RE explicitly: it returns a whole column, and
+        # the name does not end in _ROWS, so nothing else would route it to
+        # the array path.
+        "INDEX_BY_GROUP": _index_by_group,
         "SLOPE": _slope,
         "INTERCEPT": _intercept,
         "RSQ": _rsq,
@@ -6464,6 +8560,7 @@ def _evaluate_calculatedlist_interims(self, only=None):
         "INTERCEPT_CI_LOW_ROWS": _intercept_ci_low_rows,
         "INTERCEPT_CI_HIGH_ROWS": _intercept_ci_high_rows,
     }}
+    _manifest_selfcheck("list", _SAFE["__builtins__"])
 
     def _eval_expr(formula, values):
         """Evaluate formula with a flat value dict.
@@ -6485,8 +8582,11 @@ def _evaluate_calculatedlist_interims(self, only=None):
     # rewrite the scalar engine does (_INDEX_BY_RE).  Without it INDEX_BY
     # reached the per-element path and saw a single scalar per row, which can
     # never match, so the column came out entirely '---'.
+    # (?!_) so INDEX_BY_GROUP is not taken for an INDEX_BY call with a
+    # strange argument list: it has four arguments and stays on the array
+    # path, where the generic [kw] substitution already inlines its columns.
     _CL_INDEX_BY_RE = re.compile(
-        r'INDEX_BY\s*\(\s*\[([A-Za-z_]\w*)\]\s*,\s*\[([A-Za-z_]\w*)\]\s*,\s*([^)]+)\)')
+        r'INDEX_BY(?!_)\s*\(\s*\[([A-Za-z_]\w*)\]\s*,\s*\[([A-Za-z_]\w*)\]\s*,\s*([^)]+)\)')
 
     def _cl_replace_index_by(match):
         """Rewrite one INDEX_BY call with its array arguments inlined."""
@@ -6591,12 +8691,13 @@ def _evaluate_calculatedlist_interims(self, only=None):
                 # RESULT is the whole column must not be squeezed through
                 # that same [out_val] wrapping, or a 6-row table collapses
                 # to one row containing "---" (2026-09 XAGG addition).
-                new_value = _jj.dumps(r)
+                new_value = _dumps_fixed(r)
             elif isinstance(r, (str, unicode)):
                 new_value = _jj.dumps([r])
             else:
                 try:
-                    new_value = _jj.dumps([float(r)])
+                    new_value = _dumps_fixed(
+                        [r if isinstance(r, _Fixed) else float(r)])
                 except (ValueError, TypeError):
                     new_value = _jj.dumps([_PLACEHOLDER])
             if not _same_value(c.get("value", ""), new_value):
@@ -6643,7 +8744,8 @@ def _evaluate_calculatedlist_interims(self, only=None):
         # degrade to the per-element path.
         _ARRAY_FN_RE = re.compile(
             r'(GROUP_\w+(?:list)?|\w+_ROWS|RESULT_STATUS|TIME_ELAPSED_HOURS|COALESCE|SHIFT'
-            r'|BASELINE_BYlist|XAGG_\w+|APPEND)\s*\(')
+            r'|BASELINE_BYlist|XAGG_\w+|APPEND|INDEX_BY_GROUP'
+            r'|DISTINCT_\w+)\s*\(')
         if _ARRAY_FN_RE.search(formula):
             expr = formula
             if isinstance(expr, str):
@@ -6682,7 +8784,8 @@ def _evaluate_calculatedlist_interims(self, only=None):
                         str_arrays[kw] = r
                     element_results = r
                 elif r is not None:
-                    element_results = [float(r)]
+                    element_results = [
+                        r if isinstance(r, _Fixed) else float(r)]
             except Exception as _dle:
                 _note_eval_failure(kw, _dle)
                 if _DEBUG:
@@ -6718,6 +8821,10 @@ def _evaluate_calculatedlist_interims(self, only=None):
                         element_results.append(_PLACEHOLDER)
                     elif isinstance(r, (str, unicode)):
                         element_results.append(r)
+                    elif isinstance(r, _Fixed):
+                        # float(r) here used to strip ROUND's places the
+                        # moment an element-wise formula produced them
+                        element_results.append(r)
                     else:
                         element_results.append(float(r))
                 except Exception as _dle:
@@ -6730,7 +8837,9 @@ def _evaluate_calculatedlist_interims(self, only=None):
             _dl_sys.stderr.write("maitux:   result kw=%s element_results=%s (len=%d)\n" % (kw, element_results[:5], len(element_results)))
 
         if element_results:
-            new_value = _jj.dumps(element_results)
+            # _Fixed cells are written as their text, everything else as
+            # before -- storage form A' (需求与方案 §2.2)
+            new_value = _dumps_fixed(element_results)
             if not _same_value(c.get("value", ""), new_value):
                 c["value"] = new_value
                 changed = True

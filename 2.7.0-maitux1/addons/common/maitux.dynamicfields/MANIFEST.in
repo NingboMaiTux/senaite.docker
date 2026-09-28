@@ -1,0 +1,3 @@
+include *.md
+recursive-include src *.zcml *.pt *.po *.mo *.txt *.xml *.js *.css
+global-exclude *.pyc

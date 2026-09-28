@@ -1,10 +1,27 @@
-<script type="text/javascript">
+<script xmlns:tal="http://xml.zope.org/namespaces/tal"
+        type="text/javascript"
+        id="stability-plan-template-form"
+        tal:attributes="data-msg-basic-information python:view.get_labels().get('basic-information', '')">
 (function() {
   function init($) {
     if (window.__senaiteStabilityPlanTemplateEnhancementsApplied) {
       return;
     }
     window.__senaiteStabilityPlanTemplateEnhancementsApplied = true;
+
+    // 界面文案统一由 viewlet 翻译后挂在 <script> 的 data-* 上（见 get_labels）。
+    // 这里不做任何硬编码，否则中文站会漏英文。
+    function label(name, fallback) {
+      var $script = $("#stability-plan-template-form");
+      if (!$script.length) {
+        return fallback;
+      }
+      var value = $script.attr("data-msg-" + name);
+      if (value === undefined || value === null || value === "") {
+        return fallback;
+      }
+      return value;
+    }
 
     function controllerFor(inputId) {
       try {
@@ -126,6 +143,34 @@
       }
       $hidden.val(value == null ? "" : value);
       $hidden.trigger("change");
+      return true;
+    }
+
+    // 日期时间控件（senaite-datetime-widget）真正的提交值是隐藏输入，
+    // 旁边两个 date/time 输入只是给用户看的，这里一起写，保证显示与提交一致。
+    function setDatetimeFieldValue(fieldName, value) {
+      if (!value) {
+        return false;
+      }
+      var $hidden = $("[name='form.widgets." + fieldName + "']");
+      if (!$hidden.length) {
+        return false;
+      }
+      var parts = String(value).split(" ");
+      var date = parts[0] || "";
+      var time = parts[1] || "";
+
+      $hidden.val(String(value));
+      $hidden.trigger("change");
+
+      var $date = $("[name='form.widgets." + fieldName + "-date']");
+      if ($date.length) {
+        $date.val(date);
+      }
+      var $time = $("[name='form.widgets." + fieldName + "-time']");
+      if ($time.length && time) {
+        $time.val(time.slice(0, 5));
+      }
       return true;
     }
 
@@ -760,8 +805,14 @@
     ok = setRowFieldValue($row, "window_days", row.window_days == null ? "" : String(row.window_days)) && ok;
     ok = setRowReferenceFieldValue($row, "analysis_specification", row.analysis_specification || "", row.analysis_specification_record || null) && ok;
     ok = setRowReferenceFieldValue($row, "analysis_profile", row.analysis_profile || "", row.analysis_profile_record || null) && ok;
+    ok = setRowReferenceFieldValue($row, "batch", row.batch || "", row.batch_record || null) && ok;
     ok = setRowFieldValue($row, "inspection_quantity", row.inspection_quantity == null ? "" : String(row.inspection_quantity)) && ok;
     ok = setRowFieldValue($row, "notes", row.notes || "") && ok;
+    // 复制出来的明细统一回到"待放置"（后端 @@plan_copy_defaults 已经重置过一次，
+    // 这里再显式写一遍，避免新增行沿用模板行的残留值）。
+    if (row.detail_status) {
+      setRowFieldValue($row, "detail_status", row.detail_status);
+    }
     applyRowAnalysisChoiceRules($row);
   }
   return ok;
@@ -816,6 +867,61 @@
   }
 }
 
+    // 「复制计划」：列表页复制按钮会跳到本表单并带上 copy_from_uid，
+    // 这里按被复制方案的字段与时间点明细预填（明细的清理规则在后端
+    // @@plan_copy_defaults 里，前端只负责填进控件）。
+    function applyPlanCopyDefaults() {
+      if (!$("body").is(".portaltype-stabilityplans")) {
+        return;
+      }
+
+      var params = new URLSearchParams(window.location.search || "");
+      var sourceUid = params.get("copy_from_uid");
+      if (!sourceUid || window.__senaitePlanCopyDefaultsApplied) {
+        return;
+      }
+
+      if (!window.__senaitePlanCopyDefaultsData && !window.__senaitePlanCopyDefaultsLoading) {
+        window.__senaitePlanCopyDefaultsLoading = true;
+        var baseUrl = (document.body && document.body.dataset && document.body.dataset.viewUrl) || window.location.pathname;
+        baseUrl = baseUrl.replace(/\/\+\+add\+\+StabilityPlan(\/)?$/, "");
+        $.getJSON(baseUrl + "/@@plan_copy_defaults", { uid: sourceUid })
+          .done(function(data) {
+            window.__senaitePlanCopyDefaultsData = data || {};
+          })
+          .always(function() {
+            window.__senaitePlanCopyDefaultsLoading = false;
+          });
+        return;
+      }
+
+      var data = window.__senaitePlanCopyDefaultsData;
+      if (!data || !data.uid) {
+        return;
+      }
+
+      var ok = true;
+      ok = setFieldValue("title", data.copied_title || data.title || "") && ok;
+      ok = setFieldValue("description", data.description || "") && ok;
+      ok = setFieldValue("sample_quantity", data.sample_quantity == null ? "" : String(data.sample_quantity)) && ok;
+      ok = setFieldValue("reserve_quantity", data.reserve_quantity == null ? "" : String(data.reserve_quantity)) && ok;
+      if (data.plan_template) {
+        ok = setHiddenFieldValue("plan_template", data.plan_template) && ok;
+      }
+      if (data.unit) {
+        ok = setFieldValue("unit", data.unit, data.unit_record || null) && ok;
+      }
+      if (data.start_time) {
+        ok = setDatetimeFieldValue("start_time", data.start_time) && ok;
+      }
+      if (data.plan_details && data.plan_details.length) {
+        ok = populatePlanDetails(data.plan_details) && ok;
+      }
+      if (ok) {
+        window.__senaitePlanCopyDefaultsApplied = true;
+      }
+    }
+
     function applyAll() {
       var $rights = findFieldWrapper("rights");
       if ($rights.length) {
@@ -823,8 +929,9 @@
       }
       var $defaultTab = $("#default-tab");
       if ($defaultTab.length) {
-        $defaultTab.text("Basic Information");
+        $defaultTab.text(label("basic-information", "Basic Information"));
       }
+      applyPlanCopyDefaults();
       applyPlanTemplateDefaults();
       applyAnalysisChoiceRules();
       restrictPlanDetailsAnalysisSpecSearch();

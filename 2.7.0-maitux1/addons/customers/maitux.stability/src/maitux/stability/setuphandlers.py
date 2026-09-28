@@ -12,35 +12,33 @@ from senaite.core import logger
 from senaite.core.upgrade.utils import temporary_allow_type
 from zope.interface import implementer
 
-from maitux.stability import _
 from maitux.stability.permissions import AddStabilityPlanTemplate
 
 
 MODULE_ID = "stability_studies"
-MODULE_TITLE = _(u"Stability Studies", default=u"Stability Studies")
+# 中文注释：以下标题即"菜单名 / 页面标题"的来源（对象 Title），统一用中文，
+# 与 maitux.stock 的做法保持一致（原为英文，侧边栏与页面标题都是英文）。
+# 中文注释：标题一律存**英文 msgid**，运行时按语言翻译（见 i18n.py 与 locales/）：
+#   英文站 -> "Stability Studies"  中文站 -> 稳定性研究
+MODULE_TITLE = u"Stability Studies"
 MODULE_TYPE = "StabilityStudies"
 DEFAULT_STUDY_ID = "default_stability_study"
-DEFAULT_STUDY_TITLE = _(u"Default Stability Study", default=u"Default Stability Study")
+DEFAULT_STUDY_TITLE = u"Default Stability Study"
 DEFAULT_STUDY_TYPE = "StabilityStudy"
 # sidebar 当前对子级使用 path 倒序查询，这里通过数字前缀稳定控制显示顺序。
 # 同时保留旧 ID 别名，方便历史数据在升级/卸载时统一清理。
 TABLE_DEFINITIONS = (
-    ("storage_conditions", "500_storage_conditions", "Storage Conditions", "StorageConditions", ("storage_conditions", "z_storage_conditions")),
-    ("packaging_specifications", "400_packaging_specifications", "Packaging Specifications", "PackagingSpecifications", ("packaging_specifications", "y_packaging_specifications")),
-    ("stability_plan_templates", "300_stability_plan_templates", "Stability Plan Templates", "StabilityPlanTemplates", ("stability_plan_templates", "x_stability_plan_templates")),
-    ("stability_plans", "200_stability_plans", "Stability Plans", "StabilityPlans", ("stability_plans", "w_stability_plans")),
-    ("task_board", "100_task_board", "Task Board", "StabilityPlans", ("task_board", "v_task_board")),
+    ("storage_conditions", "500_storage_conditions", u"Storage Conditions", "StorageConditions", ("storage_conditions", "z_storage_conditions")),
+    ("packaging_specifications", "400_packaging_specifications", u"Packaging Specifications", "PackagingSpecifications", ("packaging_specifications", "y_packaging_specifications")),
+    ("stability_plan_templates", "300_stability_plan_templates", u"Stability Plan Templates", "StabilityPlanTemplates", ("stability_plan_templates", "x_stability_plan_templates")),
+    ("stability_plans", "200_stability_plans", u"Stability Plans", "StabilityPlans", ("stability_plans", "w_stability_plans")),
+    ("task_board", "100_task_board", u"Task Board", "StabilityPlans", ("task_board", "v_task_board")),
 )
 TABLE_ID_BY_LOGICAL = dict([(item[0], item[1]) for item in TABLE_DEFINITIONS])
 TABLE_ID_ALIASES = dict([(item[1], item[4]) for item in TABLE_DEFINITIONS])
 STATIC_TABLES = tuple([(item[1], item[2], item[3]) for item in TABLE_DEFINITIONS])
 SIDEBAR_DEPTH = 2
 PROJECTNAME = "maitux.stability"
-
-
-def _table_title(title):
-    """把静态表标题转为 maitux.stability 域的 Message，供侧边栏等运行时翻译。"""
-    return _(title, default=title)
 
 
 @implementer(INonInstallable)
@@ -78,6 +76,61 @@ def post_install(context):
 def setup_stability_content(context):
     """兼容旧入口，统一委托到标准安装入口。"""
     setup_handler(context)
+
+
+def _as_unicode(value):
+    """把任意值安全地转成 unicode（py2 下 Title() 返回的是 UTF-8 字节串）。"""
+    if value is None:
+        return u""
+    if isinstance(value, unicode):  # noqa: F821  (py2)
+        return value
+    try:
+        return value.decode("utf-8")
+    except Exception:
+        try:
+            return unicode(value)  # noqa: F821
+        except Exception:
+            return u""
+
+
+def sync_title(obj, title):
+    """把对象 Title 同步成期望值（幂等），并刷新目录索引。
+
+    两个坑：
+    1. py2 下 ``obj.Title()`` 返回 UTF-8 字节串，直接比较会触发 UnicodeWarning
+       且结果不可靠 —— 标题永远刷不上去。
+    2. 侧边栏/菜单读的是 **catalog 的 Title 索引**，只 setTitle 不 reindex 时
+       菜单会一直显示旧名字（"切英文还是中文"就是这么来的）。
+    """
+    if obj is None or not getattr(obj, "Title", None):
+        return False
+    current = _as_unicode(obj.Title())
+    wanted = _as_unicode(title)
+    if current == wanted:
+        return False
+    try:
+        obj.setTitle(wanted)
+    except Exception:
+        logger.warning("Could not set title of %s", api.get_path(obj))
+        return False
+
+    logger.info("Updated title of %s: %r -> %r",
+                api.get_path(obj), current, wanted)
+    try:
+        obj.reindexObject(idxs=["Title", "sortable_title"])
+    except Exception:
+        pass
+    # 兜底：Dexterity 对象没挂 IMultiCatalogBehavior 时 reindexObject() 是空操作
+    for tool_name in ("portal_catalog", "uid_catalog"):
+        tool = api.get_tool(tool_name)
+        if tool is None:
+            continue
+        try:
+            tool.catalog_object(obj, api.get_path(obj))
+        except Exception:
+            logger.warning("Could not catalog %s in %s",
+                           api.get_path(obj), tool_name)
+    return True
 
 
 def _candidate_ids(value):
@@ -505,7 +558,8 @@ def _setup_stability_content(portal):
                     alias_children = list(getattr(alias, "objectIds", lambda: [])())
                 except Exception:
                     alias_children = []
-                # Task Board 鐞嗚涓婁笉鎵胯浇涓氬姟鏁版嵁锛涜嫢鍘嗗彶瀵硅薄涓嬩粛鏈夊唴瀹癸紝鍏堜繚鐣欏苟璁板綍鏃ュ織銆?                if alias_children:
+                # Task Board 理论上不承载业务数据；若历史对象下仍有内容，先保留并记录日志。
+                if alias_children:
                     logger.warning(
                         "Keeping old task board alias '%s' because it still contains children",
                         alias_id,
@@ -547,8 +601,7 @@ def _setup_stability_content(portal):
             except Exception:
                 pass
         try:
-            if getattr(obj, "Title", None) and obj.Title() != title:
-                obj.setTitle(title)
+            sync_title(obj, title)
         except Exception:
             pass
         obj = merge_alias_objects(container, obj, obj_id)
@@ -668,14 +721,18 @@ def _setup_stability_content(portal):
         with temporary_allow_type(portal, MODULE_TYPE):
             container = create_or_update(portal, MODULE_TYPE, MODULE_ID, MODULE_TITLE)
     else:
+        # 中文注释：容器已存在时**也要**同步标题。
+        # 老站点上这个容器是历史安装时用英文标题建的，而这里过去只做
+        # recatalog/权限同步 —— 于是改了 MODULE_TITLE 也永远刷不上去，
+        # 侧边栏菜单一直显示英文。
+        sync_title(container, MODULE_TITLE)
         recatalog(container)
         force_setup_like_permissions(container)
         update_security(container)
 
     if container is not None:
         for table_id, table_title, table_type in STATIC_TABLES:
-            table = create_or_update(
-                container, table_type, table_id, _table_title(table_title))
+            table = create_or_update(container, table_type, table_id, table_title)
             if table_type == "StabilityPlanTemplates":
                 apply_constraints(table, ("StabilityPlanTemplate",))
                 migrate_storage_time_duration(table)

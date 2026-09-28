@@ -10,6 +10,31 @@
       <h1 tal:content="context/Title">Stock Batch</h1>
     </div>
 
+    <!-- 待审核领用申请：审核人的入口在批次这一侧 -->
+    <tal:block tal:define="pending python:view.pending_request_items()">
+      <tal:block tal:condition="pending">
+        <div class="card mb-3 border-info">
+          <div class="card-header" i18n:translate="">Pending Usage Request</div>
+          <div class="card-body">
+            <div tal:repeat="row pending" class="mb-2">
+              <div>
+                <a tal:attributes="href python:row.get('url')"
+                   tal:content="python:row.get('request_id')">SUR-00001</a>
+                <span class="text-muted"
+                      tal:content="python:' / ' + (row.get('applicant') or '')">-</span>
+              </div>
+              <div class="text-muted" tal:content="python:row.get('purpose')">-</div>
+              <div tal:condition="python:row.get('can_review')" class="mt-2">
+                <a class="btn btn-info btn-sm"
+                   tal:attributes="href python:row.get('url')"
+                   i18n:translate="">Open and Review</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </tal:block>
+    </tal:block>
+
     <ul class="nav nav-tabs" role="tablist">
       <li class="nav-item">
         <a class="nav-link active" data-toggle="tab" href="#tab-base" role="tab" i18n:translate="">Base Information</a>
@@ -19,6 +44,10 @@
       </li>
       <li class="nav-item">
         <a class="nav-link" data-toggle="tab" href="#tab-usage" role="tab" i18n:translate="">Usage Records</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link" data-toggle="tab" href="#tab-audit" role="tab"
+           i18n:translate="">Approval Records</a>
       </li>
     </ul>
 
@@ -69,7 +98,7 @@
               </tal:block>
               <tal:block tal:repeat="record records">
                 <tr>
-                  <td tal:content="python:view.operation_label(record.get('operation_type', ''))">-</td>
+                  <td tal:content="python:record.get('operation_type', '')">-</td>
                   <td tal:content="python:record.get('operator', '')">-</td>
                   <td tal:content="python:record.get('operation_date') and record.get('operation_date').strftime('%Y-%m-%d %H:%M:%S') or ''">-</td>
                   <td class="text-right" tal:content="python:record.get('quantity', '')">-</td>
@@ -80,6 +109,49 @@
             </tal:block>
           </tbody>
         </table>
+      </div>
+
+      <!-- 审计追踪：审批通过 / 驳回都会在这里留下一条记录 -->
+      <div class="tab-pane fade" id="tab-audit" role="tabpanel">
+        <div class="mb-2">
+          <a class="btn btn-outline-secondary btn-sm"
+             tal:attributes="href python:view.auditlog_url()"
+             i18n:translate="">Full audit log (with field value changes)</a>
+        </div>
+        <tal:block tal:define="trail python:view.audit_trail()">
+          <table class="table table-sm table-striped">
+            <thead>
+              <tr>
+                <th i18n:translate="">Action</th>
+                <th i18n:translate="">Time</th>
+                <th i18n:translate="">Operator</th>
+                <th class="text-right" i18n:translate="">Current Amount</th>
+                <th i18n:translate="">Usage Request</th>
+                <th i18n:translate="">Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tal:block tal:condition="python:not trail">
+                <tr><td colspan="6" i18n:translate="">No records yet</td></tr>
+              </tal:block>
+              <tal:block tal:repeat="row trail">
+                <tr>
+                  <td tal:content="python:row.get('action_label')">-</td>
+                  <td tal:content="python:row.get('modified')">-</td>
+                  <td>
+                    <span tal:replace="python:row.get('actor_fullname') or row.get('actor')">-</span>
+                    <span class="text-muted"
+                          tal:condition="python:row.get('roles')"
+                          tal:content="python:' (' + row.get('roles') + ')'"></span>
+                  </td>
+                  <td class="text-right" tal:content="python:row.get('amount_after')">-</td>
+                  <td tal:content="python:row.get('request')">-</td>
+                  <td tal:content="python:row.get('comments')">-</td>
+                </tr>
+              </tal:block>
+            </tbody>
+          </table>
+        </tal:block>
       </div>
     </div>
   </metal:content>

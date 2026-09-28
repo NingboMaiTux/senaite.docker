@@ -5,14 +5,16 @@ from bika.lims import api
 from bika.lims.utils import get_link
 from senaite.app.listing import ListingView
 from senaite.core.api import dtime
-from senaite.core.i18n import translate
 from decimal import Decimal
 
-from maitux.stock import _
+from maitux.stock.i18n import translate_stock
+from maitux.stock.expiryreminder import get_batch_reminder
+from maitux.stock.expiryreminder import reminder_badge_html
 from maitux.stock.browser.stockbatchactions import ACTION_CONSUME
 from maitux.stock.browser.stockbatchactions import ACTION_DESTROY
 from maitux.stock.browser.stockbatchactions import ACTION_PRINT
 from maitux.stock.browser.stockbatchactions import ACTION_RETURN
+from maitux.stock.browser.stockbatchactions import ACTION_REVIEW_USAGE
 from maitux.stock.browser.stockbatchactions import ACTION_SPLIT
 from maitux.stock.browser.stockbatchactions import ACTION_STOCKTAKE
 from maitux.stock.browser.stockbatchactions import get_allowed_action_ids_for_batches
@@ -20,6 +22,9 @@ from maitux.stock.browser.stockbatchactions import get_transition_items_for_acti
 from maitux.stock.browser.stockbatchactions import get_transition_items_for_batch
 from maitux.stock.stockbatchexpiry import REVIEW_STATE_EXPIRED
 from maitux.stock.stockbatchexpiry import is_due_for_expiry
+from maitux.stock.usageapproval import check_approver
+from maitux.stock.usageapproval import find_pending_requests
+from maitux.stock.usageapproval import find_pending_requests_for_batch
 
 
 def is_batch_visible_in_tab(batch, review_state_id, now=None):
@@ -41,10 +46,7 @@ class StockBatchesView(ListingView):
     def __init__(self, context, request):
         super(StockBatchesView, self).__init__(context, request)
 
-        self.title = translate(_(
-            u"listing_stockbatches_title",
-            default=u"Stock Batches"
-        ))
+        self.title = translate_stock(u"Stock Batches")
         self.catalog = "portal_catalog"
         self.show_search = True
         self.contentFilter = {
@@ -57,7 +59,7 @@ class StockBatchesView(ListingView):
             },
         }
         self.context_actions = {
-            _(u"listing_stockbatches_action_add", default=u"Add"): {
+            u"Add": {
                 "url": "++add++StockBatch",
                 "permission": "cmf.AddPortalContent",
                 "icon": "senaite_theme/icon/plus",
@@ -66,22 +68,31 @@ class StockBatchesView(ListingView):
         self.show_select_column = True
 
         self.columns = collections.OrderedDict((
-            ("batch_id", {"title": _(u"listing_stockbatches_column_batch_id", default=u"Batch ID"), "toggle": True}),
-            ("stock", {"title": _(u"listing_stockbatches_column_stock", default=u"Stock"), "toggle": True}),
-            ("supplier", {"title": _(u"listing_stockbatches_column_supplier", default=u"Supplier"), "toggle": True}),
-            ("current_amount", {"title": _(u"listing_stockbatches_column_current_amount", default=u"Current Amount"), "toggle": True}),
-            ("target_quantity", {"title": _(u"listing_stockbatches_column_target_quantity", default=u"Target Quantity"), "toggle": True}),
-            ("unit", {"title": _(u"listing_stockbatches_column_unit", default=u"Unit"), "toggle": True}),
-            ("expiry_date", {"title": _(u"listing_stockbatches_column_expiry_date", default=u"Expiry Date"), "toggle": True}),
-            ("created_by", {"title": _(u"listing_stockbatches_column_created_by", default=u"Created By"), "toggle": True, "index": "Creator"}),
-            ("created_date", {"title": _(u"listing_stockbatches_column_created_date", default=u"Created Date"), "toggle": True, "index": "created"}),
-            ("status", {"title": _(u"listing_stockbatches_column_status", default=u"Status"), "toggle": True}),
+            ("batch_id", {"title": u"Batch ID", "toggle": True}),
+            ("stock", {"title": u"Stock", "toggle": True}),
+            ("supplier", {"title": u"Supplier", "toggle": True}),
+            ("current_amount", {"title": u"Current Amount", "toggle": True}),
+            ("target_quantity", {"title": u"Target Quantity", "toggle": True}),
+            ("unit", {"title": u"Unit", "toggle": True}),
+            ("expiry_date", {"title": u"Expiry Date", "toggle": True}),
+            ("created_by", {"title": u"Created By", "toggle": True, "index": "Creator"}),
+            ("created_date", {"title": u"Created Date", "toggle": True, "index": "created"}),
+            ("status", {"title": u"Status", "toggle": True}),
+            ("pending_request", {"title": u"Pending Request", "toggle": True}),
         ))
 
         self.review_states = [
             {
+                "id": "pending_review",
+                "title": u"Pending Review",
+                "contentFilter": {"review_state": "active"},
+                "transitions": get_transition_items_for_action_ids([
+                    ACTION_REVIEW_USAGE,
+                ]),
+                "columns": list(self.columns.keys()),
+            }, {
                 "id": "default",
-                "title": _(u"listing_state_active", default=u"Active"),
+                "title": u"Active",
                 "contentFilter": {"review_state": "active"},
                 "transitions": get_transition_items_for_action_ids([
                     ACTION_CONSUME,
@@ -94,7 +105,7 @@ class StockBatchesView(ListingView):
                 "columns": list(self.columns.keys()),
             }, {
                 "id": "expired",
-                "title": _(u"listing_state_expired", default=u"Expired"),
+                "title": u"Expired",
                 "contentFilter": {"review_state": REVIEW_STATE_EXPIRED},
                 "transitions": get_transition_items_for_action_ids([
                     ACTION_DESTROY,
@@ -103,7 +114,7 @@ class StockBatchesView(ListingView):
                 "columns": list(self.columns.keys()),
             }, {
                 "id": "destroyed",
-                "title": _(u"listing_state_destroyed", default=u"Destroyed"),
+                "title": u"Destroyed",
                 "contentFilter": {"review_state": "destroyed"},
                 "transitions": get_transition_items_for_action_ids([
                     ACTION_PRINT,
@@ -111,12 +122,62 @@ class StockBatchesView(ListingView):
                 "columns": list(self.columns.keys()),
             }, {
                 "id": "all",
-                "title": _(u"listing_state_all", default=u"All"),
+                "title": u"All",
                 "contentFilter": {},
                 "transitions": [],
                 "columns": list(self.columns.keys()),
             }
         ]
+
+    # ------------------------------------------------------------------
+    # 待审核领用申请（审核入口在批次这一侧）
+    # ------------------------------------------------------------------
+    def pending_requests_map(self):
+        """{batch_uid: [StockUsageRequest, ...]}；整个请求内只查一次目录。"""
+        cached = getattr(self, "_pending_map_cache", None)
+        if cached is None:
+            cached = find_pending_requests()
+            self._pending_map_cache = cached
+        return cached
+
+    def pending_requests_for(self, batch):
+        uid = api.safe_unicode(api.get_uid(batch) or "").strip()
+        if not uid:
+            return []
+        return self.pending_requests_map().get(uid) or []
+
+    def reviewable_request_for(self, batch):
+        """当前用户可以审核的那条待审核申请（没有则 None）。
+
+        "可以审核" = 非申请人 + 具备审批角色（同一套规则见 usageapproval.check_approver）。
+        """
+        user = api.get_current_user()
+        user_id = user.getId() if user else u""
+        requests = sorted(self.pending_requests_for(batch),
+                          key=lambda item: api.get_creation_date(item) or 0)
+        for request in requests:
+            if not check_approver(request, user_id):
+                return request
+        return None
+
+    def item_has_pending_request(self, item):
+        obj = item.get("obj")
+        if obj is None:
+            return False
+        batch = api.get_object(obj)
+        return bool(self.pending_requests_for(batch))
+
+    def get_review_action_items(self, batches):
+        """有待本人审核的申请时给出"审核领用"按钮（仅单选）。
+
+        电子签名一次只能签一个对象（esignature 的限制），所以限定单选，
+        多选时不给这个按钮，避免点了之后被后端拒绝。
+        """
+        if len(batches) != 1:
+            return []
+        if self.reviewable_request_for(batches[0]) is None:
+            return []
+        return get_transition_items_for_action_ids([ACTION_REVIEW_USAGE])
 
     def get_allowed_transitions_for(self, uids):
         """返回当前勾选批次可显示的批量动作按钮。"""
@@ -143,7 +204,15 @@ class StockBatchesView(ListingView):
         if allowed_ids:
             action_ids = [action_id for action_id in action_ids if action_id in allowed_ids]
 
-        return get_transition_items_for_action_ids(action_ids)
+        items = get_transition_items_for_action_ids(action_ids)
+
+        # 中文注释：审核动作与批次状态无关（取决于有没有待审核的申请），
+        # 所以单独追加、并排在最前面；同时去重以免在"待审核"页签里出现两个。
+        review_items = self.get_review_action_items(batches)
+        if review_items:
+            review_ids = set(item.get("id") for item in review_items)
+            items = review_items + [i for i in items if i.get("id") not in review_ids]
+        return items
 
     def get_catalog_query(self, **kw):
         query = super(StockBatchesView, self).get_catalog_query(**kw)
@@ -156,6 +225,13 @@ class StockBatchesView(ListingView):
     def folderitems(self):
         items = super(StockBatchesView, self).folderitems()
         review_state_id = self.review_state.get("id", "")
+
+        # 中文注释："待审核"页签只显示"有待审核领用申请"的批次。
+        # 目录里没有对应索引（lines 是对象内 DataGrid），所以在这里做内存过滤。
+        if review_state_id == "pending_review":
+            return [item for item in items
+                    if self.item_has_pending_request(item)]
+
         if review_state_id != "default":
             return items
 
@@ -228,8 +304,39 @@ class StockBatchesView(ListingView):
         expiry = getattr(obj, "expiry_date", None)
         item["expiry_date"] = self._format_dt(expiry) if expiry else ""
 
+        # 中文注释：到期提醒着色 —— 已过期红色、到期前 N 天黄色（N 配置在 Stock 上）。
+        # 行 CSS class 走 SENAITE 列表的 item["state_class"]（它会拼到 <tr class="...">），
+        # 样式见 browser/static/expiry-reminder.css。
+        reminder = get_batch_reminder(obj, stock=stock)
+        if reminder.get("row_class"):
+            state_class = api.safe_unicode(item.get("state_class") or u"").strip()
+            item["state_class"] = u"{} {}".format(
+                state_class, reminder["row_class"]).strip()
+        badge = reminder_badge_html(reminder)
+        if badge:
+            item["after"]["expiry_date"] = badge
+
         item["status"] = api.get_review_status(obj) or ""
         item["transitions"] = get_transition_items_for_batch(obj)
+
+        # 中文注释：待审核领用申请 —— 列表里显示申请单号（可点），
+        # 并且当"本人有权审核"时在行内补一个"审核领用"按钮。
+        pending = self.pending_requests_for(obj)
+        if pending:
+            request = pending[0]
+            request_id = api.safe_unicode(
+                getattr(request, "request_id", "") or api.get_title(request))
+            item["pending_request"] = get_link(
+                href=api.get_url(request),
+                value=request_id,
+                csrf=False,
+            )
+            if self.reviewable_request_for(obj) is not None:
+                item["transitions"] = get_transition_items_for_action_ids(
+                    [ACTION_REVIEW_USAGE]) + list(item["transitions"])
+        else:
+            item["pending_request"] = ""
+
         if not should_show_select_for_batch(current_state_id, item["status"]):
             item["disabled"] = True
             item["show_select"] = False

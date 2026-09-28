@@ -21,6 +21,7 @@ from zope.component import adapter
 
 from maitux.glossary import logger
 from maitux.glossary.config import EDITABLE_FIELDS
+from maitux.glossary.config import WRITABLE_FIELDS
 from maitux.glossary.interfaces import IGlossaryEntry
 from maitux.glossary.utils import find_by_calc_keyword
 from maitux.glossary.utils import text
@@ -29,6 +30,10 @@ from maitux.glossary.utils import text
 #: 依据：core 强制"同一个 calc keyword 在站点上只能有一个 Field title"
 #: （senaite/core/validators/interimfields.py:125 与 bika/lims/validators.py:375）
 #: —— 同一个字段的译文必须是唯一的，否则本表就不能当术语库用。
+#:
+#: ★ **只有 zh / en 走批量**。报告导入映射列（`acq_*`）虽然也可编辑，但
+#: 必须**只写当前行** —— 同一个 calc keyword 在不同分析上来源不同
+#: （实测 `g_rt` 8 行：SYS / 供试品 / 稳定性 / 破坏），批量写会把来源改错。
 BATCHED_FIELDS = EDITABLE_FIELDS
 
 
@@ -59,7 +64,7 @@ class GlossaryEntryDataManager(DataManager):
         在返回列表里，否则列表页只显示当前行变了。
         """
         name = text(name)
-        if name not in EDITABLE_FIELDS:
+        if name not in WRITABLE_FIELDS:
             # 白名单：analysis_keyword / calc_keyword / sync_state 等
             # 都不允许通过列表页的保存链路改写（防伪造 save_queue）。
             logger.error(
@@ -119,6 +124,9 @@ class GlossaryEntryDataManager(DataManager):
         对 zh / en：同一 calc keyword 的**所有行**
         （含未激活行）—— 否则改一次只生效一行，其余行仍然是旧译文，
         立刻违反"同一个 calc keyword 译文必须一致"。
+
+        对 `acq_*`（报告导入映射）与其它字段：**只写当前行** ——
+        同一 calc keyword 在不同分析上的来源/规则可以不同，批量写会改错。
         """
         context = self.context
         if name not in BATCHED_FIELDS:

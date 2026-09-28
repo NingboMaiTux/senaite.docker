@@ -142,6 +142,9 @@
   }
 
   .sticker {
+    /* PDF 链路里 .sticker 是 inline-block，行盒的基线留白会让每页溢出，
+       末尾多出一张空白页；打印时改 block 即可与标签张数一一对应 */
+    display: block !important;
     margin: 0 !important;
     page-break-after: always;
   }

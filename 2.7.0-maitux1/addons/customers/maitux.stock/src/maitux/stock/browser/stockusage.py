@@ -26,7 +26,6 @@ from decimal import Decimal
 import six
 from Products.Five.browser import BrowserView
 from bika.lims import api
-from bika.lims import senaiteMessageFactory as _
 from six.moves.urllib.parse import urlencode
 
 from maitux.stock.usage import DEFAULT_PAGE_SIZE
@@ -38,30 +37,41 @@ from maitux.stock.usage import format_datetime
 from maitux.stock.usage import get_status_label
 from maitux.stock.usage import parse_date_range
 from maitux.stock.usage import to_decimal
+from maitux.stock.i18n import translate_stock
 
 
 #: 使用记录表格/CSV 的统一列定义（取值 key, 列名）
 USAGE_COLUMNS = (
-    ("number", u"库存编号"),
-    ("material_name", u"物料名称"),
-    ("stock_type", u"库存类型"),
-    ("supplier", u"供应商"),
-    ("batch_number", u"厂家批号"),
-    ("batch_id", u"批次编号"),
-    ("unit", u"单位"),
-    ("operation_label", u"操作类型"),
-    ("operation_date_text", u"操作时间"),
-    ("operator", u"操作人"),
-    ("quantity_text", u"数量"),
-    ("remarks", u"备注"),
-    ("from_batch", u"来源批次"),
-    ("batch_status_label", u"批次状态"),
-    ("location", u"存放位置"),
-    ("expiry_date_text", u"有效期"),
+    ("number", u"Stock Number"),
+    ("material_name", u"Material Name"),
+    ("stock_type", u"Stock Type"),
+    ("supplier", u"Supplier"),
+    ("batch_number", u"Manufacturer Lot / Batch No."),
+    ("batch_id", u"Lot / Batch No."),
+    ("unit", u"Unit"),
+    ("operation_label", u"Operation Type"),
+    ("operation_date_text", u"Operation Date"),
+    ("operator", u"Operator"),
+    ("quantity_text", u"Quantity"),
+    ("remarks", u"Remarks"),
+    ("from_batch", u"From Batch"),
+    ("batch_status_label", u"Batch Status"),
+    ("location", u"Storage Location"),
+    ("expiry_date_text", u"Expiry Date"),
 )
 
 #: 查询结果表与 CSV 实际使用的列（含序号），保证「页面所见 = 导出所得」
-REPORT_COLUMNS = ((u"index", u"序号"),) + USAGE_COLUMNS
+REPORT_COLUMNS = ((u"index", u"No."),) + USAGE_COLUMNS
+
+
+def translated_columns(columns):
+    """把列定义里的英文 msgid 按当前语言翻译（视图渲染时调用）。
+
+    中文注释：不能在模块级常量里翻译 —— 那会儿没有 request，查不到目录，
+    结果会把 msgid 原样显示出来。
+    """
+    return tuple(
+        (key, translate_stock(title)) for key, title in columns)
 
 
 def build_csv(headers, rows):
@@ -258,24 +268,27 @@ class StockUsageTraceMixin(object):
     # 以便通过 addon 的 i18n lint（模板静态文案走显式 msgid）。
 
     def summary_text(self, total, page, pages):
-        return u"命中批次 {} 个；第 {} / {} 页。".format(total, page, pages)
+        return translate_stock(
+            u"{} batch(es) matched; page {} / {}.".format(total, page, pages))
 
     def records_header(self, count):
-        return u"使用记录（{} 条）".format(count)
+        return translate_stock(
+            u"Usage records ({})".format(count))
 
     def page_indicator(self, page, pages):
-        return u"第 {} / {} 页".format(page, pages)
+        return translate_stock(
+            u"Page {} / {}".format(page, pages))
 
     def split_target_hint(self, target):
-        return u"（厂家批号 {}；剩余 {}；{}）".format(
+        return translate_stock(u"(Manufacturer lot {}; remaining {}; {})".format(
             target.get("batch_number") or u"-",
             target.get("current_amount_text") or u"0.00",
-            target.get("status_label") or u"-")
+            target.get("status_label") or u"-"))
 
     def worksheet_hint(self, worksheet):
-        return u"（状态 {}；创建 {}）".format(
+        return translate_stock(u"(Status {}; created {})".format(
             worksheet.get("status") or u"-",
-            worksheet.get("created_text") or u"-")
+            worksheet.get("created_text") or u"-"))
 
     def split_target_rows(self, batch):
         """分装去向（由本批次分装出去的批次）展示行。"""
@@ -347,11 +360,14 @@ class StockUsageReportMixin(object):
 
         errors = []
         if date_from and start is None:
-            errors.append(u"起始时间“{}”无法识别，本次查询已忽略该条件。".format(date_from))
+            errors.append(translate_stock(
+                u"From date \u201c{}\u201d is not recognised; this filter was ignored.".format(date_from)))
         if date_to and end is None:
-            errors.append(u"截止时间“{}”无法识别，本次查询已忽略该条件。".format(date_to))
+            errors.append(translate_stock(
+                u"To date \u201c{}\u201d is not recognised; this filter was ignored.".format(date_to)))
         if start is not None and end is not None and start > end:
-            errors.append(u"起始时间晚于截止时间，本次查询结果为空。")
+            errors.append(translate_stock(
+                u"The from date is later than the to date; the result is empty."))
 
         return {
             "date_from": date_from,
@@ -413,15 +429,17 @@ class StockUsageReportMixin(object):
     # 中文注释：带数字的复合句子集中在这里拼装，模板内不出现中文。
 
     def summary_text(self, summary, page, pages):
-        return u"记录 {} 条；涉及批次 {} 个；领用合计 {}；归还合计 {}；第 {} / {} 页。".format(
-            summary.get("record_count", 0),
-            summary.get("batch_count", 0),
-            summary.get("consume_total", u"0.00"),
-            summary.get("return_total", u"0.00"),
-            page, pages)
+        return translate_stock(
+            u"{} record(s); {} batch(es); total consumed {}; "
+            u"total returned {}; page {} / {}.".format(
+                summary.get("record_count", 0),
+                summary.get("batch_count", 0),
+                summary.get("consume_total", u"0.00"),
+                summary.get("return_total", u"0.00"),
+                page, pages))
 
     def page_indicator(self, page, pages):
-        return u"第 {} / {} 页".format(page, pages)
+        return translate_stock(u"Page {} / {}".format(page, pages))
 
     # ------------------------------------------------------------ 下拉选项
 
@@ -455,7 +473,7 @@ class StockUsageTraceView(StockUsageTraceMixin, StockUsageBaseView):
     DEFAULT_PAGE_SIZE = 10
 
     def page_title(self):
-        return u"库存使用记录追溯"
+        return translate_stock(u"Stock Usage Trace")
 
     def results(self):
         return self.trace_result()
@@ -467,10 +485,10 @@ class StockUsageReportView(StockUsageReportMixin, StockUsageBaseView):
     DEFAULT_PAGE_SIZE = 50
 
     def page_title(self):
-        return u"使用记录查询与导出"
+        return translate_stock(u"Usage Query and Export")
 
     def columns(self):
-        return REPORT_COLUMNS
+        return translated_columns(REPORT_COLUMNS)
 
     def results(self):
         filters = self.filters()
@@ -492,7 +510,7 @@ class StockUsageExportView(StockUsageReportMixin, StockUsageBaseView):
 
     def __call__(self):
         rows = self.display_rows()
-        headers = [title for (key, title) in REPORT_COLUMNS]
+        headers = [title for (key, title) in translated_columns(REPORT_COLUMNS)]
         data = []
         for row in rows:
             data.append([row.get(key, u"") for (key, title) in REPORT_COLUMNS])
@@ -524,7 +542,7 @@ class StockUsageSetupView(BrowserView):
         messages = context.plone_utils.addPortalMessage
 
         if api.get_portal_type(context) != "StockManager":
-            messages(_("Not a Stock Manager."), "warning")
+            messages(translate_stock(u"Not a Stock Manager."), "warning")
             return self.request.response.redirect(api.get_url(context))
 
         types_tool = api.get_tool("portal_types")
@@ -542,21 +560,24 @@ class StockUsageSetupView(BrowserView):
             created.append(obj_id)
 
         if missing_types:
+            # 中文注释：这些提示必须走本包翻译域（translate_stock），
+            # 用 bika.lims 域的 _() 在中文站会原样漏出英文。
             messages(
-                _(u"Missing portal types: ${types}. Please reinstall "
-                  u"maitux.stock from the Add-ons control panel first.",
-                  mapping={"types": u", ".join(missing_types)}),
+                translate_stock(
+                    u"Missing portal types: {0}. Please reinstall "
+                    u"maitux.stock from the Add-ons control panel first."
+                ).format(u", ".join(missing_types)),
                 "error")
         if created:
             messages(
-                _(u"Created: ${items}", mapping={"items": u", ".join(created)}),
+                translate_stock(u"Created: {0}").format(u", ".join(created)),
                 "info")
         if existing:
             messages(
-                _(u"Already present: ${items}",
-                  mapping={"items": u", ".join(existing)}),
+                translate_stock(u"Already present: {0}").format(
+                    u", ".join(existing)),
                 "info")
         if not created and not existing and not missing_types:
-            messages(_("No changes made."), "warning")
+            messages(translate_stock(u"No changes made."), "warning")
 
         return self.request.response.redirect(api.get_url(context))

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from maitux.stability import stabilityMessageFactory as _
+from maitux.stability.title import TranslatableTitleMixin
 from plone.autoform import directives
 from plone.supermodel import model
 from senaite.core.catalog import SETUP_CATALOG
@@ -16,7 +18,6 @@ from zope.interface import invariant
 from zope.schema.vocabulary import SimpleTerm
 from zope.schema.vocabulary import SimpleVocabulary
 
-from maitux.stability import _
 from maitux.stability.interfaces import IStabilityTimepointTask
 
 
@@ -242,6 +243,6 @@ class IStabilityTimepointTaskSchema(model.Schema):
 
 
 @implementer(IStabilityTimepointTask, IStabilityTimepointTaskSchema)
-class StabilityTimepointTask(Item):
+class StabilityTimepointTask(TranslatableTitleMixin, Item):
     _catalogs = [SETUP_CATALOG]
 

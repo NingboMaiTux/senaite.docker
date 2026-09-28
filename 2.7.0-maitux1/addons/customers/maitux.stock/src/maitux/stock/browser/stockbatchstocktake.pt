@@ -9,7 +9,7 @@
     <tal:block tal:define="batches python:view.get_batches();
                            errors python:request.get('stocktake_errors', [])">
       <div class="mb-3">
-        <h1 i18n:translate="">Stocktake Batches</h1>
+        <h1 i18n:translate="">Stock Take</h1>
       </div>
 
       <form method="post" tal:attributes="action string:${context/absolute_url}/@@stockbatch_stocktake">

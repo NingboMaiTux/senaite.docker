@@ -16,6 +16,7 @@ from maitux.hazardcategories.utils import SCOPE_AR
 from maitux.hazardcategories.utils import SCOPE_BOTH
 from maitux.hazardcategories.utils import SCOPE_REFERENCE
 from maitux.hazardcategories.utils import USAGE_SCOPE_LABELS
+from maitux.hazardcategories.utils import get_container
 from maitux.hazardcategories.utils import get_scope_label
 
 
@@ -179,27 +180,10 @@ class HazardCategoriesListingView(ListingView):
         return result
 
     def get_objects_from_folder(self):
-        try:
-            folder = api.get_parent(self.context)
-            if getattr(folder, "portal_type", None) not in (
-                    "HazardCategories", "Folder"):
-                folder = self.context
-        except Exception:
-            folder = self.context
-
-        pt = getattr(folder, "portal_type", None)
-        if pt in ("HazardCategories", "Folder"):
-            container = folder
-        else:
-            try:
-                portal = api.get_portal()
-                container = portal.get("hazard_categories")
-            except Exception:
-                container = None
-
-        out = []
+        container = get_container()
         if container is None:
-            return out
+            return []
+        out = []
         try:
             ids = list(container.objectIds())
         except Exception:
