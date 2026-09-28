@@ -5,11 +5,13 @@
     "人定字段：shape / params / purpose / since —— 代码里没有等价物，门禁核不了（SPEC Q4 已知边界），出处见 Docs/Cal增加/maitux.calcenhance-函数清单-基线对账.md §1b。",
     "shape 指函数在**列表引擎**里返回什么（D2）；标量引擎每个字段只产出一个值，没有消费方读它。",
     "params：一个列表；只有两表调用约定不同的 6 个（max min sum avg stdev COALESCE）写成 {\"scalar\": [...], \"list\": [...]}（D1）。optional / variadic 缺省为 false。",
+    "每个 kind=field_name 参数带 reads_from：这个字段从哪几个 as_name 参数指的源上取（逐个核过 patches.py 的 _make_lookup / _xagg_collect / _xagg_collect_columns）。读两组源就写两个：XAGG_*_OFSUM 的 key_kw 同时读名单源与数据源，XAGG_KEYS_WHERE2 的 filter_kw 只读筛选那一组。",
+    "absent_ok：源 AS 上**没有**这个字段是合法的 —— 引擎给那几行一个空段并 WARN（只有 *2 系列的 key2_kw 是这样，_xagg_dual_collect）。★ 与 optional 不是一回事：optional 说的是「调用时这个实参可以不写」（LOOKUP 的 default），absent_ok 说的是「源上可以没有这一列」。",
     "since：README「新增函数」表首次登记的版本；与 git 冲突时以 git 为准（D4）；1.3.1 以前 git 无历史，只能信 README。",
     "internal: true 的条目（_Fixed）不是给公式用的函数（D3）：面向公式作者的地方（in_engine / by_purpose / README 总表 / §6.3）一律跳过；对外口径 = 96 个函数 + 1 个内部名。",
     "加函数 = 同一个 commit 在这里登记；不登记 calcfuncs.py --check 就 ABORT。"
   ],
-  "engine_version": "1.18.0",
+  "engine_version": "1.19.0",
   "shape_vocab": {
     "scalar": "吃整列（或多个值），恒返回一个值",
     "column": "恒返回 list（每行一格，或行空间那一列）",
@@ -344,8 +346,8 @@
       "array_path": false,
       "params": [
         {"name": "source_kw", "kind": "as_name"},
-        {"name": "target_kw", "kind": "field_name"},
-        {"name": "key_kw", "kind": "field_name"},
+        {"name": "target_kw", "kind": "field_name", "reads_from": ["source_kw"]},
+        {"name": "key_kw", "kind": "field_name", "reads_from": ["source_kw"]},
         {"name": "key_val", "kind": "scalar"},
         {"name": "default", "kind": "literal", "optional": true}
       ],
@@ -358,10 +360,10 @@
       "array_path": false,
       "params": [
         {"name": "source_kw", "kind": "as_name"},
-        {"name": "target_kw", "kind": "field_name"},
-        {"name": "key1_kw", "kind": "field_name"},
+        {"name": "target_kw", "kind": "field_name", "reads_from": ["source_kw"]},
+        {"name": "key1_kw", "kind": "field_name", "reads_from": ["source_kw"]},
         {"name": "key1_val", "kind": "scalar"},
-        {"name": "key2_kw", "kind": "field_name"},
+        {"name": "key2_kw", "kind": "field_name", "reads_from": ["source_kw"]},
         {"name": "key2_val", "kind": "scalar"},
         {"name": "default", "kind": "literal", "optional": true}
       ],
@@ -638,7 +640,7 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "field_kw", "kind": "field_name"},
+        {"name": "field_kw", "kind": "field_name", "reads_from": ["source_kws"]},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
       "purpose": ["跨AS聚合", "行空间"],
@@ -660,8 +662,8 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "key_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key_kw", "kind": "field_name", "reads_from": ["source_kws"]},
         {"name": "row_keys", "kind": "column"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -673,8 +675,8 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "key_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key_kw", "kind": "field_name", "reads_from": ["source_kws"]},
         {"name": "row_keys", "kind": "column"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -686,8 +688,8 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "key_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key_kw", "kind": "field_name", "reads_from": ["source_kws"]},
         {"name": "row_keys", "kind": "column"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -699,8 +701,8 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "key_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key_kw", "kind": "field_name", "reads_from": ["source_kws"]},
         {"name": "row_keys", "kind": "column"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -712,8 +714,8 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "key_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key_kw", "kind": "field_name", "reads_from": ["source_kws"]},
         {"name": "row_keys", "kind": "column"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -725,9 +727,9 @@
       "shape": "scalar",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "group_kw", "kind": "field_name"},
-        {"name": "key_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "group_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key_kw", "kind": "field_name", "reads_from": ["whitelist_kw", "source_kws"]},
         {"name": "whitelist_kw", "kind": "as_name"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -739,9 +741,9 @@
       "shape": "scalar",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "group_kw", "kind": "field_name"},
-        {"name": "key_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "group_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key_kw", "kind": "field_name", "reads_from": ["whitelist_kw", "source_kws"]},
         {"name": "whitelist_kw", "kind": "as_name"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -753,9 +755,9 @@
       "shape": "scalar",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "group_kw", "kind": "field_name"},
-        {"name": "key_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "group_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key_kw", "kind": "field_name", "reads_from": ["whitelist_kw", "source_kws"]},
         {"name": "whitelist_kw", "kind": "as_name"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -767,9 +769,9 @@
       "shape": "scalar",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "group_kw", "kind": "field_name"},
-        {"name": "key_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "group_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key_kw", "kind": "field_name", "reads_from": ["whitelist_kw", "source_kws"]},
         {"name": "whitelist_kw", "kind": "as_name"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -781,9 +783,9 @@
       "shape": "scalar",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "group_kw", "kind": "field_name"},
-        {"name": "key_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "group_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key_kw", "kind": "field_name", "reads_from": ["whitelist_kw", "source_kws"]},
         {"name": "whitelist_kw", "kind": "as_name"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -795,8 +797,8 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "key1_kw", "kind": "field_name"},
-        {"name": "key2_kw", "kind": "field_name"},
+        {"name": "key1_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key2_kw", "kind": "field_name", "reads_from": ["source_kws"], "absent_ok": true},
         {"name": "part", "kind": "literal"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -808,11 +810,11 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "key1_kw", "kind": "field_name"},
-        {"name": "key2_kw", "kind": "field_name"},
+        {"name": "key1_kw", "kind": "field_name", "reads_from": ["all_sources", "filtered_sources"]},
+        {"name": "key2_kw", "kind": "field_name", "reads_from": ["all_sources", "filtered_sources"], "absent_ok": true},
         {"name": "part", "kind": "literal"},
         {"name": "all_sources", "kind": "as_name"},
-        {"name": "filter_kw", "kind": "field_name"},
+        {"name": "filter_kw", "kind": "field_name", "reads_from": ["filtered_sources"]},
         {"name": "threshold", "kind": "literal"},
         {"name": "filtered_sources", "kind": "as_name"}
       ],
@@ -824,12 +826,12 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "key1_kw", "kind": "field_name"},
-        {"name": "key2_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key1_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key2_kw", "kind": "field_name", "reads_from": ["source_kws"], "absent_ok": true},
         {"name": "row_keys1", "kind": "column"},
         {"name": "row_keys2", "kind": "column"},
-        {"name": "sort_kw", "kind": "field_name"},
+        {"name": "sort_kw", "kind": "field_name", "reads_from": ["source_kws"]},
         {"name": "nth", "kind": "literal"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
       ],
@@ -841,9 +843,9 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "key1_kw", "kind": "field_name"},
-        {"name": "key2_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key1_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key2_kw", "kind": "field_name", "reads_from": ["source_kws"], "absent_ok": true},
         {"name": "row_keys1", "kind": "column"},
         {"name": "row_keys2", "kind": "column"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
@@ -856,9 +858,9 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "key1_kw", "kind": "field_name"},
-        {"name": "key2_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key1_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key2_kw", "kind": "field_name", "reads_from": ["source_kws"], "absent_ok": true},
         {"name": "row_keys1", "kind": "column"},
         {"name": "row_keys2", "kind": "column"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
@@ -871,9 +873,9 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "key1_kw", "kind": "field_name"},
-        {"name": "key2_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key1_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key2_kw", "kind": "field_name", "reads_from": ["source_kws"], "absent_ok": true},
         {"name": "row_keys1", "kind": "column"},
         {"name": "row_keys2", "kind": "column"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
@@ -886,9 +888,9 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "key1_kw", "kind": "field_name"},
-        {"name": "key2_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key1_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key2_kw", "kind": "field_name", "reads_from": ["source_kws"], "absent_ok": true},
         {"name": "row_keys1", "kind": "column"},
         {"name": "row_keys2", "kind": "column"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
@@ -901,9 +903,9 @@
       "shape": "column",
       "array_path": true,
       "params": [
-        {"name": "value_kw", "kind": "field_name"},
-        {"name": "key1_kw", "kind": "field_name"},
-        {"name": "key2_kw", "kind": "field_name"},
+        {"name": "value_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key1_kw", "kind": "field_name", "reads_from": ["source_kws"]},
+        {"name": "key2_kw", "kind": "field_name", "reads_from": ["source_kws"], "absent_ok": true},
         {"name": "row_keys1", "kind": "column"},
         {"name": "row_keys2", "kind": "column"},
         {"name": "source_kws", "kind": "as_name", "variadic": true}
@@ -967,7 +969,7 @@
       "array_path": false,
       "params": [
         {"name": "source_kw", "kind": "as_name"},
-        {"name": "field_kw", "kind": "field_name"}
+        {"name": "field_kw", "kind": "field_name", "reads_from": ["source_kw"]}
       ],
       "purpose": ["时间", "跨AS取值"],
       "since": "1.17.0"
