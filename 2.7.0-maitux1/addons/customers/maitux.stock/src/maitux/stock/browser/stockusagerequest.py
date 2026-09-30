@@ -95,6 +95,9 @@ class StockUsageRequestsView(ListingView):
         # SENAITE 列表的这些文案是在 Python 里拼进 JSON 的，渲染阶段不会再翻译，
         # 所以硬编码任何一种语言都会让另一种语言显示错（见 maitux/stock/i18n.py）。
         self.title = translate_stock(u"Usage Requests")
+        # 列表页标题图标必须显式给，否则 ListingTableTitleViewlet 回退
+        # get_icon_for(context) 会对无图标的内容类型抛 LocationError
+        self.icon = "senaite_theme/icon/file"
         self.description = translate_stock(
             u"Tick one request, then approve or reject it.")
         self.catalog = "portal_catalog"

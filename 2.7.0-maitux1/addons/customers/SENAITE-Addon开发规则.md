@@ -737,6 +737,40 @@ TypeError: You must specify a provided interface when registering a factory
 
 ---
 
+### R18. 列表视图类必须显式设置 `self.icon`（真实存在的图标名）
+
+**规则**：继承 `senaite.app.listing.ListingView` 的浏览器视图（或它们的基类），
+在 `__init__` 里**必须**给 `self.icon` 赋一个 icons 表里**真实存在**的图标名。
+
+```python
+class StorageConditionsView(BaseStabilityFolderView):
+    def __init__(self, context, request):
+        ...
+        self.title = translate(u"Storage Conditions")
+        self.icon = "senaite_theme/icon/storagelocation"   # ← 必须
+        self.columns = ...
+```
+
+**依据**：`senaite.core` 的 `ListingTableTitleViewlet`（`senaite.core.listings.title`
+viewlet）在渲染列表页标题时读列表视图的 `view.icon`。若 `self.icon` 未设置，会
+**回退**调用 `bootstrap_view.get_icon_for(context)`；对 icon_expr 指向**不存在**图标的
+内容类型（本环境常见 `senaite_theme/icon/folder` —— 图标表里**没有** `folder`），
+该回退抛 `LocationError`，页面上表现为
+`error while rendering senaite.core.listings.title`。
+
+**这是 R9「静默失效」的又一种变体**：lint 过、实例正常起，只有**真人打开列表页**才炸。
+
+**图标名必须真实存在于主题图标表**（不是"觉得应该有"）。实测存在、可安全使用的：
+`file`、`container`、`category`、`storagelocation`、`clientfolder`、`setup`、`hazardous`、
+`report`、`retest`、`warning`、`calculation`、`auditlog` 等。**`folder` 不存在**，不要用。
+
+**判断口诀**：凡是继承 `ListingView` 的类（含自定义中间基类 —— 写一次即覆盖所有子类）
+都要给 `self.icon`；要么直接写，要么在公共基类的 `__init__` 里写、让它被子类继承。
+
+**机器判据**：暂无。靠提交前逐个核查继承 `ListingView` 的类是否设置了 `self.icon`。
+
+---
+
 ### R17. 口令 / Token 不许硬编码，只从环境变量读
 
 **规则**：凭据类的值（口令、共享 Token、API Key）不能以字符串字面量的形式
@@ -797,3 +831,5 @@ PHASE1_INGEST_TOKEN = os.environ.get("PHASE1_INGEST_TOKEN", "").strip()
 - [ ] `<subscriber>` 指向普通函数时用 `handler=`（不是 `factory=`）；用 `factory=` 的一律配了 `provides=`，且函数上没有 `@adapter` 装饰器（R15）
 - [ ] 布尔字段的 `BooleanWidget` 没传 `render_own_label=True`，标签与说明由字段模板渲染（R16）
 - [ ] 代码里没有硬编码的口令 / Token / API Key；凭据一律从环境变量读，默认取空且鉴权处判非空（R17）
+- [ ] 所有继承 `ListingView` 的类（含基类）都显式设置了 `self.icon`，且图标名真实存在于 icons 表（不要用 `folder`）（R18）
+- [ ] `lint_addon.py` 扫描通过（改完 addon、重启容器之前跑一遍）

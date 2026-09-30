@@ -47,6 +47,9 @@ class StockBatchesView(ListingView):
         super(StockBatchesView, self).__init__(context, request)
 
         self.title = translate_stock(u"Stock Batches")
+        # 列表页标题图标必须显式给，否则 ListingTableTitleViewlet 回退
+        # get_icon_for(context) 会对无图标的内容类型抛 LocationError
+        self.icon = "senaite_theme/icon/storagelocation"
         self.catalog = "portal_catalog"
         self.show_search = True
         self.contentFilter = {
