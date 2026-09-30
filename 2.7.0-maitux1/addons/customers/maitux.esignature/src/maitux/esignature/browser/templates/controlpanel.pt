@@ -77,6 +77,7 @@
           <fieldset>
             <legend>Workflow Rule Table</legend>
             <p>Each row represents one workflow electronic signature rule. Use the dropdowns to select portal type, workflow, and transition, and set whether countersign is required.</p>
+            <p>Signer Not Applicant: when enabled, a signer may not be the creator of the document. Countersign already requires two different accounts; this switch additionally blocks the applicant account from being either of them.</p>
             <input type="hidden" id="esign-rules-payload" name="rules_payload" value="[]" />
             <table class="listing" id="esign-rules-table">
               <thead>
@@ -86,6 +87,7 @@
                   <th>Transition</th>
                   <th>Require Signature</th>
                   <th>Countersign</th>
+                  <th>Signer Not Applicant</th>
                   <th>Meaning Required</th>
                   <th>Meaning</th>
                   <th>Reason Required</th>
@@ -94,7 +96,7 @@
               </thead>
               <tbody id="esign-rules-body">
                 <tr>
-                  <td colspan="9">Loading rules...</td>
+                  <td colspan="10">Loading rules...</td>
                 </tr>
               </tbody>
             </table>
@@ -351,6 +353,10 @@
               countersignCell.appendChild(createCheckbox(!!rule.require_countersign, 'js-require-countersign'));
               row.appendChild(countersignCell);
 
+              var initiatorCell = document.createElement('td');
+              initiatorCell.appendChild(createCheckbox(!!rule.disallow_initiator, 'js-disallow-initiator'));
+              row.appendChild(initiatorCell);
+
               var meaningCell = document.createElement('td');
               meaningCell.appendChild(createCheckbox(rule.meaning_required !== false, 'js-meaning-required'));
               row.appendChild(meaningCell);
@@ -402,6 +408,7 @@
                   transition_id: '',
                   signature_required: true,
                   require_countersign: false,
+                  disallow_initiator: false,
                   meaning_required: true,
                   meaning: '',
                   reason_required: true
@@ -443,6 +450,7 @@
                   transition_id: transitionId,
                   signature_required: row.querySelector('.js-signature-required').checked,
                   require_countersign: row.querySelector('.js-require-countersign').checked,
+                  disallow_initiator: row.querySelector('.js-disallow-initiator').checked,
                   meaning_required: meaningRequired,
                   meaning: meaningValue,
                   reason_required: row.querySelector('.js-reason-required').checked

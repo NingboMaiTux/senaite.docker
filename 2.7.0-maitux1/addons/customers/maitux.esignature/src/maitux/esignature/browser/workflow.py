@@ -20,6 +20,7 @@ from Products.Five.browser import BrowserView
 from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
 from senaite.app.listing.adapters.workflow import ListingWorkflowTransition
 from senaite.core.browser.listing.workflow.sample import SampleReceiveWorkflowTransition
+from six import string_types
 from six.moves.urllib.parse import urlencode
 from zope.component.hooks import setSite
 from zope.event import notify
@@ -37,6 +38,7 @@ from maitux.esignature.interfaces import IReAuthenticationProvider
 from maitux.esignature.services.policy import SignaturePolicyResolver
 from maitux.esignature.services.reauth import PasReAuthenticationProvider
 from maitux.esignature.services.signflow import authenticate_countersign_users
+from maitux.esignature.services.signflow import check_signers_against_initiator
 from maitux.esignature.storage.store import SignatureRecordStore
 
 
@@ -81,6 +83,30 @@ def build_receive_redirect_url(context, back_url):
 
 def is_ajax_request(request):
     return request.getHeader("X-Requested-With") == "XMLHttpRequest"
+
+
+def as_user_id(value):
+    """把任意字段值安全地转成用户 id 文本（兼容 py2 的 str/unicode）。
+
+    表单字段可能取到列表（同名参数同时出现在查询串和表单里），此时取第一个
+    非空项，而不是让调用方拿到一个 list 去和字符串比较。
+    """
+    if value is None:
+        return u""
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            item = as_user_id(item)
+            if item:
+                return item
+        return u""
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("utf-8")
+        except Exception:
+            return u""
+    if not isinstance(value, string_types):
+        return u""
+    return value.strip()
 
 
 def redirect_response(request, redirect_url):
@@ -563,6 +589,41 @@ class SignaturePromptView(BrowserView):
     def require_countersign(self):
         return bool(self.policy().get("require_countersign"))
 
+    # 需要校验"签名人不能是发起人"时，用这些字段找发起人。
+    # 顺序是：先看业务字段（例如领用申请单的 applicant），再回落到 Zope 的 Creator。
+    INITIATOR_FIELD_NAMES = ("applicant", "initiator_user_id")
+
+    def initiator_user_id(self):
+        """返回单据发起人（申请人）的 user id。"""
+        for name in self.INITIATOR_FIELD_NAMES:
+            value = as_user_id(getattr(self.context, name, None))
+            if value:
+                return value
+        creator = getattr(self.context, "Creator", None)
+        if callable(creator):
+            try:
+                return as_user_id(creator())
+            except Exception:
+                return u""
+        return u""
+
+    def disallow_initiator(self):
+        """规则表里的职责分离开关：签名人不得为单据发起人。"""
+        return bool(self.policy().get("disallow_initiator"))
+
+    def check_signers_against_initiator(self, signer_user_ids):
+        """校验签名人（可能有两人）都不是发起人；返回错误消息或 None。
+
+        单人签名时工作流守卫已经能拦住"自己审自己"，但**双人复核**的第二个
+        账号是在同一个页面里提交的，守卫只看得到当前登录用户，看不到复核人。
+        所以这个校验必须由签名页来做，并且对两个账号都要做。
+        """
+        return check_signers_against_initiator(
+            signer_user_ids,
+            self.initiator_user_id(),
+            enabled=self.disallow_initiator(),
+        )
+
     def signature_store(self):
         return SignatureRecordStore(api.get_portal())
 
@@ -708,6 +769,22 @@ class SignaturePromptView(BrowserView):
             return self.index()
 
         user_id = self.current_user_id()
+
+        # 先做"签名人不能是发起人"的校验，再去验密码。
+        # 顺序很重要：认证失败在某些后端策略下是有代价的（计数/锁定），
+        # 不该让用户在必然被拒的情况下先白输一遍密码。
+        if policy.get("require_countersign"):
+            submitted_signers = [
+                as_user_id(self.request.get("primary_user_id")),
+                as_user_id(self.request.get("secondary_user_id")),
+            ]
+        else:
+            submitted_signers = [user_id]
+        initiator_error = self.check_signers_against_initiator(submitted_signers)
+        if initiator_error:
+            self.context.plone_utils.addPortalMessage(initiator_error, "error")
+            return self.index()
+
         provider = self.reauth_provider()
         countersign_result = None
         if policy.get("require_countersign"):

@@ -119,6 +119,17 @@ def normalize_rule(rule, defaults=None):
             rule.get("reason_required"),
             defaults.get("reason_required", True),
         ),
+        # 签名人不能是该单据的发起人（例如"审核人不能是申请人"）。
+        # 单人签名时守卫能校验当前用户，但**双人复核**的第二个账号是在同一页面
+        # 提交的，守卫看不到它，所以必须由签名页按这个开关校验。
+        #
+        # 这一项是从诺诚项目工作副本移植过来的：maitux.stock 往规则表里写它，
+        # 若 normalize_rule 不认这个键，写入会被静默丢掉，而 setuphandlers
+        # 读回时 expected["disallow_initiator"] 会直接 KeyError。
+        "disallow_initiator": _as_bool(
+            rule.get("disallow_initiator"),
+            defaults.get("disallow_initiator", False),
+        ),
     }
     return normalized
 
