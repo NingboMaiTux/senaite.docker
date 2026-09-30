@@ -376,6 +376,14 @@ class BaseStabilityFolderView(ListingView):
         }
 
         self.title = translate_stability(self.title_text)
+
+        # 列表页标题图标：**必须给**，否则 senaite.core 的 ListingTableTitleViewlet
+        # 会退回 bootstrap_view.get_icon_for(context)，对本包自定义内容类型因 FTI
+        # 的 icon_expr（senaite_theme/icon/folder，图标表里不存在）解析失败而抛
+        # LocationError，页面上表现为 listingtitle viewlet 报 "error while rendering
+        # senaite.core.listings.title"。（图标名必须是 icons 表里真实存在的）
+        self.icon = "senaite_theme/icon/storagelocation"
+
         self.columns = collections.OrderedDict((
             ("Title", {
                 "title": translate_stability(u"Title"),
@@ -523,6 +531,11 @@ class StabilityPlansView(ListingView):
         }
 
         self.title = translate_stability(u"Stability Plans")
+
+        # 列表页标题图标：与 BaseStabilityFolderView 同理，必须显式给，否则
+        # ListingTableTitleViewlet 回退 get_icon_for(context) 会抛 LocationError
+        self.icon = "senaite_theme/icon/file"
+
         self.columns = collections.OrderedDict((
             ("Title", {
                 "title": translate_stability(u"Title"),

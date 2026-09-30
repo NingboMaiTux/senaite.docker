@@ -35,6 +35,9 @@ class StockItemsView(ListingView):
         }
 
         self.title = translate_stock(u"Stock Items")
+        # 列表页标题图标必须显式给，否则 ListingTableTitleViewlet 回退
+        # get_icon_for(context) 会对无图标的内容类型抛 LocationError
+        self.icon = "senaite_theme/icon/container"
         self.show_select_column = True
 
         self.columns = collections.OrderedDict((
