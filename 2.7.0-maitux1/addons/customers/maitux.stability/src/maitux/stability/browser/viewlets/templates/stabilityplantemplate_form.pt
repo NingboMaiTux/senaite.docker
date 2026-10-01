@@ -228,231 +228,12 @@
       return { root: $root, ctrl: ctrl };
     }
 
-    function getPortalUrl() {
-      var body = document.body;
-      if (body) {
-        var url = body.getAttribute("data-portal-url") || "";
-        if (!url && body.dataset && body.dataset.portalUrl) {
-          url = body.dataset.portalUrl;
-        }
-        if (url) {
-          return url.replace(/\/$/, "");
-        }
-      }
-      if (window.portal_url) {
-        return String(window.portal_url).replace(/\/$/, "");
-      }
-      return "";
-    }
-
-    function getPortalPath() {
-      var portalUrl = getPortalUrl();
-      if (!portalUrl) {
-        return "";
-      }
-      try {
-        return new URL(portalUrl, window.location.origin).pathname.replace(/\/$/, "");
-      } catch (e) {
-        return String(portalUrl).replace(/\/$/, "");
-      }
-    }
-
-    function getLabAnalysisSpecPath() {
-      var portalPath = getPortalPath();
-      if (!portalPath) {
-        return "";
-      }
-      // catalog 的 path 查询需要站点路径，不是完整 URL。
-      return portalPath + "/bika_setup/bika_analysisspecs";
-    }
-
-    function buildLabAnalysisSpecSearchQuery() {
-      var specPath = getLabAnalysisSpecPath();
-      if (!specPath) {
-        return null;
-      }
-      return {
-        path: {
-          query: specPath,
-          level: 0
-        }
-      };
-    }
-
-    function applyAnalysisSpecSearchRestriction(entry) {
-      var query = buildLabAnalysisSpecSearchQuery();
-      if (!query || !entry || !entry.root || !entry.root.length) {
-        return;
-      }
-      entry.root.attr("data-search_query", JSON.stringify(query));
-      if (entry.ctrl && typeof entry.ctrl.set_search_query === "function") {
-        entry.ctrl.set_search_query(query);
-      }
-    }
-
-    // 稳定性计划这里仅允许选择实验室公共检验标准，排除客户私有标准，
-    // 避免同名 Analysis Specification 同时出现在下拉结果里。
-    function restrictPlanDetailsAnalysisSpecSearch() {
-      var query = buildLabAnalysisSpecSearchQuery();
-      if (!query) {
-        return;
-      }
-      getPlanDetailsRows().each(function() {
-        var entry = getRowWidgetRootAndController($(this), "analysis_specification");
-        if (!entry.root || !entry.root.length) {
-          return;
-        }
-        applyAnalysisSpecSearchRestriction(entry);
-      });
-    }
-
-    function restrictAnalysisSpecSearchForTarget(target) {
-      var fieldName = analysisFieldNameFromTarget(target);
-      if (fieldName !== "analysis_specification") {
-        return;
-      }
-      var $row = rowForAnalysisWidget(target);
-      if (!$row.length) {
-        return;
-      }
-      applyAnalysisSpecSearchRestriction(
-        getRowWidgetRootAndController($row, "analysis_specification")
-      );
-    }
-
-    function setRowReferenceEnabled($row, fieldName, enabled) {
-      var entry = getRowWidgetRootAndController($row, fieldName);
-      var $root = entry.root;
-      var $field = findRowField($row, fieldName);
-      if ($root && $root.length) {
-        $root.find("input,button,select,textarea").prop("disabled", !enabled);
-        $root.css("pointer-events", enabled ? "" : "none");
-        $root.css("opacity", enabled ? "" : "0.6");
-      }
-      if ($field.length) {
-        $field.prop("disabled", !enabled);
-      }
-    }
-
-    function clearRowReferenceField($row, fieldName) {
-      var entry = getRowWidgetRootAndController($row, fieldName);
-      var ctrl = entry.ctrl;
-      var $field = findRowField($row, fieldName);
-      if (ctrl && typeof ctrl.set_values === "function") {
-        ctrl.set_values([], { sync: false });
-      }
-      if ($field.length) {
-        $field.val("");
-        $field.trigger("change");
-      }
-      if (entry.root && entry.root.length) {
-        entry.root.attr("data-values", JSON.stringify([]));
-        entry.root.removeAttr("data-records");
-      }
-    }
-
-    function getRowReferenceValue($row, fieldName) {
-      var $field = findRowField($row, fieldName);
-      if ($field.length) {
-        var value = $.trim($field.val() || "");
-        if (value) {
-          return value;
-        }
-      }
-      var entry = getRowWidgetRootAndController($row, fieldName);
-      if (entry.root && entry.root.length) {
-        try {
-          var values = JSON.parse(entry.root.attr("data-values") || "[]");
-          if (values && values.length) {
-            return values[0] || "";
-          }
-        } catch (e) {
-        }
-      }
-      return "";
-    }
-
-    function applyRowAnalysisChoiceRules($row) {
-      var specValue = getRowReferenceValue($row, "analysis_specification");
-      var profileValue = getRowReferenceValue($row, "analysis_profile");
-
-      if (specValue) {
-        if (profileValue) {
-          clearRowReferenceField($row, "analysis_profile");
-        }
-        setRowReferenceEnabled($row, "analysis_profile", false);
-        setRowReferenceEnabled($row, "analysis_specification", true);
-        return;
-      }
-
-      if (profileValue) {
-        setRowReferenceEnabled($row, "analysis_specification", false);
-        setRowReferenceEnabled($row, "analysis_profile", true);
-        return;
-      }
-
-      setRowReferenceEnabled($row, "analysis_specification", true);
-      setRowReferenceEnabled($row, "analysis_profile", true);
-    }
-
-    function applyAnalysisChoiceRules() {
-      getPlanDetailsRows().each(function() {
-        applyRowAnalysisChoiceRules($(this));
-      });
-    }
-
-    function rowForAnalysisWidget(target) {
-      var $target = $(target);
-      var $row = $target.closest("tr[data-index]");
-      if (!$row.length) {
-        return $();
-      }
-      return $row;
-    }
-
-    function analysisFieldNameFromTarget(target) {
-      var $target = $(target);
-      var rawName = $target.attr("data-name") || "";
-      if (!rawName && $target.attr("name")) {
-        rawName = $target.attr("name");
-      }
-      if (!rawName) {
-        var $carrier = $target.closest("[data-name]");
-        rawName = $carrier.attr("data-name") || "";
-      }
-      try {
-        rawName = JSON.parse(rawName);
-      } catch (e) {
-      }
-      if (!rawName) {
-        return "";
-      }
-      if (rawName.slice(-23) === ".analysis_specification") {
-        return "analysis_specification";
-      }
-      if (rawName.slice(-17) === ".analysis_profile") {
-        return "analysis_profile";
-      }
-      return "";
-    }
-
-    function handleAnalysisWidgetInteraction(event) {
-      var fieldName = analysisFieldNameFromTarget(event.target);
-      if (!fieldName) {
-        return;
-      }
-      var $row = rowForAnalysisWidget(event.target);
-      if (!$row.length) {
-        return;
-      }
-      // 组件会异步回写 UID，这里延迟一次统一刷新，保证禁用状态跟着选中结果走。
-      window.setTimeout(function() {
-        applyRowAnalysisChoiceRules($row);
-      }, 50);
-      window.setTimeout(function() {
-        applyRowAnalysisChoiceRules($row);
-      }, 250);
-    }
+    // 说明：这里原有三个函数（getPortalUrl / getPortalPath / getLabAnalysisSpecPath）
+    // 与一段 buildLabAnalysisSpecSearchQuery 逻辑，用于把行上的「检验标准」下拉
+    // 限制在实验室公共标准上（排除客户私有标准、避免同名重复）。
+    // 2026-09-29 需求订正后，明细行不再有「检验标准 / 分析套餐」字段
+    // （检验项一律来自该行的样品模板），这段限制逻辑连同
+    // "选标准就禁用套餐"的互斥逻辑一起删除。
 
     var planDetailsDropdownOverlay = null;
     var planDetailsOverlayActiveRoots = [];
@@ -803,8 +584,9 @@
     ok = setRowFieldValue($row, "orientation", row.orientation || "") && ok;
     ok = setRowFieldValue($row, "timepoint_days", row.timepoint_days == null ? "" : String(row.timepoint_days)) && ok;
     ok = setRowFieldValue($row, "window_days", row.window_days == null ? "" : String(row.window_days)) && ok;
-    ok = setRowReferenceFieldValue($row, "analysis_specification", row.analysis_specification || "", row.analysis_specification_record || null) && ok;
-    ok = setRowReferenceFieldValue($row, "analysis_profile", row.analysis_profile || "", row.analysis_profile_record || null) && ok;
+    // 样品模板：**逐个时间点维护**（行上的"检验标准/分析套餐"已删除），
+    // 复制方案时把它一起带过来（前端 UIDReference 控件要拿到记录才能显示已选内容）。
+    ok = setRowReferenceFieldValue($row, "sample_template", row.sample_template || "", row.sample_template_record || null) && ok;
     ok = setRowReferenceFieldValue($row, "batch", row.batch || "", row.batch_record || null) && ok;
     ok = setRowFieldValue($row, "inspection_quantity", row.inspection_quantity == null ? "" : String(row.inspection_quantity)) && ok;
     ok = setRowFieldValue($row, "notes", row.notes || "") && ok;
@@ -813,7 +595,6 @@
     if (row.detail_status) {
       setRowFieldValue($row, "detail_status", row.detail_status);
     }
-    applyRowAnalysisChoiceRules($row);
   }
   return ok;
 }
@@ -922,6 +703,43 @@
       }
     }
 
+    // 「新建方案」默认预置一行 0 点（B 方案，2026-09-30）。
+    //
+    // 为什么在这里做：明细行是**前端**填进 DataGrid 的（本版本 DataGrid 不渲染
+    // 字段默认值 —— 实测渲染出的表单 plan_details.count=0，只有 TT 原型行）。
+    // 复制 / 按模板建这两个分支各自有预填逻辑，这里补"都不是"的普通新建。
+    //
+    // 口径（与后端一致）：
+    //   * 只在**一行都没有**时插一行 0 点（不覆盖用户已加的行、也不重复插）；
+    //   * 只插一行、时间点选 0，用户可以删（删 0 点行会二次确认）或改成别的时间点；
+    //   * 服务端还有一道兜底（browser/add.py 的 create()），脚本直接 POST 也拿得到 0 点行。
+    function applyPlanInitialRowDefault() {
+      if (!$("body").is(".portaltype-stabilityplans")) {
+        return;
+      }
+      var params = new URLSearchParams(window.location.search || "");
+      if (params.get("copy_from_uid") || params.get("template_uid")) {
+        // 这两个分支自己有预填逻辑（复制源明细 / 模板默认值）
+        return;
+      }
+      if (window.__senaitePlanInitialRowApplied) {
+        return;
+      }
+      if (getPlanDetailsRows().length > 0) {
+        // 已经有行了（用户加的 / 别处填的）—— 绝不重复插
+        return;
+      }
+      var ok = populatePlanDetails([{
+        timepoint_days: 0,
+        window_days: 0,
+        detail_status: "pending_placement",
+        orientation: "upright"
+      }]);
+      if (ok) {
+        window.__senaitePlanInitialRowApplied = true;
+      }
+    }
+
     function applyAll() {
       var $rights = findFieldWrapper("rights");
       if ($rights.length) {
@@ -933,31 +751,13 @@
       }
       applyPlanCopyDefaults();
       applyPlanTemplateDefaults();
-      applyAnalysisChoiceRules();
-      restrictPlanDetailsAnalysisSpecSearch();
+      applyPlanInitialRowDefault();
       bindPlanDetailsDropdownAutoClose();
       bindPlanDetailsDropdownOverlayWatcher();
       bindPlanDetailsDropdownPositionRefresh();
     }
     $(applyAll);
     document.addEventListener("senaite.core.widgets:loaded", applyAll);
-    $(document).on(
-      "change input",
-      ".datagridwidget-body[data-plan-details='1'] [name$='.analysis_specification'], .datagridwidget-body[data-plan-details='1'] [name$='.analysis_profile']",
-      applyAnalysisChoiceRules
-    );
-    $(document).on(
-      "click keyup change",
-      ".datagridwidget-body[data-plan-details='1'] [data-name], .datagridwidget-body[data-plan-details='1'] input, .datagridwidget-body[data-plan-details='1'] button",
-      handleAnalysisWidgetInteraction
-    );
-    $(document).on(
-      "mousedown focusin click",
-      ".datagridwidget-body[data-plan-details='1'] [data-name], .datagridwidget-body[data-plan-details='1'] input, .datagridwidget-body[data-plan-details='1'] button",
-      function(event) {
-        restrictAnalysisSpecSearchForTarget(event.target);
-      }
-    );
     document.body.addEventListener("datagrid:row_added", applyAll);
 
     var tries = 0;

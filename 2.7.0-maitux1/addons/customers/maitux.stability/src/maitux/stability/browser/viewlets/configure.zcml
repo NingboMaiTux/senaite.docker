@@ -1,4 +1,4 @@
-﻿<configure
+<configure
     xmlns="http://namespaces.zope.org/zope"
     xmlns:browser="http://namespaces.zope.org/browser"
     i18n_domain="maitux.stability">
@@ -8,6 +8,35 @@
       name="maitux.stability.stabilityplantemplate_form"
       class=".stabilityplantemplateform.StabilityPlanTemplateFormViewlet"
       manager="plone.app.layout.viewlets.interfaces.IHtmlHead"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"
+      />
+
+  <!-- 方案页/方案编辑页上的「本方案没有 0 点」提示条（B 方案，2026-09-30）：
+       0 点不强制，但没有 0 点就没有基线样品 —— 把这件事摆在方案页上，
+       而不是等用户在看板点「关联已有样品」才被拒。
+       管理器 plone.abovecontentbody 由 senaite 的 main_template 渲染（见
+       senaite/core/browser/main_template/templates/main_template.pt）。 -->
+  <browser:viewlet
+      for="maitux.stability.interfaces.IStabilityPlan"
+      name="maitux.stability.stabilityplan_zero_point"
+      class=".stabilityplanzeropoint.StabilityPlanZeroPointViewlet"
+      manager="plone.app.layout.viewlets.interfaces.IAboveContentBody"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"
+      />
+
+  <!-- 方案页上的「方案状态」面板（阶段 6a）：
+       状态徽标 + 当前可用的暂停/恢复/终止按钮 + 状态变更历史（谁/何时/为什么）。
+       与「没有 0 点」提示条同一个管理器（plone.abovecontentbody）与位置。
+       为什么要有它：列表页的按钮是"列表级"的、拿不到每一行的状态；
+       方案页这里拿得到，所以只显示**当前可用**的动作。
+       另外它还承担需求 A3 —— 状态变更的可读留痕（不用去啃平台审计页）。 -->
+  <browser:viewlet
+      for="maitux.stability.interfaces.IStabilityPlan"
+      name="maitux.stability.stabilityplan_status"
+      class=".stabilityplanstatus.StabilityPlanStatusViewlet"
+      manager="plone.app.layout.viewlets.interfaces.IAboveContentBody"
       permission="zope2.View"
       layer="senaite.core.interfaces.ISenaiteCore"
       />

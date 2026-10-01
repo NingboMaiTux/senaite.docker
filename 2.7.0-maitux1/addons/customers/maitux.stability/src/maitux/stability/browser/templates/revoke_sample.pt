@@ -1,0 +1,97 @@
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      metal:use-macro="here/main_template/macros/master"
+      i18n:domain="maitux.stability">
+  <body>
+    <metal:content fill-slot="content-core">
+      <h1 i18n:translate="">Revoke Sample Registration</h1>
+
+      <div class="alert alert-warning" tal:condition="python:bool(view.problem)">
+        <span tal:content="view/problem">problem</span>
+      </div>
+
+      <tal:block tal:condition="python:view.target is not None">
+        <table class="table table-sm table-striped">
+          <tbody>
+            <tr>
+              <th i18n:translate="">Plan</th>
+              <td><a tal:attributes="href view/target/plan_url"
+                     tal:content="view/target/plan_title">Plan</a></td>
+            </tr>
+            <tr>
+              <th i18n:translate="">Task</th>
+              <td tal:content="view/target/task_title">Task</td>
+            </tr>
+            <tr>
+              <th i18n:translate="">Status</th>
+              <td tal:content="view/target/status_title">Status</td>
+            </tr>
+            <tr>
+              <th i18n:translate="">Sample</th>
+              <td>
+                <tal:block tal:condition="python:bool(view.target.get('sample_url'))">
+                  <a tal:attributes="href view/target/sample_url"
+                     tal:content="view/target/sample_id">SAMPLE</a>
+                </tal:block>
+                <tal:block tal:condition="python:not view.target.get('sample_url')">-</tal:block>
+              </td>
+            </tr>
+            <tr tal:condition="python:bool(view.target.get('revoked_at'))">
+              <th i18n:translate="">Last revoke</th>
+              <td>
+                <span tal:content="view/target/revoked_at">2026-01-01 08:00</span>
+                <span> / </span>
+                <span tal:content="view/target/revoked_by">admin</span>
+                <div class="text-muted" tal:content="view/target/revoke_reason">reason</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="alert alert-info">
+          <div i18n:translate="">
+            Revoking only removes the link between this timepoint and the sample.
+            The sample itself is NOT deleted: if it has to be cancelled, do that
+            from the sample page.
+          </div>
+          <div class="mb-0" i18n:translate="">
+            The status goes back to Pending Placement (or Placed, if a stock batch
+            was already assigned) and the row can be deleted again.
+          </div>
+        </div>
+
+        <div class="alert alert-danger" tal:condition="python:not view.can_revoke()">
+          <span i18n:translate="">This timepoint has no revocable sample registration.</span>
+        </div>
+
+        <form method="post"
+              tal:attributes="action string:${context/absolute_url}/@@revoke_sample">
+          <input tal:replace="structure context/@@authenticator/authenticator"/>
+          <input type="hidden" name="row_ids:list"
+                 tal:attributes="value view/target/row_id"/>
+          <input type="hidden" name="row_uids:list"
+                 tal:attributes="value view/target/expected_uid"/>
+
+          <div class="form-group">
+            <label for="stability-revoke-reason" i18n:translate="">Reason</label>
+            <textarea id="stability-revoke-reason" name="reason" rows="3"
+                      class="form-control" required="required"
+                      tal:content="view/default_reason"></textarea>
+            <small class="form-text text-muted" i18n:translate="">
+              Required. It is stored in the row notes together with who and when.
+            </small>
+          </div>
+
+          <button type="submit" name="button_revoke" value="1"
+                  class="btn btn-danger btn-sm"
+                  tal:attributes="disabled python:None if view.can_revoke() else 'disabled'"
+                  i18n:translate="">Revoke Sample Registration</button>
+          <button type="submit" name="button_cancel" value="1"
+                  class="btn btn-secondary btn-sm" i18n:translate="">Cancel</button>
+        </form>
+      </tal:block>
+    </metal:content>
+  </body>
+</html>

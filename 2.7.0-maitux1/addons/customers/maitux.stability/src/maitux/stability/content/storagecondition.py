@@ -4,6 +4,7 @@ from bika.lims.interfaces import IDeactivable
 from plone.supermodel import model
 from senaite.core.catalog import SETUP_CATALOG
 from senaite.core.content.base import Container
+from senaite.core.interfaces import IMultiCatalogBehavior
 from zope import schema
 from zope.interface import implementer
 
@@ -22,7 +23,8 @@ class IStorageConditionSchema(model.Schema):
     )
 
 
-@implementer(IStorageCondition, IStorageConditionSchema, IDeactivable)
+@implementer(IStorageCondition, IStorageConditionSchema, IDeactivable,
+             IMultiCatalogBehavior)
 class StorageCondition(Container):
     _catalogs = [SETUP_CATALOG]
 

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Site Setup 入口：Site Setup → Products → "Stability Sample Automation"
+     （与 maitux.esignature 的 controlpanel.xml 同一套路）。
+
+     ⚠️ title 必须 ASCII（开发规则 R9b）：CMFCore 的 actions 导入器会把 title
+        包成 Message()，含中文的字节串在 py2 下会 UnicodeDecodeError，
+        而它是**渲染期**才炸、且落在每页都渲染的分类里时整站打不开。
+        中文名走 locales/ 的 zh 翻译。
+
+     url_expr 指向 browser/controlpanel.py 里的页面（该页面用 zope2.View 注册 +
+     页面内二次校验，原因见该文件的模块注释）。 -->
+<object name="portal_controlpanel" meta_type="Plone Control Panel Tool">
+
+  <configlet
+      title="Stability Sample Automation"
+      action_id="maitux.stability.sampleautomation"
+      appId="maitux.stability"
+      category="Products"
+      condition_expr=""
+      icon_expr=""
+      url_expr="string:${portal_url}/@@stability-automation-controlpanel"
+      visible="True">
+    <permission>maitux.stability: Manage Sample Automation</permission>
+  </configlet>
+
+</object>

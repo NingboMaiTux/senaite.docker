@@ -1,6 +1,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml"
       xmlns:tal="http://xml.zope.org/namespaces/tal"
       xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
       metal:use-macro="here/main_template/macros/master"
       i18n:domain="maitux.stability">
 
@@ -138,6 +139,28 @@
         <div class="label" i18n:translate="">In Progress</div>
         <div class="value" tal:content="python:view.stats.get('in_progress', 0)">0</div>
       </div>
+      <!-- 阶段 6c：作废行单独一张卡（它们默认不出现在列表里，
+           这张卡让人知道"这个方案有几行被作废了"）。 -->
+      <div class="stability-board-card voided">
+        <div class="label" i18n:translate="">Discarded</div>
+        <div class="value" tal:content="python:view.stats.get('voided', 0)">0</div>
+      </div>
+    </div>
+
+    <!-- 没有 0 点行的方案（B 方案，2026-09-30）：
+         0 点不强制，但没有 0 点就没有基线样品 —— 看板上先说清，
+         免得用户勾了行点「关联已有样品」才被拒。 -->
+    <div class="alert alert-warning stability-board-zero-point-notice"
+         tal:condition="python:bool(view.plans_without_zero_point)">
+      <strong i18n:translate="">These plans have no zero point row:</strong>
+      <span tal:content="python:u', '.join(view.plans_without_zero_point)">plan</span>
+      <span tal:condition="python:bool(view.plans_without_zero_point_suffix())"
+            tal:content="python:view.plans_without_zero_point_suffix()">(2 plans in total)</span>
+      <div class="mb-0" i18n:translate="">
+        Without a zero point (Timepoint (Months) = 0) no past sample can be linked
+        as the baseline of these plans. Add a row with Timepoint (Months) = 0 to
+        each of them.
+      </div>
     </div>
 
     <div class="stability-board-toolbar">
@@ -147,10 +170,21 @@
            tal:attributes="href f/url; class python:'btn btn-sm btn-outline-secondary %s' % ('active' if f.get('active') else '')"
            tal:content="f/title">All</a>
       </div>
+      <!-- 阶段 6a：**方案状态**过滤 —— 与上面的"行状态"是两个维度。
+           默认 Active Plans = 不显示已终止方案的行（需求第 2 轮第 6 条：
+           "看板上可以不显示，或者默认不显示，在条件里面可以显示出来"）；
+           已**暂停**的方案仍然显示（它的时间点还被人看，解冻后要接着做）。 -->
+      <div class="stability-status-filters" role="group"
+           i18n:attributes="aria-label" aria-label="Plan status filters">
+        <a tal:repeat="f python:view.get_plan_state_filter_buttons()"
+           tal:attributes="href f/url; class python:'btn btn-sm btn-outline-info %s' % ('active' if f.get('active') else '')"
+           tal:content="f/title">Active Plans</a>
+      </div>
       <form class="stability-search-form"
             method="get"
             tal:attributes="action string:${context/absolute_url}/@@task_board">
         <input type="hidden" name="status_filter" tal:condition="python:view.status_filter != 'all'" tal:attributes="value view/status_filter"/>
+        <input type="hidden" name="plan_state_filter" tal:condition="python:view.plan_state_filter != view.PLAN_STATE_FILTER_DEFAULT" tal:attributes="value view/plan_state_filter"/>
         <input type="hidden" name="sort_on" tal:attributes="value view/sort_on"/>
         <input type="hidden" name="sort_order" tal:attributes="value view/sort_order"/>
         <input type="text"
@@ -167,13 +201,22 @@
           method="GET"
           tal:attributes="action string:${context/absolute_url}/@@task_board;
                           data-msg-select-one python:view.get_js_messages().get('select_one', '');
-                          data-msg-pending-only python:view.get_js_messages().get('pending_only', '')">
+                          data-msg-pending-only python:view.get_js_messages().get('pending_only', '');
+                          data-msg-zero-point-only python:view.get_js_messages().get('zero_point_only', '')">
       <input type="hidden" name="status_filter" tal:attributes="value view/status_filter"/>
+      <input type="hidden" name="plan_state_filter" tal:attributes="value view/plan_state_filter"/>
       <input type="hidden" name="plan_query" tal:attributes="value view/plan_query"/>
       <input type="hidden" name="sort_on" tal:attributes="value view/sort_on"/>
       <input type="hidden" name="sort_order" tal:attributes="value view/sort_order"/>
 
       <h2 i18n:translate="">Timepoint Tasks</h2>
+      <!-- 阶段 6a 冻结（2026-09-30 补齐界面层）：
+           列表里只要出现"已暂停 / 已终止方案"的行，就把话说在前面 ——
+           那些行**勾都勾不上**（见下面复选框的 disabled），
+           行级「撤销」链接也不会出现。不解释的话用户会以为看板坏了。 -->
+      <div class="alert alert-warning stability-board-frozen-note py-2"
+           tal:condition="python:view.has_frozen_rows()"
+           i18n:translate="">Paused or terminated plans are frozen: their timepoints cannot be modified.</div>
       <table class="table table-striped table-hover stability-task-table">
         <thead>
           <tr>
@@ -202,6 +245,7 @@
                  tal:content="python:view.sort_header('window_end', 'Window End')">Window End</a>
             </th>
             <th i18n:translate="">Status</th>
+            <th i18n:translate="">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -209,9 +253,17 @@
             <td>
               <input type="checkbox"
                      name="row_ids:list"
-                     tal:attributes="value python:row.get('row_id', ''); data-status row/status; disabled python:not bool(row.get('row_id'))"/>
+                     tal:attributes="value python:row.get('row_id', ''); data-status row/status; data-frozen python:'1' if row.get('plan_frozen') else '0'; data-expired python:'1' if row.get('is_expired') else '0'; data-zero-point python:'1' if row.get('zero_point') else '0'; title python:view.frozen_note() if row.get('plan_frozen') else None; disabled python:None if row.get('can_select') else 'disabled'"/>
             </td>
-            <td><a tal:attributes="href row/plan_url" tal:content="row/plan_title">Plan</a></td>
+            <td>
+              <a tal:attributes="href row/plan_url" tal:content="row/plan_title">Plan</a>
+              <!-- 阶段 6a：方案被暂停时在行上标出来 ——
+                   否则用户会奇怪"为什么这一行的按钮点不动"。
+                   （已终止的方案默认根本不显示，见 _get_rows 的 PLAN_STATE_FILTER_DEFAULT） -->
+              <span class="badge badge-warning ml-1"
+                    tal:condition="python:row.get('plan_frozen')"
+                    tal:content="row/plan_state_title">Paused</span>
+            </td>
             <td tal:content="row/task_title">Task</td>
             <td>
               <tal:block tal:condition="python:bool(row.get('sample_url'))">
@@ -222,7 +274,10 @@
             <td tal:content="python:row.get('stock_batch_title') or '-'">-</td>
             <td tal:content="row/timepoint_months">0</td>
             <td tal:content="row/window_days">0</td>
-            <td tal:attributes="class python:'stability-overdue' if row.get('is_overdue') else ''"
+            <!-- 阶段 6b：过期标记改用"今天 > 窗口结束日 且还没登样"的判据
+                 （唯一实现在 automation.row_is_expired；旧口径是"目标日期 < 现在"，
+                 会连已经登过样的行一起算成过期）。 -->
+            <td tal:attributes="class python:'stability-overdue' if row.get('is_expired') else ''"
                 tal:content="row/target_date">-</td>
             <td tal:content="row/window_start">-</td>
             <td tal:content="row/window_end">-</td>
@@ -230,10 +285,39 @@
               <span class="stability-status-pill"
                     tal:attributes="class python:'stability-status-pill %s' % row.get('status', '')"
                     tal:content="row/status_title">Status</span>
+              <!-- 「已过期」是**计算状态**，不是行状态值 —— 所以单独一个徽标，
+                   不覆盖上面那颗行状态药丸（两者都有意义：一个是"还没登样"，
+                   一个是"窗口已经过了"）。 -->
+              <span class="badge badge-danger ml-1"
+                    tal:condition="python:row.get('is_expired')"
+                    i18n:translate="">Expired</span>
+              <!-- 阶段 6c：「已作废」（软删除）。作废行**只在"已作废"筛选下出现**
+                   （见 _filter_rows），出现时也是只读的：没有任何操作入口。
+                   悬停提示里带上"谁、什么时候、为什么"，省得再去翻审计页。 -->
+              <span class="badge badge-secondary ml-1 stability-voided-badge"
+                    tal:condition="python:row.get('is_voided')"
+                    tal:attributes="title python:view.voided_title(row)"
+                    i18n:translate="">Discarded</span>
+            </td>
+            <td>
+              <!-- 行级「撤销登样」（阶段 4）：只有"有样品、且不是已完成"的行才有。
+                   撤销要求填原因，所以不在这里直接提交，跳到专门的确认页。 -->
+              <tal:block tal:condition="python:bool(row.get('can_revoke'))">
+                <a class="stability-revoke-link"
+                   tal:attributes="href row/revoke_url"
+                   i18n:translate="">Revoke</a>
+              </tal:block>
+              <!-- 阶段 6d：**行级「作废时间点」入口已撤掉**（用户 2026-09-30：
+                   "作废这个功能还是不要吧，这个界面的删除改成状态删除就行了"）。
+                   现在的口径：删除只在**方案编辑页**做，删掉即"状态删除"（废弃），
+                   留审计、默认在看板隐藏、用「已废弃」筛选查。
+                   这里只剩「撤销登样」一个行级入口，没有别的就给个 "-"。 -->
+              <tal:block
+                  tal:condition="python:not row.get('can_revoke')">-</tal:block>
             </td>
           </tr>
           <tr tal:condition="python:not view.rows">
-            <td colspan="11" i18n:translate="">No task data available</td>
+            <td colspan="12" i18n:translate="">No task data available</td>
           </tr>
         </tbody>
       </table>
@@ -253,17 +337,33 @@
                 class="btn btn-primary btn-sm"
                 name="bulk_action"
                 value="link_sample"
-                onclick="return validateSelectionRequired();"
+                onclick="return validateZeroPointSelection();"
                 i18n:translate="">
           Link Existing Sample
         </button>
+        <!-- 创建样品：按**该时间点行的样品模板**（及其检验项）建样。
+             行上原有的「检验标准 / 分析套餐」已删除（2026-09-29 需求订正）。
+             只在列表里有行配了样品模板时出现。 -->
         <button type="submit"
                 class="btn btn-primary btn-sm"
                 name="bulk_action"
                 value="create_sample"
+                tal:condition="python:view.can_generate_samples()"
                 onclick="return validateSelectionRequired();"
                 i18n:translate="">
           Create Sample
+        </button>
+        <!-- 「生成到期样品」（阶段 4）：与定时入口同一份判据，
+             只把"当天的生成时刻"这道门去掉（目标日期到了就生成）；
+             范围 = 勾选行所属的方案；仍要求方案开着自动登样。 -->
+        <button type="submit"
+                class="btn btn-outline-primary btn-sm"
+                name="bulk_action"
+                value="generate_due"
+                tal:condition="python:view.can_generate_due()"
+                onclick="return validateSelectionRequired();"
+                i18n:translate="">
+          Generate Due Samples
         </button>
       </div>
     </form>
@@ -276,7 +376,8 @@
         }
         return {
           selectOne: form.getAttribute('data-msg-select-one') || '',
-          pendingOnly: form.getAttribute('data-msg-pending-only') || ''
+          pendingOnly: form.getAttribute('data-msg-pending-only') || '',
+          zeroPointOnly: form.getAttribute('data-msg-zero-point-only') || ''
         };
       }
 
@@ -301,22 +402,50 @@
       function validatePendingSelection() {
         var checkboxes = document.getElementsByName('row_ids:list');
         var hasAny = false;
-        var hasPending = false;
+        var hasPlaceable = false;
         for (var i = 0; i < checkboxes.length; i++) {
           if (!checkboxes[i].checked) {
             continue;
           }
           hasAny = true;
-          if (checkboxes[i].getAttribute('data-status') === 'pending_placement') {
-            hasPending = true;
+          // 「样品放置」允许"还没登样"的行：待放置 / 已放置（可改批次）。
+          var status = checkboxes[i].getAttribute('data-status');
+          if (status === 'pending_placement' || status === 'placed') {
+            hasPlaceable = true;
           }
         }
         if (!hasAny) {
           alert(stabilityBoardMessages().selectOne);
           return false;
         }
-        if (!hasPending) {
+        if (!hasPlaceable) {
           alert(stabilityBoardMessages().pendingOnly);
+          return false;
+        }
+        return true;
+      }
+
+      function validateZeroPointSelection() {
+        /* 「关联已有样品」只对**零点行**有意义（阶段 3）：其余时间点该走「创建样品」。
+           前端只做提示，真正的判据在服务端（handle_bulk_action + link_sample_to_row）。 */
+        var checkboxes = document.getElementsByName('row_ids:list');
+        var hasAny = false;
+        var hasZeroPoint = false;
+        for (var i = 0; i < checkboxes.length; i++) {
+          if (!checkboxes[i].checked) {
+            continue;
+          }
+          hasAny = true;
+          if (checkboxes[i].getAttribute('data-zero-point') === '1') {
+            hasZeroPoint = true;
+          }
+        }
+        if (!hasAny) {
+          alert(stabilityBoardMessages().selectOne);
+          return false;
+        }
+        if (!hasZeroPoint) {
+          alert(stabilityBoardMessages().zeroPointOnly);
           return false;
         }
         return true;

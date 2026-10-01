@@ -23,6 +23,9 @@ from datetime import datetime
 from bika.lims import api
 from DateTime import DateTime
 
+from maitux.stability.plandetails import DETAIL_ROW_DEFAULTS as _PLANDETAIL_ROW_DEFAULTS
+from maitux.stability.plandetails import DETAIL_ROW_KEYS as _PLANDETAIL_ROW_KEYS
+from maitux.stability.timepoints import is_voided
 from maitux.stability.title import strip_copy_suffix
 
 
@@ -44,46 +47,46 @@ COPY_SUFFIX = u"Copy"
 DETAIL_STATUS_DEFAULT = "pending_placement"
 
 # 复制明细时需要重置的字段与重置值：
+#   detail_uid       -> 清空。行标识是"方案内"的身份，复制出来的是一批**新行**，
+#                       不能继承源方案的行 id（否则两个方案的明细行会同 id，
+#                       任务对象也会跟着串）。保存时由订阅器重新分配。
 #   detail_status    -> 回到"待放置"，避免新方案直接继承旧方案的进度；
 #   analysis_request -> 旧方案已关联的样品（新方案要重新排样）；
 #   stock_batch      -> 旧方案已排的库存批次。
 DETAIL_RESET_VALUES = {
+    "detail_uid": u"",
     "detail_status": DETAIL_STATUS_DEFAULT,
     "analysis_request": u"",
     "stock_batch": u"",
+    # 撤销登样的审计（阶段 4）：复制出来的是**一批新行**，
+    # 源行的"被撤销过"是源方案的历史，不能跟着新方案（否则新方案一出生就带撤销痕迹）。
+    "revoked_at": u"",
+    "revoked_by": u"",
+    "revoke_reason": u"",
+    # 作废三件套（阶段 6c）：作废行根本不会被复制（见 build_copy_rows），
+    # 这里再清一次是**防御性**的 —— 万一历史数据里混进行（例如手工改过库），
+    # 也不能让新方案一出生就带"已作废"的章。
+    "voided_at": u"",
+    "voided_by": u"",
+    "void_reason": u"",
 }
 
 # IStabilityPlanDetailSchema 的字段全集。
 # 历史数据可能缺列，而 DataGrid 的行校验要求每一列都存在，
 # 所以复制时统一补齐（缺的用下面的默认值）。
-DETAIL_ROW_KEYS = (
-    "packaging_specification",
-    "storage_condition",
-    "orientation",
-    "timepoint_days",
-    "window_days",
-    "analysis_specification",
-    "analysis_profile",
-    "analysis_request",
-    "inspection_quantity",
-    "batch",
-    "detail_status",
-    "notes",
-)
+#
+# ★ 2026-09-30：这两份清单挪到 plandetails（与"新建方案预置 0 点行"共用同一份），
+#   本处只做引用 —— 之前 plan_copy 与 add 各写一份，少一列就会静默丢字段。
+DETAIL_ROW_KEYS = _PLANDETAIL_ROW_KEYS
 
-DETAIL_ROW_DEFAULTS = {
-    "window_days": 0,
-    "inspection_quantity": 0,
-    "detail_status": DETAIL_STATUS_DEFAULT,
-}
+DETAIL_ROW_DEFAULTS = _PLANDETAIL_ROW_DEFAULTS
 
 # 明细里需要连同展示记录一起下发给前端的 UID 引用字段
 # （前端 UIDReference 控件只有拿到记录才能显示已选内容）。
 DETAIL_REFERENCE_FIELDS = (
     "packaging_specification",
     "storage_condition",
-    "analysis_specification",
-    "analysis_profile",
+    "sample_template",
     "batch",
 )
 
@@ -274,6 +277,10 @@ def build_copy_rows(plan):
     保留时间点参数（时间点/窗口期/包装规格/贮存条件/检验标准或 Profile/
     批次/检验数量/备注），重置状态并清空样品与库存批次关联。
 
+    ★ 阶段 6c：**作废行不复制**（确认稿 §4 拦截点 12）——
+      作废是"源方案的历史"（那一行我们决定不要了），
+      复制过去只会让新方案一出生就带一堆没用的行。
+
     注意：这里不写 ``*_record`` 之类的展示辅助字段 —— 这些只在
     ``build_copy_data`` 里拼给前端用，不能落进库里。
     """
@@ -281,6 +288,8 @@ def build_copy_rows(plan):
     rows = []
     for row in details:
         if not isinstance(row, dict):
+            continue
+        if is_voided(row):
             continue
 
         new_row = {}

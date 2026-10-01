@@ -1,0 +1,16 @@
+<div xmlns="http://www.w3.org/1999/xhtml"
+     xmlns:tal="http://xml.zope.org/namespaces/tal"
+     xmlns:metal="http://xml.zope.org/namespaces/metal"
+     xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+     i18n:domain="maitux.stability"
+     class="alert alert-warning stability-zero-point-notice">
+
+  <!-- 命名空间必须是 http://xml.zope.org/...（写成 xmlns.zope.org 会让 TAL 完全不执行，
+       页面把模板源码吐给浏览器 —— 2026-09-30 在 zero_point_link.pt 上踩过）。 -->
+  <strong i18n:translate="">Zero Point (baseline) is not defined in this plan.</strong>
+  <div class="mb-0" i18n:translate="">
+    Without a zero point (Timepoint (Months) = 0) no past sample can be linked as
+    the baseline of this plan: add a row with Timepoint (Months) = 0, then use
+    Link Existing Sample on the task board.
+  </div>
+</div>

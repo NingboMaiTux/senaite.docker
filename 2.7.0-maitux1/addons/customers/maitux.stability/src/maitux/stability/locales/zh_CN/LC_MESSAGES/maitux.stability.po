@@ -120,11 +120,7 @@ msgstr "已从选中的方案复制 {0} 条计划明细。"
 msgid "Name"
 msgstr "名称"
 
-msgid "Analysis Specification"
-msgstr "检验标准"
 
-msgid "Analysis Profile"
-msgstr "分析套餐"
 
 msgid "Article"
 msgstr "附件"
@@ -195,11 +191,7 @@ msgstr "研究名称"
 msgid "Unit"
 msgstr "单位"
 
-msgid "Please select either an Analysis Specification or an Analysis Profile."
-msgstr "请选择检验标准或分析套餐（二者选其一）。"
 
-msgid "Please select one Analysis Specification or one Analysis Profile."
-msgstr "请选择一种检验标准或分析套餐（二者只能填一个）。"
 
 msgid "Create Plan"
 msgstr "创建计划"
@@ -255,11 +247,7 @@ msgstr "请选择库存批次..."
 msgid "Select…"
 msgstr "请选择…"
 
-msgid "Spec/Profile"
-msgstr "检验标准/分析套餐"
 
-msgid "(None)"
-msgstr "（无）"
 
 msgid "Sample Type"
 msgstr "样品类型"
@@ -288,8 +276,6 @@ msgstr "未选中待放置的任务。"
 msgid "Selected pending tasks are listed below. Choose a Stock Batch for each task and save."
 msgstr "下面是选中的待放置任务，请为每个任务选择库存批次后保存。"
 
-msgid "Selecting a client refreshes the contact list."
-msgstr "选择客户后会自动刷新联系人列表。"
 
 msgid "Only the most recent samples are listed. A search dialog can be added later."
 msgstr "只列出最近的样品，后续可以加搜索框弹窗选择。"
@@ -297,8 +283,8 @@ msgstr "只列出最近的样品，后续可以加搜索框弹窗选择。"
 msgid "Please select at least one task."
 msgstr "请至少选择一个任务。"
 
-msgid "Sample Placement can only be applied to Pending Placement tasks."
-msgstr "只有“待放置”的任务才能执行样品放置。"
+msgid "Sample Placement can only be applied to timepoints that have not been generated yet."
+msgstr "只有尚未登样的时间点可以做样品放置。"
 
 msgid "No items selected."
 msgstr "未选中任何条目。"
@@ -315,23 +301,11 @@ msgstr "请为每个选中的任务选择库存批次。"
 msgid "Please select an existing sample first."
 msgstr "请先选择一个已有样品。"
 
-msgid "Please select a Client."
-msgstr "请选择客户。"
 
-msgid "Please select a Contact."
-msgstr "请选择联系人。"
 
-msgid "Please select a Sample Type."
-msgstr "请选择样品类型。"
 
-msgid "Client not found."
-msgstr "未找到客户。"
 
-msgid "Cannot create sample in this environment."
-msgstr "当前环境无法创建样品。"
 
-msgid "Created {0} sample(s)."
-msgstr "已创建 {0} 个样品。"
 
 msgid "Linked sample for {0} plan detail row(s)."
 msgstr "已为 {0} 条方案明细关联样品。"
@@ -339,8 +313,8 @@ msgstr "已为 {0} 条方案明细关联样品。"
 msgid "Failed to update Stability Plan details."
 msgstr "更新稳定性方案明细失败。"
 
-msgid "Updated {0} task(s) to In Progress."
-msgstr "已将 {0} 个任务更新为进行中。"
+msgid "Updated {0} timepoint(s) to Placed."
+msgstr "已把 {0} 个时间点更新为「已放置」。"
 
 msgid "Sync done. Created: {0}, Updated: {1}, Deleted: {2}."
 msgstr "同步完成。新增：{0}，更新：{1}，删除：{2}。"
@@ -348,8 +322,6 @@ msgstr "同步完成。新增：{0}，更新：{1}，删除：{2}。"
 msgid "Sync feature is not available."
 msgstr "同步功能不可用。"
 
-msgid "No analyses were created for this sample. Please check the selected Specification/Profile."
-msgstr "该样品未生成任何检验项目，请检查所选的检验标准/分析套餐。"
 
 msgid "You do not have permission to place samples."
 msgstr "您没有执行样品放置的权限。"
@@ -380,3 +352,574 @@ msgstr "基本信息"
 
 msgid "Select..."
 msgstr "请选择……"
+
+msgid "Timepoint ID"
+msgstr "时间点标识"
+
+
+
+msgid "TP {0} (Initial)"
+msgstr "TP {0}（0 点）"
+
+msgid "Sample Automation"
+msgstr "样品自动化"
+
+msgid "Sample Template"
+msgstr "样品模板"
+
+
+msgid "Create samples automatically"
+msgstr "自动登样"
+
+msgid "Plans created from this template inherit this switch. When it is on, samples are created for every timepoint whose target date has arrived; the zero point is not created but linked to an existing sample. Needs the site wide switch to be on as well."
+msgstr "用该模板创建的方案会继承此开关。开启后，凡是目标日期已到的时间点都会自动生成样品；零点不生成样品，而是关联已有样品。还需站点级总开关同时开启。"
+
+msgid "Contact person used when samples are created automatically. A plan may override it."
+msgstr "自动生成样品时使用的联系人，方案上可覆盖。"
+
+msgid "Inherited from the plan template when the plan is created. When it is on, samples are created for every timepoint whose target date has arrived; the zero point is linked to an existing sample instead. The site wide switch must be on as well."
+msgstr "创建方案时从方案模板继承。开启后，凡是目标日期已到的时间点都会自动生成样品；零点改为关联已有样品。站点级总开关也必须开启。"
+
+msgid "Contact person used when samples are created automatically. Defaults to the contact of the plan template."
+msgstr "自动生成样品时使用的联系人，默认取方案模板上的联系人。"
+
+msgid "Stability Sample Automation"
+msgstr "稳定性自动登样"
+
+msgid "Site wide defaults for the automatic sample creation of stability studies. The generation time is read from here, so changing it does not require touching the server scheduler."
+msgstr "稳定性研究自动登样的站点级默认设置。生成时刻从这里读取，改它不需要动服务器上的定时任务。"
+
+msgid "Enable automatic sample creation"
+msgstr "启用自动登样"
+
+msgid "Master switch for the whole site. When it is off, no sample is created automatically; creating samples by hand still works."
+msgstr "全站总开关。关闭后不会自动生成任何样品；手工建样不受影响。"
+
+msgid "Time of day for automatic creation"
+msgstr "每日生成时刻"
+
+msgid "24-hour HH:MM (default 08:00). A timepoint whose target date is today is handled once the current time has passed this value. The scheduled task may run more often; the time is read from this setting, not from the scheduler."
+msgstr "24 小时制 HH:MM，默认 08:00。目标日期是「今天」的时间点，会在当前时间过了这个时刻之后处理。定时任务可以跑得更频繁；时刻以本配置为准，不写死在调度器里。"
+
+msgid "Create samples N days before the target date"
+msgstr "提前多少天生成样品"
+
+msgid "0 = create on the target date itself (default)."
+msgstr "0 = 目标日期当天生成（默认）。"
+
+msgid "Zero point: look-back window (days)"
+msgstr "零点可关联回溯窗口（天）"
+
+msgid "How far back from T0 a sample may be dated to be linked as the zero point sample (default 30)."
+msgstr "零点所关联的往期样品，其样品日期最多可早于 T0 多少天（默认 30）。"
+
+msgid "Generate Samples"
+msgstr "生成样品（登样）"
+
+
+msgid "Planned Sampling Date"
+msgstr "计划取样日期"
+
+msgid "Result"
+msgstr "结果"
+
+msgid "Will be created"
+msgstr "将创建样品"
+
+msgid "Generate"
+msgstr "生成"
+
+msgid "Analyses"
+msgstr "检验项"
+
+msgid "Generated At"
+msgstr "登样时间"
+
+msgid "Generated By"
+msgstr "登样人"
+
+
+msgid "The zero point is not created here: link an existing sample instead."
+msgstr "零点不在这里生成样品，请改用「关联已有样品」。"
+
+msgid "Sample automation is not fully configured for this plan:"
+msgstr "该方案的自动登样配置不完整："
+
+
+msgid "Zero point: link an existing sample instead of creating one."
+msgstr "零点是「关联已有样品」，不新建样品。"
+
+msgid "Only timepoints in Pending Placement can be generated."
+msgstr "只有「待放置」的时间点可以登样。"
+
+msgid "A sample has already been generated for this timepoint."
+msgstr "该时间点已经登过样了。"
+
+msgid "No target date: the plan has no Start Time (T0)."
+msgstr "没有目标日期：方案没有填写起始时间（T0）。"
+
+msgid "The plan details changed since this page was opened. Please select the rows again."
+msgstr "页面打开之后方案明细已被修改，请重新选择时间点。"
+
+msgid "The selected timepoint no longer exists."
+msgstr "所选时间点已不存在。"
+
+msgid "Sample generation failed."
+msgstr "登样失败。"
+
+
+
+msgid "The plan has no Contact."
+msgstr "方案上没有选择联系人。"
+
+
+msgid "The Sample Template has no Sample Type."
+msgstr "样品模板没有样品类型。"
+
+msgid "The Sample Template has no analyses."
+msgstr "样品模板没有配置检验项。"
+
+msgid "Generated {0} sample(s)."
+msgstr "已生成 {0} 个样品。"
+
+msgid "Skipped {0} timepoint(s): {1}"
+msgstr "已跳过 {0} 个时间点：{1}"
+
+msgid "The selected stability plan could not be found (stale reference)."
+msgstr "所选稳定性方案已找不到（引用可能已失效）。"
+
+msgid "The client the samples are created for: samples are registered under this client. Defaults to the client of the plan template."
+msgstr "登样时样品登记到哪个委托方名下：样品会建在该客户下。新建方案时会从方案模板带入默认值。"
+
+msgid "Default client for plans created from this template. The samples are registered under the client configured on the plan."
+msgstr "用该模板新建方案时带入的默认客户。实际登样以**方案上**配置的客户为准。"
+
+
+msgid "No Client is configured for this plan."
+msgstr "方案上没有选择客户。"
+
+
+msgid "The Contact belongs to another client than the samples are created for."
+msgstr "联系人与样品将要登记到的客户不是同一个客户。"
+
+msgid "Samples are created from the Sample Template configured on each timepoint: the sample type and the analyses come from that template, the client and the contact come from the plan. The Date Sampled is left empty."
+msgstr "样品按**该时间点行上配置的样品模板**创建：样品类型与检验项取自该模板，客户与联系人取自方案；不填写「实际取样日期」。"
+
+msgid "This timepoint has no Sample Template."
+msgstr "该时间点没有选择样品模板。"
+
+msgid "Sample type and analyses for this timepoint come from this template: samples are created with the template's analyses."
+msgstr "该时间点的样品类型与检验项来自这个样品模板：登样时就按模板里的检验项生成样品。"
+
+msgid "The Client of the plan does not match the client the Sample Template of this timepoint belongs to."
+msgstr "方案上的客户与该时间点样品模板归属的客户不一致。"
+
+# ---- 客户/联系人不一致（2026-09-29）----
+
+msgid "The Contact "{contact}" belongs to "{contact_client}", but the samples are created for "{client}"."
+msgstr "联系人“{contact}”属于“{contact_client}”，而样品将要登记到的客户是“{client}”。"
+
+msgid "The Sample Template "{template}" belongs to "{template_client}", but the samples are created for "{client}"."
+msgstr "样品模板“{template}”属于“{template_client}”，而样品将要登记到的客户是“{client}”。"
+
+msgid "The Contact "{contact}" belongs to "{contact_client}" and does not match the Client "{client}": the Contact was cleared. Please select a Contact of "{client}"."
+msgstr "联系人“{contact}”属于“{contact_client}”，与客户“{client}”不是同一家，已清空；请重新选择“{client}”的联系人。"
+
+
+# ---- 先放置、再登样（2026-09-29）----
+
+msgid "Placed"
+msgstr "已放置"
+
+msgid "This timepoint is completed and can no longer be generated."
+msgstr "该时间点已完成，不能再登样。"
+
+
+# ---- 0 点关联往期样品（阶段 3，2026-09-29）----
+
+msgid "Select Target Timepoint"
+msgstr "选择目标时间点"
+
+msgid "Window"
+msgstr "可关联窗口"
+
+msgid "Sample ID"
+msgstr "样品编号"
+
+msgid "Date"
+msgstr "日期"
+
+msgid "Sampled Date"
+msgstr "取样日期"
+
+msgid "Created Date"
+msgstr "创建日期"
+
+msgid "Linked To"
+msgstr "已关联到"
+
+msgid "Candidate Samples"
+msgstr "候选样品"
+
+msgid "Show samples of all clients"
+msgstr "显示全部客户的样品"
+
+msgid "Only the plan client's samples are listed."
+msgstr "当前只列出方案客户的样品。"
+
+msgid "Only samples in the window [T0 - N, T0] are listed: a sample without a Sampled Date is matched by its creation date."
+msgstr "只列出可关联窗口 [T0 - N, T0] 内的样品；没有「取样日期」的样品按「创建日期」匹配。"
+
+msgid "No candidate samples match this window."
+msgstr "这个窗口内没有可关联的候选样品。"
+
+msgid "Link"
+msgstr "关联"
+
+msgid "Linked sample {sample} to {plan} / {task}."
+msgstr "已把样品 {sample} 关联到 {plan} / {task}。"
+
+msgid "Only the zero point can be linked to an existing sample. Please use Generate for the other timepoints."
+msgstr "只有零点（0 点）可以关联已有的往期样品；其它时间点请用「生成」。"
+
+msgid "Only the zero point can be linked to an existing sample. Please use Create Sample for the other timepoints."
+msgstr "只有零点（0 点）可以关联已有的往期样品；其它时间点请用「创建样品」。"
+
+msgid "The selected sample does not exist any more."
+msgstr "选中的样品已经不存在了。"
+
+msgid "The sample date {date} is outside the allowed window ({start} ~ {end}) for this timepoint."
+msgstr "样品日期 {date} 不在该时间点的可关联窗口（{start} ~ {end}）内。"
+
+msgid "This sample is already linked to {plan} / {task}."
+msgstr "这个样品已经关联到 {plan} / {task} 了。"
+
+msgid "The plan has no Start Time (T0), so there is no window to link samples from."
+msgstr "方案没有填「开始时间（T0）」，因此没有可关联的窗口。"
+
+msgid "Linking the sample failed."
+msgstr "关联样品失败。"
+
+msgid "This timepoint already has a sample linked."
+msgstr "这个时间点已经关联过样品了。"
+
+msgid "Please select a timepoint and a sample."
+msgstr "请选择时间点与样品。"
+
+
+# ---- 0 点提示（B 方案，2026-09-30）----
+
+msgid "Zero Point (baseline) is not defined in this plan."
+msgstr "本方案没有定义 0 点（基线点）。"
+
+msgid "Without a zero point (Timepoint (Months) = 0) no past sample can be linked as the baseline of this plan: add a row with Timepoint (Months) = 0, then use Link Existing Sample on the task board."
+msgstr "没有 0 点（时间点（月）= 0）就无法关联往期样品作为本方案的基线：请新增一行、把「时间点（月）」选为 0，然后在任务看板上用「关联已有样品」。"
+
+msgid "These plans have no zero point row:"
+msgstr "下列方案没有 0 点行："
+
+msgid "Without a zero point (Timepoint (Months) = 0) no past sample can be linked as the baseline of these plans. Add a row with Timepoint (Months) = 0 to each of them."
+msgstr "没有 0 点（时间点（月）= 0）就无法关联往期样品作为这些方案的基线。请为每个方案新增一行、把「时间点（月）」选为 0。"
+
+msgid "None of the selected timepoints is a zero point: only the zero point (Timepoint (Months) = 0) can be linked to an existing past sample."
+msgstr "选中的时间点里没有 0 点：只有 0 点（时间点（月）= 0）可以关联已有的往期样品。"
+
+msgid "Zero Point"
+msgstr "0 点"
+
+msgid "This row is the zero point (baseline) of the plan: if you delete it, no past sample can be linked as the baseline. Delete this row?"
+msgstr "这一行是方案的 0 点（基线点）：删掉之后本方案将无法关联基线样品。确定删除这一行吗？"
+
+
+# ---- 0 点提示（B 方案，2026-09-30）----
+
+msgid "({0} plans in total)"
+msgstr "（共 {0} 份方案）"
+
+
+# ---- 0 点提示（B 方案，2026-09-30）----
+
+msgid "Zero Point (baseline) is not defined in this plan: add a row with Timepoint (Months) = 0 and select it here, otherwise no past sample can be linked as the baseline."
+msgstr "本方案没有 0 点（基线点）：请先在方案明细里新增一行、把「时间点（月）」选为 0，再回到这里选中它；否则无法关联往期样品作为基线。"
+
+
+# ---- 0 点提示（B 方案，2026-09-30）----
+
+msgid "A zero point row (Timepoint (Months) = 0) was added to the new plan: it can be deleted or changed later."
+msgstr "新建方案默认带了一行 0 点（时间点（月）= 0）：可以删掉，也可以改成别的时间点。"
+
+
+# ---- 阶段 4：到期自动登样 + 撤销登样（2026-09-30）----
+
+msgid "Sample registration revoked for {plan} / {task}."
+msgstr "已撤销 {plan} / {task} 的登样。"
+
+msgid "The plan details changed since this page was opened. Please open the page again."
+msgstr "方案明细在打开本页之后被改过，请重新打开本页。"
+
+msgid "This timepoint has no sample registered, so there is nothing to revoke."
+msgstr "这个时间点没有登记样品，没有可撤销的内容。"
+
+msgid "This timepoint is completed: its sample registration cannot be revoked any more."
+msgstr "这个时间点已完成，它的登样不能再撤销。"
+
+msgid "A reason is required to revoke a sample registration."
+msgstr "撤销登样必须填写原因。"
+
+msgid "Revoking the sample registration failed."
+msgstr "撤销登样失败。"
+
+msgid "You do not have permission to revoke sample registrations."
+msgstr "你没有撤销登样的权限。"
+
+msgid "Please select exactly one timepoint to revoke."
+msgstr "撤销登样一次只能选一个时间点。"
+
+msgid "Revoke Sample Registration"
+msgstr "撤销登样"
+
+msgid "Last revoke"
+msgstr "上次撤销"
+
+msgid "Revoking only removes the link between this timepoint and the sample. The sample itself is NOT deleted: if it has to be cancelled, do that from the sample page."
+msgstr "撤销只解除「这个时间点 ↔ 样品」的关联，**不会删除样品对象**；样品本身需要取消请到样品页处理。"
+
+msgid "The status goes back to Pending Placement (or Placed, if a stock batch was already assigned) and the row can be deleted again."
+msgstr "状态退回「待放置」（如果已经放过库存批次，则退回「已放置」），该行重新可以删除。"
+
+msgid "This timepoint has no revocable sample registration."
+msgstr "这个时间点没有可撤销的登样记录。"
+
+msgid "Reason"
+msgstr "原因"
+
+msgid "Required. It is stored in the row notes together with who and when."
+msgstr "必填。会与「谁、何时」一起写进该行的备注。"
+
+msgid "Generate Due Samples"
+msgstr "生成到期样品"
+
+msgid "Due samples: scanned {plans} plan(s), created {created} sample(s), skipped {skipped} row(s)."
+msgstr "到期登样：扫描 {plans} 个方案，生成 {created} 个样品，跳过 {skipped} 行。"
+
+msgid "{count} row(s) could not be generated: check the Sample Template and the plan configuration."
+msgstr "另有 {count} 行未能生成：请检查样品模板与方案配置。"
+
+msgid "Generating due samples failed. Please check the log."
+msgstr "生成到期样品失败，请查看日志。"
+
+msgid "Actions"
+msgstr "操作"
+
+msgid "Revoke"
+msgstr "撤销"
+
+
+msgid "A paused plan stops generating samples automatically; all operations on its timepoints are frozen until it is resumed."
+msgstr "暂停后该方案不再自动生成样品；其时间点上的一切操作都将冻结，直到恢复为止。"
+
+msgid "Active Plans"
+msgstr "进行中的方案"
+
+msgid "Actor"
+msgstr "操作人"
+
+msgid "All Plans"
+msgstr "全部方案"
+
+msgid "All samples of this plan are finished."
+msgstr "该方案的所有样品均已完成。"
+
+msgid "Changing the status is recorded in the audit trail together with who did it, when, and the reason."
+msgstr "状态变更会连同操作人、时间与原因一起记入审计追踪。"
+
+msgid "Current Status"
+msgstr "当前状态"
+
+msgid "Finished"
+msgstr "已完成"
+
+msgid "From"
+msgstr "原状态"
+
+msgid "Last Status Change"
+msgstr "上次状态变更"
+
+msgid "New Status"
+msgstr "新状态"
+
+msgid "No status change has been recorded yet."
+msgstr "尚未记录任何状态变更。"
+
+msgid "Pause"
+msgstr "暂停"
+
+msgid "Pause the selected stability plan"
+msgstr "暂停选中的稳定性方案"
+
+msgid "Paused"
+msgstr "已暂停"
+
+msgid "Plan Status"
+msgstr "方案状态"
+
+msgid "Plan status filters"
+msgstr "方案状态筛选"
+
+msgid "Please select exactly one stability plan: the plan status is changed one plan at a time."
+msgstr "请只选择一个稳定性方案：方案状态一次只能变更一个方案。"
+
+msgid "Please select one stability plan first."
+msgstr "请先选择一个稳定性方案。"
+
+msgid "Required. It is recorded in the audit trail and shown on the plan page."
+msgstr "必填。会记入审计追踪，并显示在方案页上。"
+
+msgid "Resume"
+msgstr "恢复"
+
+msgid "Resume the selected stability plan"
+msgstr "恢复选中的稳定性方案"
+
+msgid "Sample Status"
+msgstr "样品状态"
+
+msgid "Status History"
+msgstr "状态变更历史"
+
+msgid "Terminate"
+msgstr "终止"
+
+msgid "Terminate the selected stability plan (final)"
+msgstr "终止选中的稳定性方案（终态，不可恢复）"
+
+msgid "Terminated"
+msgstr "已终止"
+
+msgid "Terminated Plans"
+msgstr "已终止的方案"
+
+msgid "Terminating is final: a terminated plan cannot be resumed, and its samples are not changed in any way."
+msgstr "终止是终态：已终止的方案不能恢复，其样品也不会被做任何改动。"
+
+msgid "The selected stability plan could not be found."
+msgstr "找不到所选的稳定性方案。"
+
+msgid "The stability plan cannot be changed to the requested state from its current state."
+msgstr "该稳定性方案无法从当前状态变更到请求的状态。"
+
+msgid "This plan has unfinished samples. Terminating the plan stops all further operations on its timepoints. Please review the list below before continuing."
+msgstr "该方案有未完成的样品。终止后将停止该方案时间点上的一切操作，请先核对下面的清单再继续。"
+
+msgid "This plan is paused. All operations on its timepoints are frozen until it is resumed."
+msgstr "该方案已暂停，其时间点上的所有操作都将冻结，直到恢复为止。"
+
+msgid "This plan is terminated."
+msgstr "该方案已终止。"
+
+msgid "This stability plan cannot be edited in its current state."
+msgstr "该稳定性方案在当前状态下不能编辑。"
+
+msgid "Unknown"
+msgstr "未知"
+
+msgid "Unsupported action."
+msgstr "不支持的动作。"
+
+msgid "You do not have permission to change the status of a stability plan."
+msgstr "您没有变更稳定性方案状态的权限。"
+
+msgid "{count} paused or terminated plan(s) were skipped: all operations on their timepoints are frozen."
+msgstr "已跳过 {count} 个已暂停或已终止的方案：其时间点上的一切操作均已冻结。"
+
+
+msgid "Resumed. Please check the timepoints that expired during the pause and the Start Time (T0) before the next automatic scan runs."
+msgstr "已恢复。下一次自动扫描运行前，请检查暂停期间已过期的时间点与起始时间（T0）。"
+
+
+msgid "This timepoint has expired and can no longer be generated."
+msgstr "该时间点已过期，不能再登样。"
+
+msgid "This timepoint has expired and can no longer be linked to a sample."
+msgstr "该时间点已过期，不能再关联样品。"
+
+
+msgid "A reason is required to change the status of a stability plan."
+msgstr "变更稳定性方案状态时必须填写原因。"
+
+msgid "This stability plan is paused. All operations on it are frozen."
+msgstr "该方案已暂停：其时间点上的一切操作均已冻结。"
+
+msgid "This stability plan is terminated."
+msgstr "该方案已终止。"
+
+msgid "Paused or terminated plans are frozen: their timepoints cannot be modified."
+msgstr "已暂停或已终止的方案已冻结：其时间点不能再修改。"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+msgid "Some timepoint rows could not be read and were dropped. Please reload the page and fill them in again."
+msgstr "有部分时间点行没能读出来，已被丢弃。请刷新页面后重新填写。"
+
+msgid "The timepoint rows could not be read, so they were left unchanged. Please reload the page and try again."
+msgstr "时间点明细没能读出来，本次未做任何改动。请刷新页面后重试。"
+
+
+msgid "The timepoint rows of this plan could not be verified, so they were left unchanged."
+msgstr "本方案的时间点明细没有通过校验，本次未做改动。"
+
+msgid "Discarded"
+msgstr "已废弃"
+
+msgid "Discarded at"
+msgstr "废弃时间"
+
+msgid "Discarded by"
+msgstr "废弃人"
+
+msgid "Discard reason"
+msgstr "废弃原因"
+
+msgid "Set when the timepoint row was deleted (status deleted)."
+msgstr "时间点行被删除（状态删除）时写入。"
+
+msgid "Optional: why the timepoint row was discarded."
+msgstr "选填：该时间点行为什么被废弃。"
+
+msgid "Only timepoints that have not been generated yet can be deleted."
+msgstr "只有「还没登样」的时间点可以删除。"
+
+msgid "Cannot delete: this timepoint has already started"
+msgstr "不能删除：该时间点已经开始"
+
+msgid "The sample {sample} of this timepoint is not finished. Please finish or cancel it before deleting this timepoint."
+msgstr "该时间点关联的样品 {sample} 尚未完成，请先完成或取消该样品再删除本时间点。"
+
+msgid "The timepoint has been deleted (status deleted) and is kept in the plan for traceability. Use the Discarded filter on the task board to see it."
+msgstr "该时间点已删除（状态删除），为保留溯源而留在方案中；可在任务看板的「已废弃」筛选里查看。"
+
+msgid "The timepoint rows could not be fully read, so no timepoint was deleted. Please reload the page and try again."
+msgstr "时间点明细没能完整读出来，本次没有删除任何时间点。请刷新页面后重试。"
+
+msgid "An expired timepoint cannot be edited; delete it or add a new timepoint instead."
+msgstr "已过期的时间点不能编辑，请删除它或另行新增时间点。"

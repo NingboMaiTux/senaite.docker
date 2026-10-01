@@ -1,0 +1,161 @@
+<!--
+  ⚠️ 命名空间必须写 `http://xml.zope.org/...`（不是 `http://xmlns.zope.org/...`）：
+  写成 xmlns.zope.org 时 TAL/METAL 处理器**认不出这些属性**，整个模板会被原样吐给浏览器
+  （页面显示的是一堆未执行的 TAL 指令源码），而 HTTP 状态码依然是 200 —— 2026-09-30 真机踩到。
+  同目录其它模板（generate_sample.pt / task_board.pt / sample_placement.pt）都是这个写法。
+  验收时用"响应体里还有没有未执行的 TAL 指令"当判据（本注释特意不写那些属性名，免得自己命中）。
+-->
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      metal:use-macro="here/main_template/macros/master"
+      i18n:domain="maitux.stability">
+  <body>
+    <metal:content fill-slot="content-core">
+      <h1 i18n:translate="">Link Existing Sample</h1>
+
+      <div class="alert alert-info"
+           tal:condition="python:not view.targets and not view.notice">
+        <span i18n:translate="">No plan details selected.</span>
+      </div>
+
+      <!-- 「勾了行，但没有一行能关联」的具体原因（B 方案，2026-09-30）：
+           最常见的是"这些行里没有 0 点"（0 点不强制，方案里可能没有 0 点行）。 -->
+      <div class="alert alert-warning stability-zero-point-notice"
+           tal:condition="python:bool(view.notice)">
+        <span tal:content="view/notice">notice</span>
+      </div>
+
+      <!-- 阶段 6a 冻结（2026-09-30 补齐界面层）：选中的零点行属于
+           **已暂停 / 已终止** 的方案 —— 服务端本来就会拒，但页面此前照样
+           列出候选样品、给 Link 按钮，用户填完才被弹回来
+           （用户实测："终止的方案好像还能关联样品"）。
+           现在：这里出一条红色横幅、目标行的单选钮 disabled、
+           候选样品列表为空 -> Link 按钮自然也是 disabled。 -->
+      <div class="alert alert-danger stability-zero-point-frozen"
+           tal:condition="python:view.has_frozen_targets()">
+        <span tal:content="view/frozen_notice">frozen</span>
+      </div>
+
+      <tal:block tal:condition="python:bool(view.targets)">
+        <!-- 选中的行：能不能关联、窗口是什么，都摆出来 -->
+        <table class="table table-sm table-striped">
+          <thead>
+            <tr>
+              <th i18n:translate="">Select Target Timepoint</th>
+              <th i18n:translate="">Plan</th>
+              <th i18n:translate="">Task</th>
+              <th i18n:translate="">Status</th>
+              <th i18n:translate="">Client</th>
+              <th i18n:translate="">Window</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr tal:repeat="target python:view.targets">
+              <td>
+                <input type="radio" name="target_row_id"
+                       tal:attributes="value target/row_id;
+                                       checked python:'checked' if target['row_id'] == view.selected_target else None;
+                                       disabled python:None if target['can_link'] else 'disabled'"/>
+              </td>
+              <td><a tal:attributes="href target/plan_url" tal:content="target/plan_title">Plan</a></td>
+              <td tal:content="target/task_title">Task</td>
+              <td tal:content="target/status_title">Status</td>
+              <td tal:content="python:target.get('client_title') or '-'">Client</td>
+              <td>
+                <span tal:condition="python:bool(target.get('can_link'))"
+                      tal:content="python:'%s ~ %s' % (target.get('window_start') or '-', target.get('window_end') or '-')">-</span>
+                <span class="text-danger" tal:condition="python:not target.get('can_link')"
+                      tal:content="target/reason">reason</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- 客户过滤开关（默认只看方案客户） -->
+        <form method="get" class="mb-3"
+              tal:attributes="action string:${context/absolute_url}/@@zero_point_candidates">
+          <tal:block tal:repeat="target python:view.targets">
+            <input type="hidden" name="row_ids:list" tal:attributes="value target/row_id"/>
+          </tal:block>
+          <input type="hidden" name="target_row_id" tal:attributes="value view/selected_target"/>
+          <input type="hidden" name="all_clients"
+                 tal:attributes="value python:'' if view.show_all_clients else '1'"/>
+          <button type="submit" class="btn btn-sm btn-outline-secondary">
+            <span tal:condition="python:view.show_all_clients"
+                  i18n:translate="">Only the plan client's samples are listed.</span>
+            <span tal:condition="python:not view.show_all_clients"
+                  i18n:translate="">Show samples of all clients</span>
+          </button>
+          <small class="form-text text-muted ml-2" i18n:translate="">
+            Only samples in the window [T0 - N, T0] are listed: a sample without a Sampled Date is matched by its creation date.
+          </small>
+        </form>
+
+        <h4 i18n:translate="">Candidate Samples</h4>
+
+        <div class="alert alert-warning"
+             tal:condition="python:view.selected_target and not view.candidates">
+          <span i18n:translate="">No candidate samples match this window.</span>
+        </div>
+
+        <form method="post"
+              tal:attributes="action string:${context/absolute_url}/@@zero_point_candidates">
+          <input tal:replace="structure context/@@authenticator/authenticator"/>
+          <tal:block tal:repeat="target python:view.targets">
+            <input type="hidden" name="row_ids:list" tal:attributes="value target/row_id"/>
+          </tal:block>
+          <input type="hidden" name="target_row_id" tal:attributes="value view/selected_target"/>
+          <input type="hidden" name="all_clients"
+                 tal:attributes="value python:'1' if view.show_all_clients else ''"/>
+
+          <table class="table table-sm table-striped" tal:condition="python:bool(view.candidates)">
+            <thead>
+              <tr>
+                <th></th>
+                <th i18n:translate="">Sample ID</th>
+                <th i18n:translate="">Client</th>
+                <th i18n:translate="">Sample Type</th>
+                <th i18n:translate="">Date</th>
+                <th i18n:translate="">Status</th>
+                <th i18n:translate="">Linked To</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr tal:repeat="item python:view.candidates">
+                <td>
+                  <input type="radio" name="sample_uid"
+                         tal:attributes="value item/uid;
+                                         disabled python:None if item['can_link'] else 'disabled'"/>
+                </td>
+                <td><a tal:attributes="href item/url" tal:content="item/id">SAMPLE-1</a></td>
+                <td tal:content="item/client_title">-</td>
+                <td tal:content="item/sample_type_title">-</td>
+                <td>
+                  <span tal:content="item/date">2026-01-01</span>
+                  <small class="text-muted" tal:content="item/date_source_title">Sampled Date</small>
+                </td>
+                <td tal:content="python:item.get('state') or '-'">-</td>
+                <td>
+                  <span tal:condition="python:not item.get('linked_to')">-</span>
+                  <span class="text-danger" tal:condition="python:bool(item.get('linked_to'))"
+                        tal:content="item/linked_to">Plan / TP 1</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="mt-3">
+            <button type="submit" name="button_link" value="1"
+                    class="btn btn-primary btn-sm"
+                    tal:attributes="disabled python:None if view.candidates else 'disabled'"
+                    i18n:translate="">Link</button>
+            <button type="submit" name="button_cancel" value="1"
+                    class="btn btn-secondary btn-sm" i18n:translate="">Cancel</button>
+          </div>
+        </form>
+      </tal:block>
+    </metal:content>
+  </body>
+</html>
