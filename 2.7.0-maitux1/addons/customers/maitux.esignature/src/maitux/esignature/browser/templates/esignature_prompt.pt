@@ -382,6 +382,15 @@
                   verified successfully in a single submission.
                 </div>
 
+                <div tal:condition="python:view.disallow_initiator()" class="maitux-esign-panel">
+                  <strong>Segregation of Duties (signer must not be the applicant):</strong>
+                  The applicant of this record is
+                  <span tal:replace="python:view.initiator_user_id() or '(unknown)'">applicant</span>.
+                  That account cannot be either the signer or the countersigner. With
+                  countersign enabled, both accounts must differ from each other and from
+                  the applicant.
+                </div>
+
                 <div class="maitux-esign-actions">
                   <div class="maitux-esign-actions-left">
                     <span class="maitux-esign-note">Fields marked with * are required by the current policy.</span>

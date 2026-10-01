@@ -1,0 +1,166 @@
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      metal:use-macro="here/main_template/macros/master"
+      i18n:domain="maitux.stability">
+  <body>
+    <metal:content fill-slot="content-core">
+      <h1 i18n:translate="">Generate Samples</h1>
+
+      <div class="alert alert-info" tal:condition="python:not view.rows">
+        <span i18n:translate="">No plan details selected.</span>
+      </div>
+
+      <tal:block tal:condition="python:bool(view.rows)">
+        <!-- 口径说明：这一段是"这次登样会按什么规则建样"，必须写在按钮之前。 -->
+        <div class="alert alert-secondary">
+          <p i18n:translate="">
+            Samples are created from the Sample Template configured on each
+            timepoint: the sample type and the analyses come from that template,
+            the client and the contact come from the plan. The Date Sampled is
+            left empty.
+          </p>
+          <p class="mb-0" i18n:translate="">
+            The zero point is not created here: link an existing sample instead.
+          </p>
+        </div>
+
+        <!-- 方案级配置：客户 / 联系人 / 生成时刻（样品模板在行上） -->
+        <tal:block tal:repeat="config python:view.plans">
+          <div class="card mb-3">
+            <div class="card-header">
+              <a tal:attributes="href config/plan_url" tal:content="config/plan_title">Plan</a>
+            </div>
+            <div class="card-body">
+              <div class="row">
+                <div class="col-md-4">
+                  <div><strong i18n:translate="">Client</strong>:
+                    <span tal:content="python:config.get('client') or '-'">-</span></div>
+                </div>
+                <div class="col-md-4">
+                  <div><strong i18n:translate="">Contact</strong>:
+                    <span tal:content="python:config.get('contact') or '-'">-</span></div>
+                </div>
+                <div class="col-md-4">
+                  <div><strong i18n:translate="">Time of day for automatic creation</strong>:
+                    <span tal:content="config/generation_time">08:00</span></div>
+                  <div><strong i18n:translate="">Create samples N days before the target date</strong>:
+                    <span tal:content="config/lead_days">0</span></div>
+                </div>
+              </div>
+
+              <div class="alert alert-danger mt-2 mb-0"
+                   tal:condition="python:bool(config.get('problems'))">
+                <div i18n:translate="">Sample automation is not fully configured for this plan:</div>
+                <ul class="mb-0">
+                  <li tal:repeat="problem python:config.get('problems')"
+                      tal:content="problem">problem</li>
+                </ul>
+              </div>
+              <div class="alert alert-warning mt-2 mb-0"
+                   tal:condition="python:bool(config.get('warnings'))">
+                <ul class="mb-0">
+                  <li tal:repeat="warning python:config.get('warnings')"
+                      tal:content="warning">warning</li>
+                </ul>
+              </div>
+
+              <!-- 没有 0 点行的方案（B 方案，2026-09-30）：登样本身不受影响
+                   （0 点行本来就不建样），但基线样品将无从关联 —— 在这里说清。 -->
+              <div class="alert alert-warning mt-2 mb-0 stability-zero-point-notice"
+                   tal:condition="python:bool(config.get('lacks_zero_point'))">
+                <strong i18n:translate="">Zero Point (baseline) is not defined in this plan.</strong>
+                <div class="mb-0" i18n:translate="">
+                  Without a zero point (Timepoint (Months) = 0) no past sample can be
+                  linked as the baseline of this plan: add a row with
+                  Timepoint (Months) = 0, then use Link Existing Sample on the task board.
+                </div>
+              </div>
+            </div>
+          </div>
+        </tal:block>
+
+        <!-- 逐行预演：样品模板/检验项按每一行自己的配置展示 -->
+        <table class="table table-sm table-striped">
+          <thead>
+            <tr>
+              <th i18n:translate="">Plan</th>
+              <th i18n:translate="">Task</th>
+              <th i18n:translate="">Status</th>
+              <th i18n:translate="">Sample Template</th>
+              <th i18n:translate="">Analyses</th>
+              <th i18n:translate="">Target Date</th>
+              <th i18n:translate="">Planned Sampling Date</th>
+              <th i18n:translate="">Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr tal:repeat="row python:view.rows">
+              <td tal:content="row/plan_title">Plan</td>
+              <td tal:content="row/task_title">Task</td>
+              <td tal:content="row/status_title">Status</td>
+              <td tal:content="row/sample_template">-</td>
+              <td tal:content="row/service_count">0</td>
+              <td tal:content="row/target_date">-</td>
+              <td tal:content="row/sampling_date">-</td>
+              <td>
+                <span class="stability-generate-ok"
+                      tal:condition="python:row.get('can_generate')"
+                      i18n:translate="">Will be created</span>
+                <span class="stability-generate-skip"
+                      tal:condition="python:not row.get('can_generate')"
+                      tal:content="row/reason_text">reason</span>
+                <!-- 零点行：直接给「关联已有样品」的入口（阶段 3） -->
+                <a class="btn btn-sm btn-outline-primary ml-2"
+                   tal:condition="python:row.get('is_zero_point')"
+                   tal:attributes="href row/zero_point_url"
+                   i18n:translate="">Link Existing Sample</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <form method="post"
+              tal:attributes="action string:${context/absolute_url}/@@generate_sample">
+          <input tal:replace="structure context/@@authenticator/authenticator"/>
+          <tal:block tal:repeat="item python:view.rows">
+            <input type="hidden" name="row_ids:list" tal:attributes="value item/row_id"/>
+            <input type="hidden" name="row_uids:list" tal:attributes="value item/detail_uid"/>
+          </tal:block>
+
+          <div class="mt-3">
+            <button type="submit" name="button_generate" value="1"
+                    class="btn btn-primary btn-sm"
+                    tal:attributes="disabled python:None if view.has_generatable_rows() else 'disabled'"
+                    i18n:translate="">Generate</button>
+            <button type="submit" name="button_cancel" value="1"
+                    class="btn btn-secondary btn-sm" i18n:translate="">Cancel</button>
+          </div>
+        </form>
+      </tal:block>
+
+      <style type="text/css">
+        /* 与 datagrid 页的时间点徽标同一套配色，保持"状态/结论"颜色一致。 */
+        .stability-generate-ok {
+          display: inline-block;
+          padding: .15rem .4rem;
+          font-size: .75rem;
+          font-weight: 600;
+          border-radius: .2rem;
+          color: #fff;
+          background-color: #28a745;
+        }
+        .stability-generate-skip {
+          display: inline-block;
+          padding: .15rem .4rem;
+          font-size: .75rem;
+          font-weight: 600;
+          border-radius: .2rem;
+          color: #fff;
+          background-color: #6c757d;
+        }
+      </style>
+    </metal:content>
+  </body>
+</html>

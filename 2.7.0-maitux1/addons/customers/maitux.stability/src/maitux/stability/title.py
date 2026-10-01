@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """让稳定性容器类的 Title() 按当前语言翻译（与 maitux.stock.title 同一套路）。"""
 
-import re
-
 from bika.lims import api
 
 from maitux.stability.i18n import translate_stability
+from maitux.stability.timepoints import INITIAL_MONTHS
+from maitux.stability.timepoints import normalize_months
+from maitux.stability.timepoints import parse_task_title
 
 
 # 复制方案名称的后缀分隔符与别名。
@@ -49,26 +50,47 @@ def localize_copy_suffix(raw):
     return raw
 
 
-# 时间点任务标题的形态：``TP 1 (3 Months)``（subscribers.py 生成时写死英文）。
-TASK_TITLE_PATTERN = re.compile(u"^TP (\\d+) \\((\\d+) Months\\)$")
+# 时间点任务标题的形态（落库时写死英文，见 timepoints.build_task_title）：
+#   ``TP 1 (3 Months)``  普通时间点
+#   ``TP 1 (Initial)``   零点（0 点）
+# 解析规则统一放在 timepoints.py（与生成侧同一份实现）。
+def localized_task_title(seq, months):
+    """按当前语言拼时间点任务标题。
+
+    * 零点（months == 0）用单独文案 ``TP {0} (Initial)``；
+    * 其它用 ``TP {0} ({1} Months)``。
+
+    msgid 一律英文，译文在 locales/ —— 中文写 ``TP 1（0 点）`` / ``TP 1（3 个月）``。
+    整句作为一个 msgid 再 format，语序与量词都由译文决定，
+    不会出现 ``TP 1 (3 个月 Months)`` 这类拼接错误。
+    """
+    months = normalize_months(months)
+    if months == INITIAL_MONTHS:
+        msgid = u"TP {0} (Initial)"
+        try:
+            return translate_stability(msgid).format(seq)
+        except Exception:
+            return msgid.format(seq)
+    msgid = u"TP {0} ({1} Months)"
+    try:
+        return translate_stability(msgid).format(seq, months)
+    except Exception:
+        return msgid.format(seq, months)
 
 
 def localize_task_title(raw):
-    """把 ``TP 1 (3 Months)`` 按当前语言重写成 ``TP 1（3 个月）``。
+    """把落库的英文任务标题按当前语言重写（含零点形态）。
 
     中文注释：时间点任务的 Title 是**生成时写死的英文**并存进了 ZODB，
     只做目录查询是查不到译文的，所以这里按形态识别后重建。
     """
     if not raw:
         return raw
-    match = TASK_TITLE_PATTERN.match(raw)
-    if not match:
+    parsed = parse_task_title(raw)
+    if parsed is None:
         return raw
-    pattern = translate_stability(u"TP {0} ({1} Months)")
-    try:
-        return pattern.format(match.group(1), match.group(2))
-    except Exception:
-        return raw
+    seq, months = parsed
+    return localized_task_title(seq, months) or raw
 
 
 class TranslatableTitleMixin(object):

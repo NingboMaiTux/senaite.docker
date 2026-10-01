@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <rolemap>
   <permissions>
     <permission name="maitux.stability: Add Stability Plan Template"
@@ -8,6 +8,38 @@
       <role name="Manager"/>
       <role name="Owner"/>
     </permission>
+
+    <!-- 管理「样品模板 + 自动登样」的配置（字段级 + 站点设置页）。
+         ⚠️ 名字必须与 configure.zcml 里的 permission title **完全一致** ——
+         GenericSetup 的 rolemap 认的是标题（Zope 侧的权限名），不是 ZCML 的 id。
+
+         默认给 Manager / LabManager / StabilityAdministrator：这是"改全站自动登样口径"的权限。
+         ★ 2026-09-30 阶段 5：加上 StabilityAdministrator —— 它是稳定性模块自己的管理角色，
+           **定时任务（cron）用的专用账号就挂这个角色**，不再用 admin:admin
+          （见《稳定性模块-使用与运维说明》§四）。要放开给别的角色（例如 LabClerk），
+          改这里并**重跑 profile**，或在站点后台的角色管理里直接勾选 —— 这就是需求里的"权限可配置"。 -->
+    <permission name="maitux.stability: Manage Sample Automation"
+                acquire="False">
+      <role name="LabManager"/>
+      <role name="Manager"/>
+      <role name="StabilityAdministrator"/>
+    </permission>
+
+    <!-- 管理「方案状态」（暂停 / 恢复 / 终止）：阶段 6a。
+         给谁：与 Manage Sample Automation **同一批角色** ——
+         "谁能改全站自动登样口径"和"谁能停一个在跑的方案"是同一层级的权力，
+         分开配会让两个开关出现"能开不能停"这种尴尬组合。
+
+         ⚠️ 名字必须与 configure.zcml 里的 permission title **完全一致**
+         （GenericSetup 的 rolemap 认的是标题，不是 ZCML 的 id）；
+         工作流 definition.xml 里的 <guard-permission> 也用这个标题形式。 -->
+    <permission name="maitux.stability: Manage Plan Status"
+                acquire="False">
+      <role name="LabManager"/>
+      <role name="Manager"/>
+      <role name="StabilityAdministrator"/>
+    </permission>
   </permissions>
 </rolemap>
+
 

@@ -7,6 +7,7 @@ import transaction
 from bika.lims import api
 from bika.lims import logger
 from bika.lims.api.snapshot import get_storage as get_snapshot_storage
+from bika.lims.api.snapshot import supports_snapshots
 from bika.lims.api.snapshot import take_snapshot
 from bika.lims.api.user import get_user_id
 from bika.lims.subscribers.auditlog import reindex_object
@@ -97,7 +98,7 @@ def _enrich_transition_snapshot(obj, verified_context, action):
 
 
 def _build_signature_record(obj, verified_context, action):
-    return {
+    record = {
         "object_uid": api.get_uid(obj),
         "object_path": verified_context.get("object_path") or "/".join(obj.getPhysicalPath()),
         "portal_type": getattr(obj, "portal_type", None),
@@ -117,6 +118,12 @@ def _build_signature_record(obj, verified_context, action):
         "status": verified_context.get("status") or "applied",
         "auditlog_summary": build_signature_summary(verified_context),
     }
+    # 允许调用方预先生成 signature_id。业务模块（如库存领用申请）需要先把
+    # 签名 ID 写进自己的业务流水，再落签名记录，否则两边 ID 对不上。
+    signature_id = verified_context.get("signature_id")
+    if signature_id:
+        record["signature_id"] = signature_id
+    return record
 
 
 def _append_signature_audit_snapshot(obj, verified_context, action, audit_action=None):
@@ -200,6 +207,37 @@ def record_pending_countersign(context, verified_context, action):
     store.save(record)
     # 仅保留业务签名记录，不再额外追加独立审计快照，避免审计追踪重复显示。
     reindex_object(context)
+
+
+def record_signature(context, verified_context, action, append_audit_snapshot=True):
+    """公共入口：记录一次已完成校验的电子签名。
+
+    与 ``on_action_succeeded`` 的区别：后者只服务于"工作流动作已成功"这条链路
+    （由 ``IActionSucceededEvent`` 触发）。库存领用这类**非工作流动作**也需要
+    同等的签名留痕，因此把"落库 + 独立审计快照"的逻辑抽成公共函数复用。
+
+    :param context: 被签名的对象（签名记录与审计快照都挂在这个对象上）
+    :param verified_context: ``services.context.build_verified_signature_context``
+        的返回值（或等价字典）
+    :param action: 逻辑动作名，会写进记录的 ``transition_id`` 与审计动作名
+    :param append_audit_snapshot: 是否额外追加一条独立电子签名审计快照
+    :returns: 已落库的签名记录（``PersistentMapping``）
+    """
+    portal = api.get_portal()
+    store = SignatureRecordStore(portal)
+    data = dict(verified_context or {})
+    record = _build_signature_record(context, data, action)
+    stored = store.save(record)
+    # 审计快照底层直接调用 IAnnotations(obj)，对不支持快照的对象会抛异常。
+    # 这里必须先判定，否则业务侧（如库存领用）会整单回滚。
+    if append_audit_snapshot and supports_snapshots(context):
+        # 审计快照辅助函数读取的是"已验证上下文"的键名
+        # （user_id / initiator_user_id / countersigner_user_id ...），
+        # 而落库记录用的是另一套键名（signer_userid / initiator_userid ...）。
+        # 这里必须传原始上下文，否则快照里的签名人字段会全部为空。
+        _append_signature_audit_snapshot(context, data, action)
+    reindex_object(context)
+    return stored
 
 
 def on_action_succeeded(context, event):

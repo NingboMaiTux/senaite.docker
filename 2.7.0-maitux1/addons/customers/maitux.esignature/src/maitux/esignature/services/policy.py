@@ -11,6 +11,8 @@ from maitux.esignature.services.rules import loads_policy_rules
 DEFAULT_POLICY = {
     "signature_required": False,
     "require_countersign": False,
+    # 签名人不得为单据发起人（职责分离）。规则表里按行开启，默认关闭。
+    "disallow_initiator": False,
     "signature_type": None,
     "meaning_required": False,
     "reason_required": False,
@@ -115,6 +117,8 @@ class SignaturePolicyResolver(object):
             policy.update({
                 "signature_required": rule.get("signature_required", True),
                 "require_countersign": rule.get("require_countersign", False),
+                # 职责分离开关：由规则决定，签名页按它校验两个账号都不是申请人。
+                "disallow_initiator": rule.get("disallow_initiator", False),
                 "meaning_required": rule.get("meaning_required", meaning_required),
                 "reason_required": rule.get("reason_required", reason_required),
                 # 受控含义：由规则决定，签名页只读展示，签名人不能改。

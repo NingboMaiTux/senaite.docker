@@ -13,6 +13,9 @@ from senaite.core.upgrade.utils import temporary_allow_type
 from zope.interface import implementer
 
 from maitux.stability.permissions import AddStabilityPlanTemplate
+from maitux.stability.permissions import ManagePlanStatus
+from maitux.stability.permissions import ViewLogTab
+from maitux.stability.permissions import permission_name
 
 
 MODULE_ID = "stability_studies"
@@ -39,6 +42,126 @@ TABLE_ID_ALIASES = dict([(item[1], item[4]) for item in TABLE_DEFINITIONS])
 STATIC_TABLES = tuple([(item[1], item[2], item[3]) for item in TABLE_DEFINITIONS])
 SIDEBAR_DEPTH = 2
 PROJECTNAME = "maitux.stability"
+
+#: 权限的 id 形式 -> title 形式（**兜底表**）。
+#:
+#: 为什么需要它：`manage_permission()` 校验的是 Zope 认的权限名。本包在
+#: **无请求的启动路径**（`bin/instance run` —— 阶段 6a 的停机迁移走的正是它）
+#: 下，ZCML 的 id 形式会被判为 "invalid"，而 title 形式始终有效
+#: （`workflow` / `rolemap` 两个导入步骤用的就是 title 形式，它们都成功）。
+#: `permissions.permission_name()` 依赖 `queryUtility(IPermission)`，
+#: 也就是依赖 ZCML 已被加载 —— 迁移路径下不保证，所以这里再留一份字面量兜底。
+#:
+#: ⚠️ 这张表必须与 profiles/default/rolemap.xml 里的名字**逐字一致**
+#: （check_permissions.py 的自检会盯 rolemap 那一侧）。
+PERMISSION_TITLE_FALLBACK = {
+    AddStabilityPlanTemplate: "maitux.stability: Add Stability Plan Template",
+    ManagePlanStatus: "maitux.stability: Manage Plan Status",
+}
+
+
+def _resolved_permission(permission):
+    """把权限名解析成 **``possible_permissions()`` 里真正存在的那个名字**。
+
+    ★ 真机实测（2026-09-30，阶段 6a 停机迁移，`bin/instance run`）：
+
+        queryUtility(IPermission, 'maitux.stability.permissions.X') -> FOUND，
+            它的 ``.title`` 是 ``'maitux.stability: X'``；
+        possible_permissions() 里**只有 title 形式**；
+        manage_permission('maitux.stability.permissions.X', ...) 直接报
+            ValueError: The permission <em>maitux.stability.permissions.X</em>
+            is invalid.
+
+      这与 permissions.py 模块注释的结论完全一致：**id 形式只给
+      ``queryUtility(IPermission)`` / ``write_permission()`` 用；
+      ``manage_permission()`` / ``checkPermission()`` 认的是 title 形式。**
+      本包过去有两处把 id 形式直接喂给 manage_permission（ensure_permissions
+      与 force_setup_like_permissions），在有请求的路径下靠 rolemap 兜住了，
+      但在**无请求的启动路径**下会直接把整个 setup_handler 打断
+      —— 于是后面的工作流绑定、存量方案迁移全都不执行。
+    """
+    resolved = permission_name(permission)
+    if resolved:
+        return resolved
+    return PERMISSION_TITLE_FALLBACK.get(permission, permission)
+
+
+def manage_permission_pair(portal, permission, roles):
+    """给权限设角色映射：先试解析后的名字，不行再试原样。
+
+    :returns: True 表示已写入；False 表示两种写法都不认。
+        刻意**不抛异常** —— 见 ensure_permissions() 里的说明：本 profile 的
+        rolemap.xml 已经用 title 形式把同一批角色映射建立过了，
+        为了这个"再确认一次"的调用中断整个安装，代价太大。
+    """
+    candidates = []
+    for name in (_resolved_permission(permission), permission,
+                 PERMISSION_TITLE_FALLBACK.get(permission)):
+        if name and name not in candidates:
+            candidates.append(name)
+
+    last_error = None
+    for name in candidates:
+        try:
+            portal.manage_permission(name, roles=roles, acquire=False)
+            if name != permission:
+                logger.info(
+                    "manage_permission needed the resolved form: "
+                    "'%s' -> '%s'", permission, name)
+            return True
+        except Exception as exc:
+            last_error = exc
+            continue
+
+    logger.error(
+        "Failed to register portal permission '%s' "
+        "(tried %s; last error: %s)", permission, candidates, last_error)
+    return False
+
+
+def ensure_audit_log_permission(portal):
+    """把审计页的读权限**增量**授给 StabilityAdministrator（阶段 6a · A4）。
+
+    ★ 为什么是模块级函数而不是 setup_handler 里的闭包：
+      阶段 6a 的迁移脚本（``bin/instance run``，停机执行）**也要**做这一步，
+      两个入口必须是**同一份实现** —— 否则"走 profile 装"和"走迁移脚本装"
+      会得到两种权限结果，而这种差异只会在某个角色看不到审计页时才被发现。
+
+    为什么必须在 Python 里"读出来再追加"，而不是写进 rolemap.xml：
+      GenericSetup 的 rolemap 导入是 ``manage_permission(roles=[...])`` ——
+      **整体替换**。写成 XML 会把站点上已经额外勾选的角色全抹掉
+      （例如客户在站点后台给 Verifier 开了审计页）。这里是纯增量操作。
+
+    为什么非加不可：``senaite.core: View Log Tab`` 默认只给
+      LabManager / Manager（senaite/core/profiles/default/rolemap.xml）
+      —— 本模块自己的管理角色（含 cron 专用账号）根本打不开审计页，
+      那这一轮做的审计等于没人看得见。
+
+    :returns: True 表示已确认（或刚写入）；False 表示环境不满足、跳过了
+    """
+    wanted = "StabilityAdministrator"
+    try:
+        current = portal.rolesOfPermission(ViewLogTab)
+        roles = [item["name"] for item in current if item.get("selected")]
+        if not roles:
+            # 权限还没注册（senaite.core 没装完）—— 不猜默认值，直接跳过。
+            logger.warning(
+                "Permission '%s' has no roles yet; skipping the grant of '%s'",
+                ViewLogTab, wanted)
+            return False
+        if wanted in roles:
+            return True
+        roles.append(wanted)
+        portal.manage_permission(ViewLogTab, roles=roles, acquire=False)
+        logger.info(
+            "Granted '%s' to %s (roles now: %s)",
+            ViewLogTab, wanted, ", ".join(roles))
+        return True
+    except Exception:
+        # 这是"让审计页可见"的便利项，不是模块能跑起来的前提 —— 记警告不中断。
+        logger.warning(
+            "Could not grant '%s' to %s", ViewLogTab, wanted, exc_info=True)
+        return False
 
 
 @implementer(INonInstallable)
@@ -232,6 +355,10 @@ def _setup_stability_content(portal):
         if obj is None:
             return
         # 这些权限属于核心安装配置，失败后必须中断安装，避免站点处于半配置状态。
+        # ⚠️ permission 一律先过 _resolved_permission()：AddStabilityPlanTemplate
+        #    这里原本写的是 ZCML 的 **id 形式**，在无请求的启动路径下
+        #    manage_permission 会报 "is invalid" 并因此中断整个 setup_handler
+        #    （阶段 6a 停机迁移时实测踩到）。
         permission_rules = (
             ("View", ["Authenticated"]),
             ("Access contents information", ["Authenticated"]),
@@ -239,7 +366,7 @@ def _setup_stability_content(portal):
             ("Modify portal content", ["LabClerk", "LabManager", "Manager"]),
             ("Add portal content", ["LabClerk", "LabManager", "Manager"]),
             (
-                AddStabilityPlanTemplate,
+                _resolved_permission(AddStabilityPlanTemplate),
                 ["LabClerk", "LabManager", "Manager", "Owner"],
             ),
         )
@@ -255,15 +382,34 @@ def _setup_stability_content(portal):
                 raise
 
     def ensure_permissions():
+        # ★ 2026-09-30 真机订正（阶段 6a 停机迁移时暴露）：
+        #
+        # 这里原先只传 **ZCML 的 id 形式**，并注释说"两种形式都有映射"。
+        # 实测在 `bin/instance run`（停机迁移路径）下会直接炸：
+        #     ValueError: The permission
+        #     <em>maitux.stability.permissions.AddStabilityPlanTemplate</em> is invalid.
+        # 而**同一批权限的 title 形式**（`maitux.stability: ...`）是有效的 ——
+        # `workflow` 与 `rolemap` 两个导入步骤用的正是 title 形式，它们都成功了。
+        # 这与 permissions.py 模块注释里那条结论完全一致：
+        # **`manage_permission()` / `checkPermission()` 认的是 title 形式**，
+        # id 形式只给 `queryUtility(IPermission)` / `write_permission()` 用。
+        #
+        # 所以改成 manage_permission_pair()：先试 id（有请求的路径下它一直是好的，
+        # 不改变既有行为），失败再试 permission_name() 解析出的 title，
+        # 最后用 PERMISSION_TITLE_FALLBACK 里的字面量兜底。
+        # 而且**不再 raise** —— 这个 profile 的 rolemap.xml 已经用 title 形式把
+        # 角色映射建立了一遍，这里只是"再确认一次"；为了它中断整个安装，
+        # 代价是后面的容器创建、工作流绑定、存量方案迁移全部不执行。
         roles = ["LabClerk", "LabManager", "Manager", "Owner"]
-        try:
-            portal.manage_permission(AddStabilityPlanTemplate, roles=roles, acquire=False)
-        except Exception:
-            logger.exception(
-                "Failed to register portal permission '%s'",
-                AddStabilityPlanTemplate,
-            )
-            raise
+        manage_permission_pair(portal, AddStabilityPlanTemplate, roles)
+
+        # 阶段 6a：管理方案状态（暂停 / 恢复 / 终止）的权限。
+        status_roles = ["LabManager", "Manager", "StabilityAdministrator"]
+        manage_permission_pair(portal, ManagePlanStatus, status_roles)
+
+        # 阶段 6a · A4：把审计页的读权限加给 StabilityAdministrator。
+        # 实现提到模块级了（ensure_audit_log_permission）—— 迁移脚本要用同一份。
+        ensure_audit_log_permission(portal)
 
     def bind_workflows():
         wf_tool = api.get_tool("portal_workflow")
@@ -294,14 +440,36 @@ def _setup_stability_content(portal):
                 ("senaite_one_state_workflow",),
             ),
             (
-                (
-                    "StabilityPlan",
-                    "StabilityTimepointTask",
-                ),
+                # 时间点任务仍是单状态：任务的"状态"是明细行状态
+                # （pending_placement / placed / active / completed）的镜像，
+                # 与**方案的生命周期**（进行中/暂停/终止）是两回事，不跟着改。
+                ("StabilityTimepointTask",),
                 ("senaite_one_state_workflow",),
             ),
+            (
+                # 阶段 6a：稳定性方案改绑三态工作流（进行中 / 已暂停 / 已终止）。
+                # 定义见 profiles/default/workflows/senaite_stability_plan_workflow/。
+                ("StabilityPlan",),
+                ("senaite_stability_plan_workflow",),
+            ),
         )
+        available = set(getattr(wf_tool, "objectIds", lambda: [])() or [])
         for portal_types, workflows in bindings:
+            missing = [w for w in workflows if w not in available]
+            if missing:
+                # 工作流对象还不存在。本 profile 的 workflows/ 目录是由标准
+                # `workflow` 导入步骤建的，那一步与本步的先后由 GenericSetup
+                # 的依赖图决定 —— 所以这里**不能 raise**：profile 里的
+                # workflows.xml 已经声明了绑定，那一步会正确完成，
+                # 这里只是"再确认一次"的兜底。
+                logger.warning(
+                    "Workflow(s) not available yet, skipping binding %s -> %s "
+                    "(missing: %s)",
+                    ", ".join(portal_types),
+                    ", ".join(workflows),
+                    ", ".join(missing),
+                )
+                continue
             try:
                 wf_tool.setChainForPortalTypes(portal_types, workflows)
             except Exception:
@@ -712,6 +880,27 @@ def _setup_stability_content(portal):
                 )
                 continue
 
+    def migrate_plan_workflow_states():
+        """阶段 6a：给存量方案补工作流状态（幂等）。
+
+        为什么必须做：方案从 ``senaite_one_state_workflow`` 换绑到
+        ``senaite_stability_plan_workflow`` 之后，**存量方案在新工作流下没有任何
+        状态记录** —— ``getInfoFor`` 返回空串。虽然 ``plan_status.normalize_state``
+        把空当「进行中」（功能不会坏），但目录里 ``review_state`` 也是空，
+        方案列表的状态列和状态筛选就都是空的，等于"状态没生效"。
+
+        ★ 只补"完全没有状态"的：已经是 paused / terminated 的方案
+        **绝不能被覆盖** —— 那会静默解冻一个被人工停掉的方案。
+        """
+        try:
+            from maitux.stability.plan_status import migrate_existing_plans
+        except Exception:
+            logger.exception(
+                "Failed to import the plan status module; skipping the "
+                "workflow state migration")
+            return 0
+        return migrate_existing_plans(actor=u"profile-import")
+
     container = None
     for cid in _candidate_ids(MODULE_ID):
         container = portal.get(cid)
@@ -759,6 +948,18 @@ def _setup_stability_content(portal):
         delete_default_studies(container)
         reorder_children(container, [item[0] for item in STATIC_TABLES])
         scrub_missing_children(container)
+
+    # 阶段 6a：换绑工作流后给存量方案补状态。放在容器/表都建好之后 ——
+    # 方案可能就在这些容器里，早于它们跑会漏掉"刚被建出来"的那批。
+    try:
+        migrated = migrate_plan_workflow_states()
+        if migrated:
+            logger.info(
+                "Initialized the stability plan workflow state for %d plan(s)",
+                migrated)
+    except Exception:
+        logger.exception(
+            "Failed to initialize the workflow state of existing stability plans")
 
     setup_tool = api.get_senaite_setup()
     if setup_tool:

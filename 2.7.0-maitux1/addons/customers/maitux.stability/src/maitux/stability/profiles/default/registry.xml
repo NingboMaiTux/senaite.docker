@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!-- 稳定性「样品模板 + 自动登样」的站点级配置（plone.app.registry）。
+
+     记录键 = prefix + "." + 字段名，即 maitux.stability.auto_create_enabled 等。
+
+     ⚠️ 本文件是 GenericSetup profile 文件：**改它必须重跑 profile 才生效**（R3）。
+        但代码侧有兜底 —— automation.ensure_records() 会在打开设置页时补齐缺失记录，
+        所以"加了字段忘了重跑 profile"只会少记录、不会 500。 -->
+<registry>
+  <records interface="maitux.stability.automation.IStabilityAutomationSettings"
+           prefix="maitux.stability" />
+</registry>
