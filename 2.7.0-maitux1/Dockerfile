@@ -141,6 +141,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     mkdir -p $SENAITE_HOME/buildout-cache/downloads; \
     mkdir -p $SENAITE_INSTANCE_HOME/eggs; \
     mkdir -p $WHEELHOUSE; \
+    find /cache/eggs /cache/wheelhouse /cache/buildout-downloads \
+      -iname 'ZODB-5.8.1.post1*' -exec rm -rf {} + 2>/dev/null || true; \
     cp -a /cache/buildout-downloads/. $SENAITE_HOME/buildout-cache/downloads/ || true; \
     cp -a /cache/eggs/. $SENAITE_INSTANCE_HOME/eggs/ || true; \
     cp -a /cache/wheelhouse/. $WHEELHOUSE/ || true; \
