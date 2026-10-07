@@ -34,7 +34,8 @@
       <tal:block repeat="widget view/widgets">
         <tr tal:define="idx python:widget.name.split('.')[-1]"
             tal:attributes="class python:'%s row-%d%s' % (widget.klass, repeat['widget'].number(), widget.mode=='hidden' and ' hidden' or '');
-                            data-index idx;"
+                            data-index idx;
+                            data-voided python:'1' if view.row_is_voided(idx) else '0';"
             tal:condition="python:view._includeRow(widget.name) and idx != 'AA'">
           <metal:block define-macro="widget-row">
             <div tal:replace="structure widget/render"></div>
@@ -45,6 +46,81 @@
   </table>
   <input type="hidden" tal:replace="structure view/counterMarker" />
   <button type="button" class="btn btn-sm btn-outline-secondary mb-2" id="stability-plan-details-add-row" i18n:translate="">Add row</button>
+
+  <style type="text/css">
+    /* 时间点行的状态徽标。
+       中文注释：不依赖 Bootstrap 的 .badge 配色类（版本升级会变），
+       这里自带一份最小样式，和 task_board.pt 自带 <style> 的做法一致。 */
+    .stability-timepoint-status {
+      display: inline-block;
+      padding: .15rem .4rem;
+      font-size: .75rem;
+      font-weight: 600;
+      line-height: 1.2;
+      border-radius: .2rem;
+      white-space: nowrap;
+      color: #fff;
+      background-color: #6c757d;
+    }
+    .stability-timepoint-status[data-status="active"] { background-color: #17a2b8; }
+    .stability-timepoint-status[data-status="completed"] { background-color: #28a745; }
+    .stability-timepoint-status[data-status="pending_placement"] { background-color: #6c757d; }
+    .stability-timepoint-status[data-status="placed"] { background-color: #0d6efd; }
+
+    /* 0 点（基线点）行的标记：深色描边，跟状态徽标区分开 */
+    .stability-timepoint-initial {
+      display: inline-block;
+      margin-right: .25rem;
+      padding: .15rem .4rem;
+      font-size: .75rem;
+      font-weight: 600;
+      line-height: 1.2;
+      border-radius: .2rem;
+      white-space: nowrap;
+      color: #fff;
+      background-color: #343a40;
+    }
+
+    /* 阶段 6c：**已作废 / 已废弃**的行在编辑页里**不显示**（需求：
+       废弃行不出现在编辑页，只在「废弃」筛选里查得到）。
+
+       ★ 只隐藏，**绝不 disable、绝不从 DOM 里删**：
+         被禁用的控件浏览器**根本不提交** → "计数标记说有这一行、请求里
+         却没有" → z3c.form 的 `MultiWidget.extract` 拿 `NO_VALUE` 哨兵占位
+         → 哨兵不可 pickle → 事务 commit 时 PicklingError → 整个保存 500。
+         这就是 2026-09-30 生产事故（编辑页保存报错）的根因。
+         行照旧随表单提交；判据在服务端（browser/edit.py +
+         timepoints.sanitize_submitted_rows：废弃三件套是服务端专有字段，
+         提交上来也不认）。 */
+    tr[data-voided="1"] {
+      display: none;
+    }
+    tr[data-voided="1"] .dgf--row-delete,
+    tr[data-voided="1"] .dgf--row-add {
+      display: none !important;
+    }
+  </style>
+
+  <!-- 时间点行的状态文案与删除守卫提示。
+       中文注释：这些文案由下面的 JS 读取，所以渲染成**真正的 DOM 元素**再让 JS 取文本，
+       不把译文拼进 JS 字符串（译文里的引号会把脚本拼坏）——
+       这是本包模板的一贯做法（task_board.pt 用 data-msg-*，此处用隐藏元素）。
+       状态文案复用明细状态词表的既有 msgid，不新增重复条目。 -->
+  <div class="d-none" id="stability-timepoint-labels">
+    <span class="stability-status-label" data-status="pending_placement" i18n:translate="">Pending Placement</span>
+    <span class="stability-status-label" data-status="placed" i18n:translate="">Placed</span>
+    <span class="stability-status-label" data-status="active" i18n:translate="">In Progress</span>
+    <span class="stability-status-label" data-status="completed" i18n:translate="">Completed</span>
+    <span class="stability-delete-blocked-msg" i18n:translate="">Only timepoints that have not been generated yet can be deleted.</span>
+    <span class="stability-protected-row-title" i18n:translate="">Cannot delete: this timepoint has already started</span>
+    <!-- 0 点行（B 方案，2026-09-30）：徽标文案 + 删除时的二次确认 -->
+    <span class="stability-zero-point-badge" i18n:translate="">Zero Point</span>
+    <span class="stability-zero-point-delete-confirm" i18n:translate="">This row is the zero point (baseline) of the plan: if you delete it, no past sample can be linked as the baseline. Delete this row?</span>
+    <!-- 阶段 6d：已废弃的行在编辑页里**不显示**（CSS 隐藏），
+         所以原来那两条「已作废」悬停提示/徽标文案已经没有用处，已删除：
+         追溯靠审计（void_timepoint 快照），不在这一页上放废弃标记。 -->
+  </div>
+
   <script type="text/javascript" src="" tal:attributes="src string:${view/portal_url}/++resource++senaite.core.z3cform.static/datagrid.js"></script>
   <link rel="stylesheet" href="" type="text/css" media="screen" tal:attributes="href string:${view/portal_url}/++resource++senaite.core.z3cform.static/datagrid.css"/>
   <script type="text/javascript">
@@ -131,13 +207,232 @@
       grid.trigger_custom_event("datagrid:row_added", {datagrid: datagrid, row: newtr});
     }
 
+    /* ------------------------------------------------------------------
+       时间点行删除守卫（前端部分）
+       ------------------------------------------------------------------
+       需求：只有「待放置（Pending Placement）」的时间点行可以删除，
+       「进行中」「已完成」的行不允许删除。
+
+       这里做的两件事：
+         1. 给每行挂上状态徽标，并把受保护行的删除按钮**隐藏**；
+         2. 用捕获阶段的点击拦截兜底（防止按钮被别处重新启用，
+            或者用户改 DOM 后仍点得动）。
+
+       ★ 这只是体验层：真正的判据在服务端
+         （browser/edit.py 的 StabilityPlanEditForm）。绕过 JS 直接 POST
+         一样删不掉，这个函数失效不会造成数据问题。
+
+       状态值直接从该行的隐藏列 `detail_status` 输入框读 ——
+       它是随行走的，拖动排序之后依然对应正确的那一行；
+       读不到（空值）时按「待放置」处理，与后端 normalize_status 口径一致。
+       ------------------------------------------------------------------ */
+    function textOf(el) {
+      if (!el || typeof el.textContent !== "string") return "";
+      return el.textContent.replace(/^\s+|\s+$/g, "");
+    }
+
+    function labelText(selector) {
+      var host = document.getElementById("stability-timepoint-labels");
+      if (!host) return "";
+      return textOf(host.querySelector(selector));
+    }
+
+    function statusLabels() {
+      var map = {};
+      var host = document.getElementById("stability-timepoint-labels");
+      if (!host) return map;
+      var nodes = host.querySelectorAll(".stability-status-label");
+      for (var i = 0; i < nodes.length; i++) {
+        var key = nodes[i].getAttribute("data-status");
+        if (key) map[key] = textOf(nodes[i]);
+      }
+      return map;
+    }
+
+    function rowStatus(row) {
+      var field = row.querySelector(
+        'input[name$=".detail_status"],select[name$=".detail_status"],textarea[name$=".detail_status"]');
+      var value = field && field.value != null ? "" + field.value : "";
+      value = value.replace(/^\s+|\s+$/g, "");
+      return value || "pending_placement";
+    }
+
+    function isDeletableStatus(status) {
+      /* 只有"还没登样"的行允许删除：待放置 / 已放置（先放置、再登样）。
+         登过样（active）或已完成（completed）的行不允许删除。 */
+      return status === "pending_placement" || status === "placed";
+    }
+
+    function rowMonths(row) {
+      /* 该行的时间点（月）。取的是随行走的隐藏/下拉字段，
+         所以拖动排序之后依然对应正确的那一行。 */
+      var field = row.querySelector(
+        'input[name$=".timepoint_days"],select[name$=".timepoint_days"],textarea[name$=".timepoint_days"]');
+      var value = field && field.value != null ? "" + field.value : "";
+      return value.replace(/^\s+|\s+$/g, "");
+    }
+
+    function isZeroPointRow(row) {
+      /* 是否 0 点（基线点）行。
+         ★ 口径与后端 timepoints.is_initial_month 一致：**只有明确等于 0 才算**，
+         空值 / 脏值（"abc"、"0abc"）一律不算 —— 脏数据不能冒充基线点，
+         否则会给用户弹一个莫名其妙的"0 点确认"。
+         2026-09-30（B 方案）：0 点不强制，但删它要问一句。 */
+      var raw = rowMonths(row);
+      if (raw === "") return false;
+      return /^0(\.0+)?$/.test(raw);
+    }
+
+    function isVoidedRow(row) {
+      /* 阶段 6c：这一行是否已废弃。
+         判据取自服务端渲染出来的 data-voided（模板用 timepoints.is_voided 算的），
+         不在前端自己读 voided_at —— 前端只是体验层，判据不能在两处各写一份。 */
+      return !!(row && row.getAttribute && row.getAttribute("data-voided") === "1");
+    }
+
+    function applyVoidedRows(datagrid) {
+      /* 已废弃的行：**不显示**（CSS `tr[data-voided="1"] {display:none}` 已做到），
+         并且必须**继续随表单提交**。
+
+         ★★ 这一段是 2026-09-30 生产事故（编辑页保存报错）的现场：
+            原来这里用 `setAttribute("disabled", "disabled")` 把废弃行的输入控件
+            禁用掉 —— 被禁用的控件浏览器**根本不提交**，于是"计数标记说有这一行、
+            请求里却没有"，z3c.form 的 `MultiWidget.extract` 就拿 `NO_VALUE` 哨兵
+            占位；哨兵不可 pickle，事务在 commit 时抛 PicklingError，
+            **用户那次保存整个丢掉**。
+            所以：隐藏可以（CSS 就够），禁用**绝对不行**，从 DOM 里删行也不行
+            （那等于告诉服务端"用户删了它"）。
+            这里顺手把可能被别处加上的 disabled 摘掉 —— 这条不变式宁可
+            运行时兜住，也不能只写在注释里。 */
+      if (!datagrid) return;
+      var rows = datagrid.querySelectorAll("tr[data-index]");
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var index = row.getAttribute("data-index");
+        if (!index || index === "TT" || index === "AA") continue;
+        if (!isVoidedRow(row)) continue;
+        row.classList.add("stability-voided-row");
+        var inputs = row.querySelectorAll("input,select,textarea");
+        for (var j = 0; j < inputs.length; j++) {
+          if (inputs[j].disabled) {
+            inputs[j].disabled = false;
+          }
+          inputs[j].removeAttribute("disabled");
+        }
+      }
+    }
+
+    function applyDeleteGuard(datagrid) {
+      if (!datagrid) return;
+      var labels = statusLabels();
+      var blockedTitle = labelText(".stability-protected-row-title");
+      var rows = datagrid.querySelectorAll("tr[data-index]");
+
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var index = row.getAttribute("data-index");
+        if (!index || index === "TT" || index === "AA") continue;
+
+        var status = rowStatus(row);
+        var deletable = isDeletableStatus(status);
+        row.setAttribute("data-detail-status", status);
+
+        var btn = row.querySelector(".dgf--row-delete");
+        if (btn) {
+          // 原按钮上有平台给的可翻译 title（"Delete row"），先存下来再换，
+          // 不能直接 removeAttribute —— 那样可删除的行会丢掉提示。
+          if (btn.dataset && btn.dataset.stabilityTitle === undefined) {
+            btn.dataset.stabilityTitle = btn.getAttribute("title") || "";
+          }
+          var originalTitle = btn.dataset ? btn.dataset.stabilityTitle : "";
+          btn.style.display = deletable ? "" : "none";
+          btn.setAttribute("title", deletable ? originalTitle : blockedTitle);
+        }
+
+        var cell = row.querySelector("td.delete-row");
+        if (!cell) continue;
+        var badge = cell.querySelector(".stability-timepoint-status");
+        if (!badge) {
+          badge = document.createElement("span");
+          cell.appendChild(badge);
+        }
+        badge.className = "stability-timepoint-status";
+        badge.setAttribute("data-status", status);
+        badge.textContent = labels[status] || status;
+        if (deletable) {
+          badge.removeAttribute("title");
+        } else {
+          badge.setAttribute("title", blockedTitle);
+        }
+
+        /* 0 点（基线点）行额外挂一个标记：用户一眼认得出哪一行是基线
+           （时间点下拉里显示的是数字 "0"，不点开看不出来）。 */
+        var initial = cell.querySelector(".stability-timepoint-initial");
+        if (isZeroPointRow(row)) {
+          if (!initial) {
+            initial = document.createElement("span");
+            initial.className = "stability-timepoint-initial";
+            cell.insertBefore(initial, badge);
+          }
+          initial.textContent = labelText(".stability-zero-point-badge");
+        } else if (initial && initial.parentNode) {
+          initial.parentNode.removeChild(initial);
+        }
+      }
+    }
+
+    function onDeleteClickCapture(event) {
+      var target = event.target;
+      if (!target || !target.closest) return;
+      var btn = target.closest(".dgf--row-delete");
+      if (!btn) return;
+      var row = btn.closest("tr");
+      if (!row) return;
+      if (!isDeletableStatus(rowStatus(row))) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+        window.alert(labelText(".stability-delete-blocked-msg") || "");
+        return;
+      }
+
+      /* 0 点行：删除前**二次确认**（B 方案，2026-09-30）。
+         它并不"更不可删"（后端口径不变：待放置/已放置的行都能删），
+         但删掉之后这个方案就再也关联不了基线样品了 —— 值得问一句。
+         用户点"取消"就整条拦掉，不让平台自己的删除处理器跑。 */
+      if (isZeroPointRow(row)) {
+        var message = labelText(".stability-zero-point-delete-confirm");
+        if (message && !window.confirm(message)) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+        }
+      }
+    }
+
+    function onRowsChanged(event) {
+      var datagrid = event.detail && event.detail.datagrid;
+      if (!datagrid || !datagrid.dataset) return;
+      if (datagrid.dataset.planDetails !== "1") return;
+      applyDeleteGuard(datagrid);
+      applyVoidedRows(datagrid);
+    }
+
     function init() {
       var datagrid = document.querySelector(".datagridwidget-body[data-plan-details='1']");
       if (!datagrid) return;
       fixUidReferenceWidgetAttrs(datagrid);
       sanitizeTemplateRow(datagrid);
+      applyDeleteGuard(datagrid);
+      /* 阶段 6c：作废行只读 + 灰显 + 排末尾（D7）。
+         ★ 放在 applyDeleteGuard 之后：守卫会按状态挂徽标，
+           作废行自己的徽标要在那之后再补一次。 */
+      applyVoidedRows(datagrid);
+      datagrid.addEventListener("click", onDeleteClickCapture, true);
       document.body.addEventListener("datagrid:row_added", reindex);
       document.body.addEventListener("datagrid:row_removed", reindex);
+      document.body.addEventListener("datagrid:row_added", onRowsChanged);
+      document.body.addEventListener("datagrid:row_removed", onRowsChanged);
       var btn = document.getElementById("stability-plan-details-add-row");
       if (btn && !btn.__bound) {
         btn.__bound = true;

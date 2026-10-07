@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import importlib.util
 import os
 import sys
 import types
@@ -13,26 +12,52 @@ import unittest
 import transaction  # noqa: F401
 
 
-def load_signflow_module():
-    """加载 signflow 模块。"""
-    file_path = os.path.abspath(os.path.join(
-        os.path.dirname(__file__), "..", "services", "signflow.py"))
-    spec = importlib.util.spec_from_file_location("test_signflow_module", file_path)
+class Namespace(object):
+    """Python 2.7 下替代 types.SimpleNamespace 的最小实现。
+
+    部署环境跑的是 Python 2.7（SENAITE 2.x），而 types.SimpleNamespace 是
+    Python 3.3 才有的，直接用会让整个测试模块在 py2.7 下 import 失败。
+    """
+
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
+def load_module_from_path(file_path, name):
+    """按文件路径加载模块，兼容 Python 2.7 / 3.x。"""
+    try:
+        import importlib.util
+    except ImportError:
+        import imp
+        return imp.load_source(name, file_path)
+
+    spec = importlib.util.spec_from_file_location(name, file_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
+def load_signflow_module():
+    """加载 signflow 模块。"""
+    file_path = os.path.abspath(os.path.join(
+        os.path.dirname(__file__), "..", "services", "signflow.py"))
+    return load_module_from_path(file_path, "test_signflow_module")
+
+
 def load_auditlog_module():
     """加载 auditlog 模块，并替换外部依赖。"""
-    api_module = types.SimpleNamespace(
+    api_module = Namespace(
         get_uid=lambda obj: getattr(obj, "uid", ""),
         get_portal=lambda: object(),
     )
 
     snapshot_storage = []
+    # 用可变容器承载"对象是否支持快照"，便于按用例切换
+    snapshot_support = {"supported": True}
     snapshot_module = types.ModuleType("bika.lims.api.snapshot")
     snapshot_module.get_storage = lambda obj: snapshot_storage
+    snapshot_module.supports_snapshots = (
+        lambda obj: snapshot_support["supported"])
     snapshot_module.take_snapshot = lambda *args, **kwargs: {
         "__metadata__": {},
         "action": kwargs.get("action"),
@@ -46,7 +71,7 @@ def load_auditlog_module():
     audit_subscriber_module = types.ModuleType("bika.lims.subscribers.auditlog")
     audit_subscriber_module.reindex_object = lambda obj: None
 
-    logger_stub = types.SimpleNamespace(
+    logger_stub = Namespace(
         warning=lambda *a, **kw: None,
         error=lambda *a, **kw: None,
         info=lambda *a, **kw: None,
@@ -125,19 +150,25 @@ def load_auditlog_module():
     class DummyStore(object):
         def __init__(self, portal):
             self.saved = []
+
         def save(self, record):
-            self.saved.append(dict(record))
-            return dict(record)
+            data = dict(record)
+            # 与真实 SignatureRecordStore.save() 的契约保持一致：
+            # 调用方没给 signature_id 时由 store 自行生成，并回传落库后的记录。
+            data.setdefault(
+                "signature_id", "generated-{}".format(len(self.saved) + 1))
+            data.setdefault("status", "created")
+            self.saved.append(dict(data))
+            return data
     store_module.SignatureRecordStore = DummyStore
     sys.modules["maitux.esignature.storage"] = types.ModuleType("maitux.esignature.storage")
     sys.modules["maitux.esignature.storage.store"] = store_module
 
     file_path = os.path.abspath(os.path.join(
         os.path.dirname(__file__), "..", "adapters", "auditlog.py"))
-    spec = importlib.util.spec_from_file_location("test_auditlog_module", file_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_module_from_path(file_path, "test_auditlog_module")
     module._test_snapshot_storage = snapshot_storage
+    module._test_snapshot_support = snapshot_support
     module._test_siteinstall = siteinstall_module
     return module
 
@@ -304,10 +335,7 @@ class TestVerifiedSignatureContext(unittest.TestCase):
 
         file_path = os.path.abspath(os.path.join(
             os.path.dirname(__file__), "..", "services", "context.py"))
-        spec = importlib.util.spec_from_file_location("test_context_module", file_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        return load_module_from_path(file_path, "test_context_module")
 
     def make(self, uid):
         obj = DummyContext()
@@ -385,6 +413,76 @@ class TestVerifiedSignatureContext(unittest.TestCase):
         for uid in ("A", "B"):
             self.assertFalse(
                 ctx.is_verified_signature_context_valid(self.make(uid), "reject", "op1"))
+
+
+class TestRecordSignatureEntryPoint(unittest.TestCase):
+    """record_signature：非工作流动作（如库存领用）的签名留痕入口。"""
+
+    def test_record_signature_persists_record_and_appends_snapshot(self):
+        """既落一条签名记录，也追加一条独立审计快照。"""
+        auditlog = load_auditlog_module()
+        before = len(auditlog._test_snapshot_storage)
+
+        stored = auditlog.record_signature(
+            DummyContext(),
+            {
+                "object_uid": "UID-1",
+                "object_path": "/portal/item",
+                "transition_id": "stock_consume",
+                "user_id": "op1",
+                "initiator_user_id": "op1",
+                "primary_signer_user_id": "op1",
+                "countersigner_user_id": "op2",
+                "require_countersign": True,
+                "signature_type": "stock_consume_countersign",
+                "meaning": "consume",
+                "reason": "two person check",
+                "signature_id": "sig-fixed",
+            },
+            "stock_consume",
+        )
+
+        # 调用方预生成的签名 ID 必须被沿用（否则业务流水与签名记录对不上）
+        self.assertEqual(stored["signature_id"], "sig-fixed")
+        self.assertEqual(stored["countersigner_userid"], "op2")
+        self.assertTrue(stored["require_countersign"])
+        self.assertEqual(len(auditlog._test_snapshot_storage), before + 1)
+
+    def test_record_signature_skips_snapshot_when_unsupported(self):
+        """对象不支持快照时不得追加审计快照，否则会拖垮调用方的业务事务。"""
+        auditlog = load_auditlog_module()
+        auditlog._test_snapshot_support["supported"] = False
+        before = len(auditlog._test_snapshot_storage)
+
+        stored = auditlog.record_signature(
+            DummyContext(),
+            {
+                "object_uid": "UID-1",
+                "user_id": "op1",
+                "initiator_user_id": "op1",
+                "countersigner_user_id": "op2",
+                "require_countersign": True,
+            },
+            "stock_consume",
+        )
+
+        # 签名记录仍然落库，只是不写审计快照
+        self.assertEqual(stored["object_uid"], "UID-1")
+        self.assertEqual(len(auditlog._test_snapshot_storage), before)
+
+    def test_record_signature_generates_id_when_not_provided(self):
+        """未预生成签名 ID 时，由签名库自行给出一个 ID。"""
+        auditlog = load_auditlog_module()
+        stored = auditlog.record_signature(
+            DummyContext(),
+            {
+                "object_uid": "UID-1",
+                "user_id": "op1",
+                "initiator_user_id": "op1",
+            },
+            "stock_consume",
+        )
+        self.assertTrue(stored.get("signature_id"))
 
 
 if __name__ == "__main__":

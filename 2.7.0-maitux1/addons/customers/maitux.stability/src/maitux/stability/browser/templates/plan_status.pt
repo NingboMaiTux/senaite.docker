@@ -1,0 +1,147 @@
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      metal:use-macro="here/main_template/macros/master"
+      i18n:domain="maitux.stability">
+  <body>
+    <metal:content fill-slot="content-core">
+      <h1 tal:content="view/page_title">Pause Stability Plan</h1>
+
+      <div class="alert alert-warning"
+           tal:condition="python:bool(view.state_notice())">
+        <span tal:content="view/state_notice">notice</span>
+      </div>
+
+      <div class="alert alert-danger"
+           tal:condition="python:bool(view.problem)">
+        <span tal:content="view/problem">problem</span>
+      </div>
+
+      <table class="table table-sm table-striped">
+        <tbody>
+          <tr>
+            <th i18n:translate="">Plan</th>
+            <td><a tal:attributes="href view/plan_url"
+                   tal:content="view/plan_title">Plan</a></td>
+          </tr>
+          <tr>
+            <th i18n:translate="">Current Status</th>
+            <td tal:content="view/current_state_title">In Progress</td>
+          </tr>
+          <tr>
+            <th i18n:translate="">New Status</th>
+            <td tal:content="view/target_state_title">Paused</td>
+          </tr>
+          <tr tal:condition="python:bool(view.status_changed_at())">
+            <th i18n:translate="">Last Status Change</th>
+            <td>
+              <span tal:content="view/status_changed_at">2026-01-01 08:00</span>
+              <span> / </span>
+              <span tal:content="view/status_changed_by">admin</span>
+              <div class="text-muted"
+                   tal:content="view/status_changed_reason">reason</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- 终止：先把该方案下的样品摊开，未完成的逐条列出来（需求第 1 轮第 3 条） -->
+      <tal:block tal:condition="view/is_terminate">
+        <div class="alert alert-danger"
+             tal:condition="python:bool(view.unfinished_samples())">
+          <div i18n:translate="">
+            This plan has unfinished samples. Terminating the plan stops all
+            further operations on its timepoints. Please review the list below
+            before continuing.
+          </div>
+        </div>
+
+        <div class="alert alert-info"
+             tal:condition="python:not view.unfinished_samples() and bool(view.samples)">
+          <span i18n:translate="">All samples of this plan are finished.</span>
+        </div>
+
+        <!-- id 是给**自动检查**用的稳定锚点：表头文案是翻译过的（中文站上是
+             「样品状态」），用英文文案去 grep 会得到假阴性 ——
+             2026-09-30 就因此误判成"站点上没样品、表格不渲染"。
+             断言一律抓这个 id（见 tools/server_checks/s6a_http_check4.sh 第 5 节）。 -->
+        <table id="stability-plan-status-samples"
+               class="table table-sm table-striped"
+               tal:condition="python:bool(view.samples)">
+          <thead>
+            <tr>
+              <th i18n:translate="">Task</th>
+              <th i18n:translate="">Sample</th>
+              <th i18n:translate="">Sample Status</th>
+              <th i18n:translate="">Finished</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr tal:repeat="item view/samples">
+              <td tal:content="python:view.sample_task_title(item)">TP 1 (3 Months)</td>
+              <td>
+                <a tal:condition="python:bool(item.get('sample_url'))"
+                   tal:attributes="href item/sample_url"
+                   tal:content="item/sample_id">SAMPLE</a>
+                <span tal:condition="python:not item.get('sample_url')">-</span>
+              </td>
+              <td tal:content="python:view.sample_state_title(item.get('sample_state'))">Received</td>
+              <td>
+                <span tal:condition="python:item.get('finished')" i18n:translate="">Yes</span>
+                <span tal:condition="python:not item.get('finished')" i18n:translate="">No</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </tal:block>
+
+      <div class="alert alert-info">
+        <div i18n:translate="">
+          Changing the status is recorded in the audit trail together with who
+          did it, when, and the reason.
+        </div>
+        <div class="mb-0"
+             tal:condition="view/is_terminate" i18n:translate="">
+          Terminating is final: a terminated plan cannot be resumed, and its
+          samples are not changed in any way.
+        </div>
+        <div class="mb-0"
+             tal:condition="python:view.transition == 'pause'" i18n:translate="">
+          A paused plan stops generating samples automatically; all operations
+          on its timepoints are frozen until it is resumed.
+        </div>
+      </div>
+
+      <div class="alert alert-danger"
+           tal:condition="python:not view.can_apply()">
+        <span tal:content="view/block_message">not allowed</span>
+      </div>
+
+      <form method="post"
+            tal:attributes="action string:${context/absolute_url}/@@plan_status">
+        <input tal:replace="structure context/@@authenticator/authenticator"/>
+        <input type="hidden" name="transition"
+               tal:attributes="value view/transition"/>
+
+        <div class="form-group">
+          <label for="stability-plan-status-reason" i18n:translate="">Reason</label>
+          <textarea id="stability-plan-status-reason" name="reason" rows="3"
+                    class="form-control" required="required"
+                    tal:content="view/reason"></textarea>
+          <small class="form-text text-muted" i18n:translate="">
+            Required. It is recorded in the audit trail and shown on the plan
+            page.
+          </small>
+        </div>
+
+        <button type="submit" name="button_apply" value="1"
+                class="btn btn-danger btn-sm"
+                tal:attributes="disabled python:None if view.can_apply() else 'disabled'"
+                tal:content="view/submit_label">Terminate</button>
+        <button type="submit" name="button_cancel" value="1"
+                class="btn btn-secondary btn-sm" i18n:translate="">Cancel</button>
+      </form>
+    </metal:content>
+  </body>
+</html>

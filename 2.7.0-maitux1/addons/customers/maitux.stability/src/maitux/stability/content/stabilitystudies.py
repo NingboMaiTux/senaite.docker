@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 from bika.lims.interfaces import IDoNotSupportSnapshots
 from plone.supermodel import model
 from senaite.core.content.base import Container
