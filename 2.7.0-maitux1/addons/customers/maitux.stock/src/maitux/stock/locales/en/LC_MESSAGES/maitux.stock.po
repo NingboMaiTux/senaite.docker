@@ -158,9 +158,6 @@ msgstr "Purchase Orders"
 msgid "Quantity"
 msgstr "Quantity"
 
-msgid "Quantity Ordered must be a number (decimals allowed)"
-msgstr "Quantity Ordered must be a number (decimals allowed)"
-
 msgid "Remarks"
 msgstr "Remarks"
 
@@ -532,3 +529,615 @@ msgstr "operation_split"
 
 msgid "operation_stocktake"
 msgstr "operation_stocktake"
+
+msgid "E-Signature"
+msgstr "E-Signature"
+
+msgid "Two-person"
+msgstr "Two-person"
+
+msgid "Two-Person Electronic Signature Required"
+msgstr "Two-Person Electronic Signature Required"
+
+msgid "At least one selected batch belongs to a stock item configured to require a two-person electronic signature. Two different operators must each enter their own account and password on this page. The stock is deducted only after both credentials are verified in a single submission."
+msgstr "At least one selected batch belongs to a stock item configured to require a two-person electronic signature. Two different operators must each enter their own account and password on this page. The stock is deducted only after both credentials are verified in a single submission."
+
+msgid "Allowed roles for the second reviewer:"
+msgstr "Allowed roles for the second reviewer:"
+
+msgid "Electronic Signature"
+msgstr "Electronic Signature"
+
+msgid "First Operator"
+msgstr "First Operator"
+
+msgid "First Operator Password"
+msgstr "First Operator Password"
+
+msgid "Always the currently logged-in operator who performs the deduction."
+msgstr "Always the currently logged-in operator who performs the deduction."
+
+msgid "Second Reviewer"
+msgstr "Second Reviewer"
+
+msgid "Second Reviewer Password"
+msgstr "Second Reviewer Password"
+
+msgid "Must be a different account from the first operator."
+msgstr "Must be a different account from the first operator."
+
+msgid "Meaning"
+msgstr "Meaning"
+
+msgid "What this signature authorizes, for example: consume reagent for a routine test."
+msgstr "What this signature authorizes, for example: consume reagent for a routine test."
+
+msgid "Reason"
+msgstr "Reason"
+
+msgid "Business reason, stored in the signature record and audit trail."
+msgstr "Business reason, stored in the signature record and audit trail."
+
+msgid "Request Stock Usage"
+msgstr "Request Stock Usage"
+
+msgid "These items require an approval workflow"
+msgstr "These items require an approval workflow"
+
+msgid "At least one selected batch belongs to a stock item that requires electronic signatures. The stock cannot be consumed directly: a usage request must be raised and signed first, then reviewed and signed by a different person, and only then is the stock deducted."
+msgstr "At least one selected batch belongs to a stock item that requires electronic signatures. The stock cannot be consumed directly: a usage request must be raised and signed first, then reviewed and signed by a different person, and only then is the stock deducted."
+
+msgid "Approval"
+msgstr "Approval"
+
+msgid "Required"
+msgstr "Required"
+
+msgid "Usage Request"
+msgstr "Usage Request"
+
+msgid "Purpose"
+msgstr "Purpose"
+
+msgid "Why this stock is requested. The reviewer will see this text together with the requested quantities."
+msgstr "Why this stock is requested. The reviewer will see this text together with the requested quantities."
+
+msgid "After submitting you will be asked to sign electronically as the applicant. The stock is deducted only after a different person reviews and signs the request."
+msgstr "After submitting you will be asked to sign electronically as the applicant. The stock is deducted only after a different person reviews and signs the request."
+
+msgid "Submit Request and Sign"
+msgstr "Submit Request and Sign"
+
+msgid "Applicant"
+msgstr "Applicant"
+
+msgid "Submitted On"
+msgstr "Submitted On"
+
+msgid "Reviewer"
+msgstr "Reviewer"
+
+msgid "Reviewed On"
+msgstr "Reviewed On"
+
+msgid "Rejection Reason"
+msgstr "Rejection Reason"
+
+msgid "Requested Items"
+msgstr "Requested Items"
+
+msgid "No items"
+msgstr "No items"
+
+msgid "Signature Trail"
+msgstr "Signature Trail"
+
+msgid "Step"
+msgstr "Step"
+
+msgid "Signer"
+msgstr "Signer"
+
+msgid "Signed At"
+msgstr "Signed At"
+
+msgid "No signature yet"
+msgstr "No signature yet"
+
+msgid "This request cannot be approved right now"
+msgstr "This request cannot be approved right now"
+
+msgid "Approve and Sign"
+msgstr "Approve and Sign"
+
+msgid "Reject and Sign"
+msgstr "Reject and Sign"
+
+msgid "Withdraw"
+msgstr "Withdraw"
+
+msgid "Back to list"
+msgstr "Back to list"
+
+msgid "Draft"
+msgstr "Draft"
+
+msgid "Pending Review"
+msgstr "Pending Review"
+
+msgid "Approved"
+msgstr "Approved"
+
+msgid "Rejected"
+msgstr "Rejected"
+
+msgid "Cancelled"
+msgstr "Cancelled"
+
+msgid "Submit for Review"
+msgstr "Submit for Review"
+
+msgid "Approve"
+msgstr "Approve"
+
+msgid "Reject"
+msgstr "Reject"
+
+msgid "Stock Usage Requests"
+msgstr "Stock Usage Requests"
+
+msgid "Request No."
+msgstr "Request No."
+
+msgid "Requested"
+msgstr "Requested"
+
+msgid "All"
+msgstr "All"
+
+msgid "Select one request, then approve or reject it."
+msgstr "Select one request, then approve or reject it."
+
+msgid "Pending Request"
+msgstr "Pending Request"
+
+msgid "Review Usage Request"
+msgstr "Review Usage Request"
+
+msgid "Pending Usage Request"
+msgstr "Pending Usage Request"
+
+msgid "Open and Review"
+msgstr "Open and Review"
+
+msgid "No usage request is waiting for your review."
+msgstr "No usage request is waiting for your review."
+
+msgid "Please select only one batch: usage requests are reviewed one at a time."
+msgstr "Please select only one batch: usage requests are reviewed one at a time."
+
+msgid "Submit Request"
+msgstr "Submit Request"
+
+msgid "At least one selected batch belongs to a stock item that requires approval. The stock cannot be consumed directly: submitting this form raises a usage request that goes to a reviewer. The stock is deducted only after a different person reviews and signs the request."
+msgstr "At least one selected batch belongs to a stock item that requires approval. The stock cannot be consumed directly: submitting this form raises a usage request that goes to a reviewer. The stock is deducted only after a different person reviews and signs the request."
+
+msgid "After submitting, the request goes to the reviewer queue as pending review. The stock is deducted only after a different person reviews and signs it."
+msgstr "After submitting, the request goes to the reviewer queue as pending review. The stock is deducted only after a different person reviews and signs it."
+
+msgid "Usage request submitted for review."
+msgstr "Usage request submitted for review."
+
+msgid "The usage request was created but could not be submitted. Please open it and submit it again."
+msgstr "The usage request was created but could not be submitted. Please open it and submit it again."
+
+msgid "Stock Inventory"
+msgstr "Stock Inventory"
+
+msgid "Stock Items"
+msgstr "Stock Items"
+
+msgid "Low Stock"
+msgstr "Low Stock"
+
+msgid "Usage Trace"
+msgstr "Usage Trace"
+
+msgid "Usage Report"
+msgstr "Usage Report"
+
+msgid "Usage Requests"
+msgstr "Usage Requests"
+
+msgid "Approval Records"
+msgstr "Approval Records"
+
+msgid "Full audit log (with field value changes)"
+msgstr "Full audit log (with field value changes)"
+
+msgid "Action"
+msgstr "Action"
+
+msgid "Time"
+msgstr "Time"
+
+msgid "Details"
+msgstr "Details"
+
+msgid "No records yet"
+msgstr "No records yet"
+
+msgid "Split Stock Batches"
+msgstr "Split Stock Batches"
+
+msgid "Stock Take"
+msgstr "Stock Take"
+
+msgid "Tick one request, then approve or reject it."
+msgstr "Tick one request, then approve or reject it."
+
+msgid "stockusage_all"
+msgstr "All"
+
+msgid "stockusage_batch_detail"
+msgstr "Detail"
+
+msgid "stockusage_batch_number"
+msgstr "Manufacturer Lot / Batch No."
+
+msgid "stockusage_batch_number_only"
+msgstr "Lot / Batch No."
+
+msgid "stockusage_batch_status"
+msgstr "Batch Status"
+
+msgid "stockusage_col_from_batch"
+msgstr "From Batch"
+
+msgid "stockusage_col_operation"
+msgstr "Operation Type"
+
+msgid "stockusage_col_operation_date"
+msgstr "Operation Date"
+
+msgid "stockusage_col_operator"
+msgstr "Operator"
+
+msgid "stockusage_col_quantity"
+msgstr "Quantity"
+
+msgid "stockusage_col_remarks"
+msgstr "Remarks"
+
+msgid "stockusage_consume_return_total"
+msgstr "Total Consumed / Returned"
+
+msgid "stockusage_current_amount"
+msgstr "Current Amount"
+
+msgid "stockusage_date_from"
+msgstr "From Date"
+
+msgid "stockusage_date_to"
+msgstr "To Date"
+
+msgid "stockusage_destination"
+msgstr "Batch Destination"
+
+msgid "stockusage_enter_filter"
+msgstr "Enter a stock number or manufacturer lot, then click Search."
+
+msgid "stockusage_expiry"
+msgstr "Expiry Date"
+
+msgid "stockusage_export_csv"
+msgstr "Export CSV (current query)"
+
+msgid "stockusage_first_last_use"
+msgstr "First / Last Use"
+
+msgid "stockusage_include_worksheets"
+msgstr "Include linked worksheet destinations (slower on large datasets)"
+
+msgid "stockusage_linked_worksheets"
+msgstr "Linked worksheet destinations (worksheets using this batch)"
+
+msgid "stockusage_location"
+msgstr "Storage Location"
+
+msgid "stockusage_lot_label"
+msgstr "Manufacturer Lot:"
+
+msgid "stockusage_material_name"
+msgstr "Material Name:"
+
+msgid "stockusage_material_name_only"
+msgstr "Material Name"
+
+msgid "stockusage_next_page"
+msgstr "Next"
+
+msgid "stockusage_no_batch"
+msgstr "No matching stock batches. Please adjust the filters."
+
+msgid "stockusage_no_records"
+msgstr "No usage records for this batch yet"
+
+msgid "stockusage_none"
+msgstr "None"
+
+msgid "stockusage_none_short"
+msgstr "None"
+
+msgid "stockusage_page_size"
+msgstr "Page Size"
+
+msgid "stockusage_prev_page"
+msgstr "Previous"
+
+msgid "stockusage_report_no_rows"
+msgstr "No matching usage records. Please adjust the filters."
+
+msgid "stockusage_reset"
+msgstr "Reset"
+
+msgid "stockusage_search"
+msgstr "Search"
+
+msgid "stockusage_split_targets"
+msgstr "Split destinations (batches split from this batch)"
+
+msgid "stockusage_stock_number"
+msgstr "Stock Number (LIMS)"
+
+msgid "stockusage_stock_number_label"
+msgstr "Stock Number:"
+
+msgid "stockusage_stock_number_only"
+msgstr "Stock Number"
+
+msgid "stockusage_stock_type"
+msgstr "Stock Type"
+
+msgid "stockusage_stock_type_only"
+msgstr "Stock Type"
+
+msgid "stockusage_supplier"
+msgstr "Supplier"
+
+msgid "stockusage_supplier_only"
+msgstr "Supplier"
+
+msgid "stockusage_worksheets_skipped"
+msgstr "Linked worksheets were not resolved in this query (tick the box above and search again)"
+
+msgid "Stock Usage Trace"
+msgstr "Stock Usage Trace"
+
+msgid "Usage Query and Export"
+msgstr "Usage Query and Export"
+
+msgid "No."
+msgstr "No."
+
+msgid "Material Name"
+msgstr "Material Name"
+
+msgid "Manufacturer Lot / Batch No."
+msgstr "Manufacturer Lot / Batch No."
+
+msgid "Lot / Batch No."
+msgstr "Lot / Batch No."
+
+msgid "Batch Status"
+msgstr "Batch Status"
+
+msgid "Created"
+msgstr "Created"
+
+msgid "Usage approved"
+msgstr "Usage approved"
+
+msgid "Usage rejected"
+msgstr "Usage rejected"
+
+msgid "Expired"
+msgstr "Expired"
+
+msgid "Destroyed"
+msgstr "Destroyed"
+
+msgid "Edited"
+msgstr "Edited"
+
+msgid "Consumed"
+msgstr "Consumed"
+
+msgid "Returned"
+msgstr "Returned"
+
+msgid "Split"
+msgstr "Split"
+
+msgid "Adjusted"
+msgstr "Adjusted"
+
+msgid "Stock take"
+msgstr "Stock take"
+
+msgid "{} batch(es) matched; page {} / {}."
+msgstr "{} batch(es) matched; page {} / {}."
+
+msgid "Usage records ({})"
+msgstr "Usage records ({})"
+
+msgid "Page {} / {}"
+msgstr "Page {} / {}"
+
+msgid "(Manufacturer lot {}; remaining {}; {})"
+msgstr "(Manufacturer lot {}; remaining {}; {})"
+
+msgid "(Status {}; created {})"
+msgstr "(Status {}; created {})"
+
+msgid "From date “{}” is not recognised; this filter was ignored."
+msgstr "From date “{}” is not recognised; this filter was ignored."
+
+msgid "To date “{}” is not recognised; this filter was ignored."
+msgstr "To date “{}” is not recognised; this filter was ignored."
+
+msgid "The from date is later than the to date; the result is empty."
+msgstr "The from date is later than the to date; the result is empty."
+
+msgid "{} record(s); {} batch(es); total consumed {}; total returned {}; page {} / {}. "
+msgstr "{} record(s); {} batch(es); total consumed {}; total returned {}; page {} / {}. "
+
+msgid "stockusage_report_desc1"
+msgstr "Filter usage records by date range, stock number, lot number, material name and supplier, then export them."
+
+msgid "stockusage_report_desc2"
+msgstr "The lot number filter matches both the manufacturer lot and the batch number. The date range applies to the operation time; leave blank for no limit."
+
+msgid "stockusage_report_desc3"
+msgstr "The exported CSV matches the current query result exactly."
+
+msgid "stockusage_trace_desc1"
+msgstr "Look up where a batch went and how it was used, by LIMS stock number or manufacturer lot, for full lot-to-usage traceability."
+
+msgid "stockusage_trace_desc2"
+msgstr "The lot number filter matches both the manufacturer lot and the batch number, with fuzzy matching."
+
+msgid "Available"
+msgstr "Available"
+
+msgid "Inactive"
+msgstr "Inactive"
+
+msgid "Expiry Reminder (days before expiry)"
+msgstr "Expiry Reminder (days before expiry)"
+
+msgid "Number of days before a batch expiry date at which the stock batch listing starts highlighting the row in yellow. Expired batches are always highlighted in red. Use 0 to disable the reminder."
+msgstr "Number of days before a batch expiry date at which the stock batch listing starts highlighting the row in yellow. Expired batches are always highlighted in red. Use 0 to disable the reminder."
+
+msgid "Already expired"
+msgstr "Already expired"
+
+msgid "{0} day(s) to expiry"
+msgstr "{0} day(s) to expiry"
+
+msgid "Batch Default Expiry Date"
+msgstr "Batch Default Expiry Date"
+
+msgid "Default expiry date proposed when creating a new batch of this stock. It is only a convenience default: the expiry date is stored per batch and the batch value always wins (expiry reminders and usage reports read the batch expiry)."
+msgstr "Default expiry date proposed when creating a new batch of this stock. It is only a convenience default: the expiry date is stored per batch and the batch value always wins (expiry reminders and usage reports read the batch expiry)."
+
+msgid "batch is low in quantity:"
+msgstr "batch is low in quantity:"
+
+msgid "batches are low in quantity:"
+msgstr "batches are low in quantity:"
+
+msgid "Quantity Ordered must be a number (decimals allowed)"
+msgstr "Quantity Ordered must be a number (decimals allowed)"
+
+msgid "Missing portal types: {0}. Please reinstall maitux.stock from the Add-ons control panel first."
+msgstr "Missing portal types: {0}. Please reinstall maitux.stock from the Add-ons control panel first."
+
+msgid "Created: {0}"
+msgstr "Created: {0}"
+
+msgid "Already present: {0}"
+msgstr "Already present: {0}"
+
+msgid "Countersigner"
+msgstr "Countersigner"
+
+msgid "Consume Requires Two-Person E-Signature"
+msgstr "Consume Requires Two-Person E-Signature"
+
+msgid "When enabled, consuming any batch of this stock requires two different operators to sign electronically on the same page before the stock is deducted."
+msgstr "When enabled, consuming any batch of this stock requires two different operators to sign electronically on the same page before the stock is deducted."
+
+msgid "Active"
+msgstr "Active"
+
+msgid "Add"
+msgstr "Add"
+
+msgid "Applicant Name"
+msgstr "Applicant Name"
+
+msgid "Approval Trail"
+msgstr "Approval Trail"
+
+msgid "Batch Number"
+msgstr "Batch Number"
+
+msgid "Batch UID"
+msgstr "Batch UID"
+
+msgid "Batch is destroyed"
+msgstr "Batch is destroyed"
+
+msgid "Batch is expired and can only be destroyed"
+msgstr "Batch is expired and can only be destroyed"
+
+msgid "Consume"
+msgstr "Consume"
+
+msgid "Filled in automatically when the request is rejected."
+msgstr "Filled in automatically when the request is rejected."
+
+msgid "Number"
+msgstr "Number"
+
+msgid "Order Date"
+msgstr "Order Date"
+
+msgid "Order Details"
+msgstr "Order Details"
+
+msgid "Order Lines"
+msgstr "Order Lines"
+
+msgid "Order No."
+msgstr "Order No."
+
+msgid "Purchase Order Number"
+msgstr "Purchase Order Number"
+
+msgid "Purchaser"
+msgstr "Purchaser"
+
+msgid "Quantity Ordered"
+msgstr "Quantity Ordered"
+
+msgid "Request"
+msgstr "Request"
+
+msgid "Reviewer Name"
+msgstr "Reviewer Name"
+
+msgid "Reviewer who approved the request (empty for direct consume)."
+msgstr "Reviewer who approved the request (empty for direct consume)."
+
+msgid "Second Operator"
+msgstr "Second Operator"
+
+msgid "Stock usage request that authorized this deduction."
+msgstr "Stock usage request that authorized this deduction."
+
+msgid "Stocktake"
+msgstr "Stocktake"
+
+msgid "Tax Rate"
+msgstr "Tax Rate"
+
+msgid "Title"
+msgstr "Title"
+
+msgid "Unit Price"
+msgstr "Unit Price"
+
+msgid "Why this stock is requested; visible to the reviewer."
+msgstr "Why this stock is requested; visible to the reviewer."

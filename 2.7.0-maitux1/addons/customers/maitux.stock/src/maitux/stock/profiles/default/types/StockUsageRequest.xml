@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<object name="StockUsageRequest" meta_type="Dexterity FTI"
+        i18n:domain="maitux.stock"
+        xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+        purge="True">
+
+  <property name="title" i18n:translate="">Stock Usage Request</property>
+  <property name="description" i18n:translate=""></property>
+
+  <property name="icon_expr">string:${portal_url}/++plone++senaite.core.static/assets/icons/batch.svg</property>
+  <property name="factory">StockUsageRequest</property>
+  <property name="add_view_expr">string:${folder_url}/++add++StockUsageRequest</property>
+  <property name="immediate_view">view</property>
+
+  <property name="global_allow">False</property>
+  <property name="filter_content_types">True</property>
+  <property name="allowed_content_types"/>
+  <property name="allow_discussion">False</property>
+
+  <property name="default_view">view</property>
+  <property name="view_methods">
+    <element value="view"/>
+  </property>
+  <property name="default_view_fallback">False</property>
+
+  <property name="add_permission">cmf.AddPortalContent</property>
+
+  <property name="schema">maitux.stock.content.stockusagerequest.IStockUsageRequestSchema</property>
+  <property name="klass">maitux.stock.content.stockusagerequest.StockUsageRequest</property>
+
+  <property name="behaviors">
+    <element value="plone.app.dexterity.behaviors.metadata.IBasic"/>
+    <element value="plone.app.referenceablebehavior.referenceable.IReferenceable" />
+    <!-- 中文注释：必须启用多目录行为，否则 senaite 的 CatalogMultiplexProcessor
+         会拒绝做目录索引（reindexObject 变成空操作），申请单会从列表/待审队列里消失。
+         与 StockBatch/Stock/StockType 保持一致。 -->
+    <element value="bika.lims.interfaces.IMultiCatalogBehavior"/>
+  </property>
+
+  <alias from="(Default)" to="(dynamic view)"/>
+  <alias from="edit" to="@@edit"/>
+  <alias from="sharing" to="@@sharing"/>
+  <alias from="view" to="(selected layout)"/>
+
+</object>

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from zope.interface import Interface
 
 class IStockFolder(Interface):
@@ -61,4 +62,19 @@ class IStockBatches(Interface):
 
 class IStockBatch(Interface):
     """Marker interface for Stock Batch
+    """
+
+
+class IStockUsageRequests(Interface):
+    """Marker interface for the Stock Usage Requests container
+
+    领用申请单目录（stockmanager/usage_requests）
+    """
+
+
+class IStockUsageRequest(Interface):
+    """Marker interface for a Stock Usage Request (领用申请单)
+
+    需要双人电子签名的库存，领用时不再直接扣减，而是走：
+        发起领用（申请人电子签名）-> 审核领用（非申请人电子签名）-> 自动扣减
     """

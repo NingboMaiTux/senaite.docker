@@ -1,6 +1,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml"
       xmlns:tal="http://xml.zope.org/namespaces/tal"
       xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
       metal:use-macro="here/main_template/macros/master"
       i18n:domain="maitux.stability">
 
@@ -16,6 +17,15 @@
         Selected pending tasks are listed below. Choose a Stock Batch for each task and save.
       </p>
 
+      <!-- 阶段 6a 冻结（2026-09-30 补齐界面层）：勾选的行里混了
+           **已暂停 / 已终止** 的方案时，那些行已经被摘出去了（见
+           SamplePlacementView.get_tasks_data），这里把话说清楚 ——
+           否则用户会以为"少了几行"是页面出错。 -->
+      <div class="alert alert-warning stability-placement-frozen-note"
+           tal:condition="python:view.has_frozen_plans()">
+        <span tal:content="view/frozen_message">frozen</span>
+      </div>
+
       <table class="table table-striped table-hover">
         <thead>
           <tr>
@@ -23,7 +33,7 @@
             <th i18n:translate="">Task</th>
             <th i18n:translate="">Timepoint (Months)</th>
             <th i18n:translate="">Window (Days)</th>
-            <th><span i18n:translate="">Stock Batch</span> <span class="required">*</span></th>
+            <th i18n:translate="">Stock Batch</th>
           </tr>
         </thead>
         <tbody>
@@ -57,18 +67,20 @@
       </table>
 
       <div class="form-controls">
-        <input class="btn btn-primary btn-sm"
-               type="submit"
-               name="button_save"
-               value="Save"
-               i18n:attributes="value"/>
-        <input class="btn btn-secondary btn-sm"
-               type="submit"
-               name="button_cancel"
-               value="Cancel"
-               i18n:attributes="value"/>
+        <!-- 一行可放置的都没有（全被摘掉 / 没有待放置的行）时不给保存按钮：
+             点了只会得到一句"没有待放置的任务"。 -->
+        <button type="submit"
+                class="btn btn-primary btn-sm"
+                name="button_save"
+                value="Save"
+                tal:condition="python:bool(view.tasks)"
+                i18n:translate="">Save</button>
+        <button type="submit"
+                class="btn btn-secondary btn-sm"
+                name="button_cancel"
+                value="Cancel"
+                i18n:translate="">Cancel</button>
       </div>
     </form>
   </metal:content-core>
 </html>
-

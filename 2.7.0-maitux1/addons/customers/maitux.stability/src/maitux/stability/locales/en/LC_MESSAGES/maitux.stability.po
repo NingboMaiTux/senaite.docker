@@ -1,8 +1,8 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: maitux.stability\n"
-"POT-Creation-Date: 2026-08-20 00:00+0000\n"
-"PO-Revision-Date: 2026-08-20 00:00+0000\n"
+"POT-Creation-Date: 2026-09-21 00:00+0000\n"
+"PO-Revision-Date: 2026-09-21 00:00+0000\n"
 "Last-Translator: Admin <admin@example.com>\n"
 "Language-Team: en <admin@example.com>\n"
 "MIME-Version: 1.0\n"
@@ -14,20 +14,113 @@ msgstr ""
 "Preferred-Encodings: utf-8 latin1\n"
 "Domain: maitux.stability\n"
 
-msgid "(None)"
-msgstr "(None)"
+
+msgid "Stability Studies"
+msgstr "Stability Studies"
+
+msgid "Storage Conditions"
+msgstr "Storage Conditions"
+
+msgid "Packaging Specifications"
+msgstr "Packaging Specifications"
+
+msgid "Stability Plan Templates"
+msgstr "Stability Plan Templates"
+
+msgid "Stability Plans"
+msgstr "Stability Plans"
+
+msgid "Task Board"
+msgstr "Task Board"
+
+msgid "Stability Task Board"
+msgstr "Stability Task Board"
+
+msgid "Plan"
+msgstr "Plan"
+
+msgid "Task"
+msgstr "Task"
+
+msgid "Sample"
+msgstr "Sample"
+
+msgid "Stock Batch"
+msgstr "Stock Batch"
+
+msgid "Timepoint (Months)"
+msgstr "Timepoint (Months)"
+
+msgid "Window (Days)"
+msgstr "Window (Days)"
+
+msgid "Target Date"
+msgstr "Target Date"
+
+msgid "Window Start"
+msgstr "Window Start"
+
+msgid "Window End"
+msgstr "Window End"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "Add"
+msgstr "Add"
+
+msgid "Title"
+msgstr "Title"
+
+msgid "Description"
+msgstr "Description"
+
+msgid "State"
+msgstr "State"
 
 msgid "Active"
 msgstr "Active"
 
-msgid "Add row"
-msgstr "Add row"
+msgid "Inactive"
+msgstr "Inactive"
 
-msgid "Analysis Profile"
-msgstr "Analysis Profile"
+msgid "All"
+msgstr "All"
 
-msgid "Analysis Specification"
-msgstr "Analysis Specification"
+msgid "Copy Plan"
+msgstr "Copy Plan"
+
+msgid "Copy"
+msgstr "Copy"
+
+msgid "Create a new stability plan by copying the selected plan"
+msgstr "Create a new stability plan by copying the selected plan"
+
+msgid "Please select one stability plan to copy"
+msgstr "Please select one stability plan to copy"
+
+msgid "The selected stability plan was not found"
+msgstr "The selected stability plan was not found"
+
+msgid "The selected plan has no plan template and cannot be copied"
+msgstr "The selected plan has no plan template and cannot be copied"
+
+msgid "The form was pre-filled with the data of the selected plan. Please review the values and save."
+msgstr "The form was pre-filled with the data of the selected plan. Please review the values and save."
+
+msgid "Article of the copied plan: {0}. Leave this field empty to keep this file."
+msgstr "Article of the copied plan: {0}. Leave this field empty to keep this file."
+
+msgid "No article was found in the copied plan. You can upload a file here if needed."
+msgstr "No article was found in the copied plan. You can upload a file here if needed."
+
+msgid "Plan details were copied from the selected plan: {0} row(s)."
+msgstr "Plan details were copied from the selected plan: {0} row(s)."
+
+msgid "Name"
+msgstr "Name"
+
+
 
 msgid "Article"
 msgstr "Article"
@@ -35,101 +128,26 @@ msgstr "Article"
 msgid "Batch"
 msgstr "Batch"
 
-msgid "Cancel"
-msgstr "Cancel"
-
-msgid "Cannot create sample in this environment."
-msgstr "Cannot create sample in this environment."
-
-msgid "Client"
-msgstr "Client"
-
-msgid "Client not found."
-msgstr "Client not found."
-
 msgid "Completed"
 msgstr "Completed"
 
-msgid "Contact"
-msgstr "Contact"
+msgid "Pending Placement"
+msgstr "Pending Placement"
 
-msgid "Create"
-msgstr "Create"
-
-msgid "Create Plan"
-msgstr "Create Plan"
-
-msgid "Create Sample"
-msgstr "Create Sample"
-
-msgid "Create a stability plan from the selected template"
-msgstr "Create a stability plan from the selected template"
-
-msgid "Created {0} sample(s)."
-msgstr "Created {0} sample(s)."
-
-msgid "Default Stability Study"
-msgstr "Default Stability Study"
-
-msgid "Description"
-msgstr "Description"
-
-msgid "Expired"
-msgstr "Expired"
-
-msgid "Failed to update Stability Plan details."
-msgstr "Failed to update Stability Plan details."
-
-msgid "Horizontal"
-msgstr "Horizontal"
-
-msgid "In Progress"
-msgstr "In Progress"
-
-msgid "Inactive"
-msgstr "Inactive"
-
-msgid "Inspection Quantity"
-msgstr "Inspection Quantity"
+msgid "Upright"
+msgstr "Upright"
 
 msgid "Inverted"
 msgstr "Inverted"
 
-msgid "Link Existing Sample"
-msgstr "Link Existing Sample"
+msgid "Horizontal"
+msgstr "Horizontal"
 
-msgid "Linked sample for {0} plan detail row(s)."
-msgstr "Linked sample for {0} plan detail row(s)."
-
-msgid "Name"
-msgstr "Name"
-
-msgid "No analyses were created for this sample. Please check the selected Specification/Profile."
-msgstr "No analyses were created for this sample. Please check the selected Specification/Profile."
-
-msgid "No items selected."
-msgstr "No items selected."
-
-msgid "No pending tasks selected."
-msgstr "No pending tasks selected."
-
-msgid "No plan details selected."
-msgstr "No plan details selected."
-
-msgid "No plans found for selected tasks."
-msgstr "No plans found for selected tasks."
-
-msgid "No task data available"
-msgstr "No task data available"
-
-msgid "No template article was found. You can upload a file here if needed."
-msgstr "No template article was found. You can upload a file here if needed."
+msgid "Inspection Quantity"
+msgstr "Inspection Quantity"
 
 msgid "Notes"
 msgstr "Notes"
-
-msgid "Only the most recent samples are listed. A search dialog can be added later."
-msgstr "Only the most recent samples are listed. A search dialog can be added later."
 
 msgid "Orientation"
 msgstr "Orientation"
@@ -137,89 +155,14 @@ msgstr "Orientation"
 msgid "Packaging Specification"
 msgstr "Packaging Specification"
 
-msgid "Pending Placement"
-msgstr "Pending Placement"
-
-msgid "Plan"
-msgstr "Plan"
-
 msgid "Plan Details"
 msgstr "Plan Details"
 
 msgid "Plan Template"
 msgstr "Plan Template"
 
-msgid "Please select a Client."
-msgstr "Please select a Client."
-
-msgid "Please select a Contact."
-msgstr "Please select a Contact."
-
-msgid "Please select a Sample Type."
-msgstr "Please select a Sample Type."
-
-msgid "Please select a Stock Batch for each selected task."
-msgstr "Please select a Stock Batch for each selected task."
-
-msgid "Please select an existing sample first."
-msgstr "Please select an existing sample first."
-
-msgid "Please select at least one task."
-msgstr "Please select at least one task."
-
-msgid "Please select either an Analysis Specification or an Analysis Profile."
-msgstr "Please select either an Analysis Specification or an Analysis Profile."
-
-msgid "Please select one Analysis Specification or one Analysis Profile."
-msgstr "Please select one Analysis Specification or one Analysis Profile."
-
-msgid "Please select one template before creating a plan"
-msgstr "Please select one template before creating a plan"
-
-msgid "Please select pending tasks first."
-msgstr "Please select pending tasks first."
-
-msgid "Sample"
-msgstr "Sample"
-
-msgid "Sample Placement"
-msgstr "Sample Placement"
-
-msgid "Sample Placement can only be applied to Pending Placement tasks."
-msgstr "Sample Placement can only be applied to Pending Placement tasks."
-
-msgid "Sample Type"
-msgstr "Sample Type"
-
-msgid "Save"
-msgstr "Save"
-
-msgid "Search"
-msgstr "Search"
-
-msgid "Select Sample"
-msgstr "Select Sample"
-
-msgid "Select a Stock Batch..."
-msgstr "Select a Stock Batch..."
-
-msgid "Select..."
-msgstr "Select..."
-
-msgid "Selected pending tasks are listed below. Choose a Stock Batch for each task and save."
-msgstr "Selected pending tasks are listed below. Choose a Stock Batch for each task and save."
-
-msgid "Selecting a client will refresh the contact list."
-msgstr "Selecting a client will refresh the contact list."
-
 msgid "Sequence"
 msgstr "Sequence"
-
-msgid "Spec/Profile"
-msgstr "Spec/Profile"
-
-msgid "Stability Studies"
-msgstr "Stability Studies"
 
 msgid "Stability Study Name"
 msgstr "Stability Study Name"
@@ -227,20 +170,8 @@ msgstr "Stability Study Name"
 msgid "Stability Study Plan ID"
 msgstr "Stability Study Plan ID"
 
-msgid "Stability Task Board"
-msgstr "Stability Task Board"
-
-msgid "StabilityPlans content type is not installed. Please reinstall/upgrade the maitux.stability add-on."
-msgstr "StabilityPlans content type is not installed. Please reinstall/upgrade the maitux.stability add-on."
-
 msgid "Start Time (T0)"
 msgstr "Start Time (T0)"
-
-msgid "Status"
-msgstr "Status"
-
-msgid "Stock Batch"
-msgstr "Stock Batch"
 
 msgid "Storage Condition"
 msgstr "Storage Condition"
@@ -257,53 +188,140 @@ msgstr "Storage Quantity - Total"
 msgid "Study Name"
 msgstr "Study Name"
 
+msgid "Unit"
+msgstr "Unit"
+
+
+
+msgid "Create Plan"
+msgstr "Create Plan"
+
+msgid "Create a stability plan from the selected template"
+msgstr "Create a stability plan from the selected template"
+
+msgid "Please select one template before creating a plan"
+msgstr "Please select one template before creating a plan"
+
+msgid "The selected template was not found"
+msgstr "The selected template was not found"
+
+msgid "In Progress"
+msgstr "In Progress"
+
+msgid "Expired"
+msgstr "Expired"
+
+msgid "Timepoint Tasks"
+msgstr "Timepoint Tasks"
+
+msgid "No task data available"
+msgstr "No task data available"
+
+msgid "TP {0} ({1} Months)"
+msgstr "TP {0} ({1} Months)"
+
+msgid "Search"
+msgstr "Search"
+
+msgid "Search Plan"
+msgstr "Search Plan"
+
+msgid "Status filters"
+msgstr "Status filters"
+
+msgid "Sample Placement"
+msgstr "Sample Placement"
+
+msgid "Link Existing Sample"
+msgstr "Link Existing Sample"
+
+msgid "Create Sample"
+msgstr "Create Sample"
+
+msgid "Select Sample"
+msgstr "Select Sample"
+
+msgid "Select a Stock Batch..."
+msgstr "Select a Stock Batch..."
+
+msgid "Select…"
+msgstr "Select…"
+
+
+
+msgid "Sample Type"
+msgstr "Sample Type"
+
+msgid "Client"
+msgstr "Client"
+
+msgid "Contact"
+msgstr "Contact"
+
+msgid "Save"
+msgstr "Save"
+
+msgid "Cancel"
+msgstr "Cancel"
+
+msgid "Create"
+msgstr "Create"
+
+msgid "No plan details selected."
+msgstr "No plan details selected."
+
+msgid "No pending tasks selected."
+msgstr "No pending tasks selected."
+
+msgid "Selected pending tasks are listed below. Choose a Stock Batch for each task and save."
+msgstr "Selected pending tasks are listed below. Choose a Stock Batch for each task and save."
+
+
+msgid "Only the most recent samples are listed. A search dialog can be added later."
+msgstr "Only the most recent samples are listed. A search dialog can be added later."
+
+msgid "Please select at least one task."
+msgstr "Please select at least one task."
+
+msgid "Sample Placement can only be applied to timepoints that have not been generated yet."
+msgstr "Sample Placement can only be applied to timepoints that have not been generated yet."
+
+msgid "No items selected."
+msgstr "No items selected."
+
+msgid "No plans found for selected tasks."
+msgstr "No plans found for selected tasks."
+
+msgid "Please select pending tasks first."
+msgstr "Please select pending tasks first."
+
+msgid "Please select a Stock Batch for each selected task."
+msgstr "Please select a Stock Batch for each selected task."
+
+msgid "Please select an existing sample first."
+msgstr "Please select an existing sample first."
+
+
+
+
+
+
+
+msgid "Linked sample for {0} plan detail row(s)."
+msgstr "Linked sample for {0} plan detail row(s)."
+
+msgid "Failed to update Stability Plan details."
+msgstr "Failed to update Stability Plan details."
+
+msgid "Updated {0} timepoint(s) to Placed."
+msgstr "Updated {0} timepoint(s) to Placed."
+
 msgid "Sync done. Created: {0}, Updated: {1}, Deleted: {2}."
 msgstr "Sync done. Created: {0}, Updated: {1}, Deleted: {2}."
 
 msgid "Sync feature is not available."
 msgstr "Sync feature is not available."
 
-msgid "Target Date"
-msgstr "Target Date"
-
-msgid "Task"
-msgstr "Task"
-
-msgid "The selected template was not found"
-msgstr "The selected template was not found"
-
-msgid "Timepoint (Months)"
-msgstr "Timepoint (Months)"
-
-msgid "Timepoint Tasks"
-msgstr "Timepoint Tasks"
-
-msgid "Title"
-msgstr "Title"
-
-msgid "Unit"
-msgstr "Unit"
-
-msgid "Updated {0} task(s) to In Progress."
-msgstr "Updated {0} task(s) to In Progress."
-
-msgid "Upright"
-msgstr "Upright"
-
-msgid "Window (Days)"
-msgstr "Window (Days)"
-
-msgid "Window End"
-msgstr "Window End"
-
-msgid "Window Start"
-msgstr "Window Start"
-
-msgid "You do not have permission to create samples."
-msgstr "You do not have permission to create samples."
-
-msgid "You do not have permission to link samples."
-msgstr "You do not have permission to link samples."
 
 msgid "You do not have permission to place samples."
 msgstr "You do not have permission to place samples."
@@ -311,53 +329,597 @@ msgstr "You do not have permission to place samples."
 msgid "You do not have permission to sync plan tasks."
 msgstr "You do not have permission to sync plan tasks."
 
-msgid "listing_packagingspecifications_title"
-msgstr "listing_packagingspecifications_title"
+msgid "You do not have permission to link samples."
+msgstr "You do not have permission to link samples."
 
-msgid "listing_stability_action_add"
-msgstr "listing_stability_action_add"
+msgid "You do not have permission to create samples."
+msgstr "You do not have permission to create samples."
 
-msgid "listing_stability_action_task_board"
-msgstr "listing_stability_action_task_board"
+msgid "StabilityPlans content type is not installed. Please reinstall/upgrade the maitux.stability add-on."
+msgstr "StabilityPlans content type is not installed. Please reinstall/upgrade the maitux.stability add-on."
 
-msgid "listing_stability_column_description"
-msgstr "listing_stability_column_description"
+msgid "Current template article: {0}. Leave this field empty to keep the template file."
+msgstr "Current template article: {0}. Leave this field empty to keep the template file."
 
-msgid "listing_stability_column_state"
-msgstr "listing_stability_column_state"
+msgid "No template article was found. You can upload a file here if needed."
+msgstr "No template article was found. You can upload a file here if needed."
 
-msgid "listing_stability_column_title"
-msgstr "listing_stability_column_title"
+msgid "Add row"
+msgstr "Add row"
 
-msgid "listing_stability_status_all"
-msgstr "listing_stability_status_all"
+msgid "Basic Information"
+msgstr "Basic Information"
 
-msgid "listing_stability_status_completed"
-msgstr "listing_stability_status_completed"
+msgid "Select..."
+msgstr "Select..."
 
-msgid "listing_stability_status_in_progress"
-msgstr "listing_stability_status_in_progress"
+msgid "Timepoint ID"
+msgstr "Timepoint ID"
 
-msgid "listing_stability_status_pending_placement"
-msgstr "listing_stability_status_pending_placement"
 
-msgid "listing_stabilityplans_title"
-msgstr "listing_stabilityplans_title"
 
-msgid "listing_stabilityplantemplates_title"
-msgstr "listing_stabilityplantemplates_title"
+msgid "TP {0} (Initial)"
+msgstr "TP {0} (Initial)"
 
-msgid "listing_state_active"
-msgstr "listing_state_active"
+msgid "Sample Automation"
+msgstr "Sample Automation"
 
-msgid "listing_state_all"
-msgstr "listing_state_all"
+msgid "Sample Template"
+msgstr "Sample Template"
 
-msgid "listing_state_inactive"
-msgstr "listing_state_inactive"
 
-msgid "listing_storageconditions_title"
-msgstr "listing_storageconditions_title"
+msgid "Create samples automatically"
+msgstr "Create samples automatically"
 
-msgid "task_title_tp_months"
-msgstr "task_title_tp_months"
+msgid "Plans created from this template inherit this switch. When it is on, samples are created for every timepoint whose target date has arrived; the zero point is not created but linked to an existing sample. Needs the site wide switch to be on as well."
+msgstr "Plans created from this template inherit this switch. When it is on, samples are created for every timepoint whose target date has arrived; the zero point is not created but linked to an existing sample. Needs the site wide switch to be on as well."
+
+msgid "Contact person used when samples are created automatically. A plan may override it."
+msgstr "Contact person used when samples are created automatically. A plan may override it."
+
+msgid "Inherited from the plan template when the plan is created. When it is on, samples are created for every timepoint whose target date has arrived; the zero point is linked to an existing sample instead. The site wide switch must be on as well."
+msgstr "Inherited from the plan template when the plan is created. When it is on, samples are created for every timepoint whose target date has arrived; the zero point is linked to an existing sample instead. The site wide switch must be on as well."
+
+msgid "Contact person used when samples are created automatically. Defaults to the contact of the plan template."
+msgstr "Contact person used when samples are created automatically. Defaults to the contact of the plan template."
+
+msgid "Stability Sample Automation"
+msgstr "Stability Sample Automation"
+
+msgid "Site wide defaults for the automatic sample creation of stability studies. The generation time is read from here, so changing it does not require touching the server scheduler."
+msgstr "Site wide defaults for the automatic sample creation of stability studies. The generation time is read from here, so changing it does not require touching the server scheduler."
+
+msgid "Enable automatic sample creation"
+msgstr "Enable automatic sample creation"
+
+msgid "Master switch for the whole site. When it is off, no sample is created automatically; creating samples by hand still works."
+msgstr "Master switch for the whole site. When it is off, no sample is created automatically; creating samples by hand still works."
+
+msgid "Time of day for automatic creation"
+msgstr "Time of day for automatic creation"
+
+msgid "24-hour HH:MM (default 08:00). A timepoint whose target date is today is handled once the current time has passed this value. The scheduled task may run more often; the time is read from this setting, not from the scheduler."
+msgstr "24-hour HH:MM (default 08:00). A timepoint whose target date is today is handled once the current time has passed this value. The scheduled task may run more often; the time is read from this setting, not from the scheduler."
+
+msgid "Create samples N days before the target date"
+msgstr "Create samples N days before the target date"
+
+msgid "0 = create on the target date itself (default)."
+msgstr "0 = create on the target date itself (default)."
+
+msgid "Zero point: look-back window (days)"
+msgstr "Zero point: look-back window (days)"
+
+msgid "How far back from T0 a sample may be dated to be linked as the zero point sample (default 30)."
+msgstr "How far back from T0 a sample may be dated to be linked as the zero point sample (default 30)."
+
+msgid "Generate Samples"
+msgstr "Generate Samples"
+
+
+msgid "Planned Sampling Date"
+msgstr "Planned Sampling Date"
+
+msgid "Result"
+msgstr "Result"
+
+msgid "Will be created"
+msgstr "Will be created"
+
+msgid "Generate"
+msgstr "Generate"
+
+msgid "Analyses"
+msgstr "Analyses"
+
+msgid "Generated At"
+msgstr "Generated At"
+
+msgid "Generated By"
+msgstr "Generated By"
+
+
+msgid "The zero point is not created here: link an existing sample instead."
+msgstr "The zero point is not created here: link an existing sample instead."
+
+msgid "Sample automation is not fully configured for this plan:"
+msgstr "Sample automation is not fully configured for this plan:"
+
+
+msgid "Zero point: link an existing sample instead of creating one."
+msgstr "Zero point: link an existing sample instead of creating one."
+
+msgid "Only timepoints in Pending Placement can be generated."
+msgstr "Only timepoints in Pending Placement can be generated."
+
+msgid "A sample has already been generated for this timepoint."
+msgstr "A sample has already been generated for this timepoint."
+
+msgid "No target date: the plan has no Start Time (T0)."
+msgstr "No target date: the plan has no Start Time (T0)."
+
+msgid "The plan details changed since this page was opened. Please select the rows again."
+msgstr "The plan details changed since this page was opened. Please select the rows again."
+
+msgid "The selected timepoint no longer exists."
+msgstr "The selected timepoint no longer exists."
+
+msgid "Sample generation failed."
+msgstr "Sample generation failed."
+
+
+
+msgid "The plan has no Contact."
+msgstr "The plan has no Contact."
+
+
+msgid "The Sample Template has no Sample Type."
+msgstr "The Sample Template has no Sample Type."
+
+msgid "The Sample Template has no analyses."
+msgstr "The Sample Template has no analyses."
+
+msgid "Generated {0} sample(s)."
+msgstr "Generated {0} sample(s)."
+
+msgid "Skipped {0} timepoint(s): {1}"
+msgstr "Skipped {0} timepoint(s): {1}"
+
+msgid "The selected stability plan could not be found (stale reference)."
+msgstr "The selected stability plan could not be found (stale reference)."
+
+msgid "The client the samples are created for: samples are registered under this client. Defaults to the client of the plan template."
+msgstr "The client the samples are created for: samples are registered under this client. Defaults to the client of the plan template."
+
+msgid "Default client for plans created from this template. The samples are registered under the client configured on the plan."
+msgstr "Default client for plans created from this template. The samples are registered under the client configured on the plan."
+
+
+msgid "No Client is configured for this plan."
+msgstr "No Client is configured for this plan."
+
+
+msgid "The Contact belongs to another client than the samples are created for."
+msgstr "The Contact belongs to another client than the samples are created for."
+
+msgid "Samples are created from the Sample Template configured on each timepoint: the sample type and the analyses come from that template, the client and the contact come from the plan. The Date Sampled is left empty."
+msgstr "Samples are created from the Sample Template configured on each timepoint: the sample type and the analyses come from that template, the client and the contact come from the plan. The Date Sampled is left empty."
+
+msgid "This timepoint has no Sample Template."
+msgstr "This timepoint has no Sample Template."
+
+msgid "Sample type and analyses for this timepoint come from this template: samples are created with the template's analyses."
+msgstr "Sample type and analyses for this timepoint come from this template: samples are created with the template's analyses."
+
+msgid "The Client of the plan does not match the client the Sample Template of this timepoint belongs to."
+msgstr "The Client of the plan does not match the client the Sample Template of this timepoint belongs to."
+
+# ---- 客户/联系人不一致（2026-09-29）----
+
+msgid "The Contact "{contact}" belongs to "{contact_client}", but the samples are created for "{client}"."
+msgstr "The Contact "{contact}" belongs to "{contact_client}", but the samples are created for "{client}"."
+
+msgid "The Sample Template "{template}" belongs to "{template_client}", but the samples are created for "{client}"."
+msgstr "The Sample Template "{template}" belongs to "{template_client}", but the samples are created for "{client}"."
+
+msgid "The Contact "{contact}" belongs to "{contact_client}" and does not match the Client "{client}": the Contact was cleared. Please select a Contact of "{client}"."
+msgstr "The Contact "{contact}" belongs to "{contact_client}" and does not match the Client "{client}": the Contact was cleared. Please select a Contact of "{client}"."
+
+
+# ---- 先放置、再登样（2026-09-29）----
+
+msgid "Placed"
+msgstr "Placed"
+
+msgid "This timepoint is completed and can no longer be generated."
+msgstr "This timepoint is completed and can no longer be generated."
+
+
+# ---- 0 点关联往期样品（阶段 3，2026-09-29）----
+
+msgid "Select Target Timepoint"
+msgstr "Select Target Timepoint"
+
+msgid "Window"
+msgstr "Window"
+
+msgid "Sample ID"
+msgstr "Sample ID"
+
+msgid "Date"
+msgstr "Date"
+
+msgid "Sampled Date"
+msgstr "Sampled Date"
+
+msgid "Created Date"
+msgstr "Created Date"
+
+msgid "Linked To"
+msgstr "Linked To"
+
+msgid "Candidate Samples"
+msgstr "Candidate Samples"
+
+msgid "Show samples of all clients"
+msgstr "Show samples of all clients"
+
+msgid "Only the plan client's samples are listed."
+msgstr "Only the plan client's samples are listed."
+
+msgid "Only samples in the window [T0 - N, T0] are listed: a sample without a Sampled Date is matched by its creation date."
+msgstr "Only samples in the window [T0 - N, T0] are listed: a sample without a Sampled Date is matched by its creation date."
+
+msgid "No candidate samples match this window."
+msgstr "No candidate samples match this window."
+
+msgid "Link"
+msgstr "Link"
+
+msgid "Linked sample {sample} to {plan} / {task}."
+msgstr "Linked sample {sample} to {plan} / {task}."
+
+msgid "Only the zero point can be linked to an existing sample. Please use Generate for the other timepoints."
+msgstr "Only the zero point can be linked to an existing sample. Please use Generate for the other timepoints."
+
+msgid "Only the zero point can be linked to an existing sample. Please use Create Sample for the other timepoints."
+msgstr "Only the zero point can be linked to an existing sample. Please use Create Sample for the other timepoints."
+
+msgid "The selected sample does not exist any more."
+msgstr "The selected sample does not exist any more."
+
+msgid "The sample date {date} is outside the allowed window ({start} ~ {end}) for this timepoint."
+msgstr "The sample date {date} is outside the allowed window ({start} ~ {end}) for this timepoint."
+
+msgid "This sample is already linked to {plan} / {task}."
+msgstr "This sample is already linked to {plan} / {task}."
+
+msgid "The plan has no Start Time (T0), so there is no window to link samples from."
+msgstr "The plan has no Start Time (T0), so there is no window to link samples from."
+
+msgid "Linking the sample failed."
+msgstr "Linking the sample failed."
+
+msgid "This timepoint already has a sample linked."
+msgstr "This timepoint already has a sample linked."
+
+msgid "Please select a timepoint and a sample."
+msgstr "Please select a timepoint and a sample."
+
+
+# ---- 0 点提示（B 方案，2026-09-30）----
+
+msgid "Zero Point (baseline) is not defined in this plan."
+msgstr "Zero Point (baseline) is not defined in this plan."
+
+msgid "Without a zero point (Timepoint (Months) = 0) no past sample can be linked as the baseline of this plan: add a row with Timepoint (Months) = 0, then use Link Existing Sample on the task board."
+msgstr "Without a zero point (Timepoint (Months) = 0) no past sample can be linked as the baseline of this plan: add a row with Timepoint (Months) = 0, then use Link Existing Sample on the task board."
+
+msgid "These plans have no zero point row:"
+msgstr "These plans have no zero point row:"
+
+msgid "Without a zero point (Timepoint (Months) = 0) no past sample can be linked as the baseline of these plans. Add a row with Timepoint (Months) = 0 to each of them."
+msgstr "Without a zero point (Timepoint (Months) = 0) no past sample can be linked as the baseline of these plans. Add a row with Timepoint (Months) = 0 to each of them."
+
+msgid "None of the selected timepoints is a zero point: only the zero point (Timepoint (Months) = 0) can be linked to an existing past sample."
+msgstr "None of the selected timepoints is a zero point: only the zero point (Timepoint (Months) = 0) can be linked to an existing past sample."
+
+msgid "Zero Point"
+msgstr "Zero Point"
+
+msgid "This row is the zero point (baseline) of the plan: if you delete it, no past sample can be linked as the baseline. Delete this row?"
+msgstr "This row is the zero point (baseline) of the plan: if you delete it, no past sample can be linked as the baseline. Delete this row?"
+
+
+# ---- 0 点提示（B 方案，2026-09-30）----
+
+msgid "({0} plans in total)"
+msgstr "({0} plans in total)"
+
+
+# ---- 0 点提示（B 方案，2026-09-30）----
+
+msgid "Zero Point (baseline) is not defined in this plan: add a row with Timepoint (Months) = 0 and select it here, otherwise no past sample can be linked as the baseline."
+msgstr "Zero Point (baseline) is not defined in this plan: add a row with Timepoint (Months) = 0 and select it here, otherwise no past sample can be linked as the baseline."
+
+
+# ---- 0 点提示（B 方案，2026-09-30）----
+
+msgid "A zero point row (Timepoint (Months) = 0) was added to the new plan: it can be deleted or changed later."
+msgstr "A zero point row (Timepoint (Months) = 0) was added to the new plan: it can be deleted or changed later."
+
+
+# ---- 阶段 4：到期自动登样 + 撤销登样（2026-09-30）----
+
+msgid "Sample registration revoked for {plan} / {task}."
+msgstr "Sample registration revoked for {plan} / {task}."
+
+msgid "The plan details changed since this page was opened. Please open the page again."
+msgstr "The plan details changed since this page was opened. Please open the page again."
+
+msgid "This timepoint has no sample registered, so there is nothing to revoke."
+msgstr "This timepoint has no sample registered, so there is nothing to revoke."
+
+msgid "This timepoint is completed: its sample registration cannot be revoked any more."
+msgstr "This timepoint is completed: its sample registration cannot be revoked any more."
+
+msgid "A reason is required to revoke a sample registration."
+msgstr "A reason is required to revoke a sample registration."
+
+msgid "Revoking the sample registration failed."
+msgstr "Revoking the sample registration failed."
+
+msgid "You do not have permission to revoke sample registrations."
+msgstr "You do not have permission to revoke sample registrations."
+
+msgid "Please select exactly one timepoint to revoke."
+msgstr "Please select exactly one timepoint to revoke."
+
+msgid "Revoke Sample Registration"
+msgstr "Revoke Sample Registration"
+
+msgid "Last revoke"
+msgstr "Last revoke"
+
+msgid "Revoking only removes the link between this timepoint and the sample. The sample itself is NOT deleted: if it has to be cancelled, do that from the sample page."
+msgstr "Revoking only removes the link between this timepoint and the sample. The sample itself is NOT deleted: if it has to be cancelled, do that from the sample page."
+
+msgid "The status goes back to Pending Placement (or Placed, if a stock batch was already assigned) and the row can be deleted again."
+msgstr "The status goes back to Pending Placement (or Placed, if a stock batch was already assigned) and the row can be deleted again."
+
+msgid "This timepoint has no revocable sample registration."
+msgstr "This timepoint has no revocable sample registration."
+
+msgid "Reason"
+msgstr "Reason"
+
+msgid "Required. It is stored in the row notes together with who and when."
+msgstr "Required. It is stored in the row notes together with who and when."
+
+msgid "Generate Due Samples"
+msgstr "Generate Due Samples"
+
+msgid "Due samples: scanned {plans} plan(s), created {created} sample(s), skipped {skipped} row(s)."
+msgstr "Due samples: scanned {plans} plan(s), created {created} sample(s), skipped {skipped} row(s)."
+
+msgid "{count} row(s) could not be generated: check the Sample Template and the plan configuration."
+msgstr "{count} row(s) could not be generated: check the Sample Template and the plan configuration."
+
+msgid "Generating due samples failed. Please check the log."
+msgstr "Generating due samples failed. Please check the log."
+
+msgid "Actions"
+msgstr "Actions"
+
+msgid "Revoke"
+msgstr "Revoke"
+
+
+msgid "A paused plan stops generating samples automatically; all operations on its timepoints are frozen until it is resumed."
+msgstr "A paused plan stops generating samples automatically; all operations on its timepoints are frozen until it is resumed."
+
+msgid "Active Plans"
+msgstr "Active Plans"
+
+msgid "Actor"
+msgstr "Actor"
+
+msgid "All Plans"
+msgstr "All Plans"
+
+msgid "All samples of this plan are finished."
+msgstr "All samples of this plan are finished."
+
+msgid "Changing the status is recorded in the audit trail together with who did it, when, and the reason."
+msgstr "Changing the status is recorded in the audit trail together with who did it, when, and the reason."
+
+msgid "Current Status"
+msgstr "Current Status"
+
+msgid "Finished"
+msgstr "Finished"
+
+msgid "From"
+msgstr "From"
+
+msgid "Last Status Change"
+msgstr "Last Status Change"
+
+msgid "New Status"
+msgstr "New Status"
+
+msgid "No status change has been recorded yet."
+msgstr "No status change has been recorded yet."
+
+msgid "Pause"
+msgstr "Pause"
+
+msgid "Pause the selected stability plan"
+msgstr "Pause the selected stability plan"
+
+msgid "Paused"
+msgstr "Paused"
+
+msgid "Plan Status"
+msgstr "Plan Status"
+
+msgid "Plan status filters"
+msgstr "Plan status filters"
+
+msgid "Please select exactly one stability plan: the plan status is changed one plan at a time."
+msgstr "Please select exactly one stability plan: the plan status is changed one plan at a time."
+
+msgid "Please select one stability plan first."
+msgstr "Please select one stability plan first."
+
+msgid "Required. It is recorded in the audit trail and shown on the plan page."
+msgstr "Required. It is recorded in the audit trail and shown on the plan page."
+
+msgid "Resume"
+msgstr "Resume"
+
+msgid "Resume the selected stability plan"
+msgstr "Resume the selected stability plan"
+
+msgid "Sample Status"
+msgstr "Sample Status"
+
+msgid "Status History"
+msgstr "Status History"
+
+msgid "Terminate"
+msgstr "Terminate"
+
+msgid "Terminate the selected stability plan (final)"
+msgstr "Terminate the selected stability plan (final)"
+
+msgid "Terminated"
+msgstr "Terminated"
+
+msgid "Terminated Plans"
+msgstr "Terminated Plans"
+
+msgid "Terminating is final: a terminated plan cannot be resumed, and its samples are not changed in any way."
+msgstr "Terminating is final: a terminated plan cannot be resumed, and its samples are not changed in any way."
+
+msgid "The selected stability plan could not be found."
+msgstr "The selected stability plan could not be found."
+
+msgid "The stability plan cannot be changed to the requested state from its current state."
+msgstr "The stability plan cannot be changed to the requested state from its current state."
+
+msgid "This plan has unfinished samples. Terminating the plan stops all further operations on its timepoints. Please review the list below before continuing."
+msgstr "This plan has unfinished samples. Terminating the plan stops all further operations on its timepoints. Please review the list below before continuing."
+
+msgid "This plan is paused. All operations on its timepoints are frozen until it is resumed."
+msgstr "This plan is paused. All operations on its timepoints are frozen until it is resumed."
+
+msgid "This plan is terminated."
+msgstr "This plan is terminated."
+
+msgid "This stability plan cannot be edited in its current state."
+msgstr "This stability plan cannot be edited in its current state."
+
+msgid "Unknown"
+msgstr "Unknown"
+
+msgid "Unsupported action."
+msgstr "Unsupported action."
+
+msgid "You do not have permission to change the status of a stability plan."
+msgstr "You do not have permission to change the status of a stability plan."
+
+msgid "{count} paused or terminated plan(s) were skipped: all operations on their timepoints are frozen."
+msgstr "{count} paused or terminated plan(s) were skipped: all operations on their timepoints are frozen."
+
+
+msgid "Resumed. Please check the timepoints that expired during the pause and the Start Time (T0) before the next automatic scan runs."
+msgstr "Resumed. Please check the timepoints that expired during the pause and the Start Time (T0) before the next automatic scan runs."
+
+
+msgid "This timepoint has expired and can no longer be generated."
+msgstr "This timepoint has expired and can no longer be generated."
+
+msgid "This timepoint has expired and can no longer be linked to a sample."
+msgstr "This timepoint has expired and can no longer be linked to a sample."
+
+
+msgid "A reason is required to change the status of a stability plan."
+msgstr "A reason is required to change the status of a stability plan."
+
+msgid "This stability plan is paused. All operations on it are frozen."
+msgstr "This stability plan is paused. All operations on it are frozen."
+
+msgid "This stability plan is terminated."
+msgstr "This stability plan is terminated."
+
+msgid "Paused or terminated plans are frozen: their timepoints cannot be modified."
+msgstr "Paused or terminated plans are frozen: their timepoints cannot be modified."
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+msgid "Some timepoint rows could not be read and were dropped. Please reload the page and fill them in again."
+msgstr "Some timepoint rows could not be read and were dropped. Please reload the page and fill them in again."
+
+msgid "The timepoint rows could not be read, so they were left unchanged. Please reload the page and try again."
+msgstr "The timepoint rows could not be read, so they were left unchanged. Please reload the page and try again."
+
+
+msgid "The timepoint rows of this plan could not be verified, so they were left unchanged."
+msgstr "The timepoint rows of this plan could not be verified, so they were left unchanged."
+
+msgid "Discarded"
+msgstr "Discarded"
+
+msgid "Discarded at"
+msgstr "Discarded at"
+
+msgid "Discarded by"
+msgstr "Discarded by"
+
+msgid "Discard reason"
+msgstr "Discard reason"
+
+msgid "Set when the timepoint row was deleted (status deleted)."
+msgstr "Set when the timepoint row was deleted (status deleted)."
+
+msgid "Optional: why the timepoint row was discarded."
+msgstr "Optional: why the timepoint row was discarded."
+
+msgid "Only timepoints that have not been generated yet can be deleted."
+msgstr "Only timepoints that have not been generated yet can be deleted."
+
+msgid "Cannot delete: this timepoint has already started"
+msgstr "Cannot delete: this timepoint has already started"
+
+msgid "The sample {sample} of this timepoint is not finished. Please finish or cancel it before deleting this timepoint."
+msgstr "The sample {sample} of this timepoint is not finished. Please finish or cancel it before deleting this timepoint."
+
+msgid "The timepoint has been deleted (status deleted) and is kept in the plan for traceability. Use the Discarded filter on the task board to see it."
+msgstr "The timepoint has been deleted (status deleted) and is kept in the plan for traceability. Use the Discarded filter on the task board to see it."
+
+msgid "The timepoint rows could not be fully read, so no timepoint was deleted. Please reload the page and try again."
+msgstr "The timepoint rows could not be fully read, so no timepoint was deleted. Please reload the page and try again."
+
+msgid "An expired timepoint cannot be edited; delete it or add a new timepoint instead."
+msgstr "An expired timepoint cannot be edited; delete it or add a new timepoint instead."

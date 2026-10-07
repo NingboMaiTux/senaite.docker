@@ -5,8 +5,9 @@ from Products.CMFPlone.interfaces import INonInstallable
 from senaite.core import logger
 from zope.interface import implementer
 
-from maitux.stock import _
 from maitux.stock.config import PROJECTNAME
+from maitux.stock.config import USAGE_REQUEST_TYPE
+from maitux.stock.config import USAGE_REQUEST_WORKFLOW
 from maitux.stock.stockbatchexpiry import REVIEW_STATE_ACTIVE
 from maitux.stock.stockbatchexpiry import REVIEW_STATE_DESTROYED
 from maitux.stock.stockbatchexpiry import expire_batch
@@ -14,28 +15,65 @@ from maitux.stock.stockbatchexpiry import is_due_for_expiry
 from maitux.stock.stockbatchexpiry import set_status_value
 
 STOCK_MANAGER_ID = "stockmanager"
-STOCK_MANAGER_TITLE = _(u"Stockinventory", default=u"Stockinventory")
+# 中文注释：**标题一律存英文 msgid**（对象 Title / FTI title 都是）。
+# 为什么：菜单名、面包屑、页面 <title> 都是直接读这个值；只有当它等于目录里的
+# msgid 时，运行时翻译才能按当前语言给出中/英文：
+#   * 英文站 → 英文原文（locales/en 里的同义条目）
+#   * 中文站 → locales/zh*/ 里的中文
+# 目录见 src/maitux/stock/locales/*/LC_MESSAGES/maitux.stock.po。
+# （侧边栏的翻译链路：senaite.core.i18n.translate -> 未命中时由
+#   maitux/stock/i18n_fallback.py 回退到本包域。）
+STOCK_MANAGER_TITLE = u"Stock Inventory"
 DYNAMIC_SECTION_ID = "stock_dynamic"
 STOCK_FOLDER_ID = "stock"
-STOCK_FOLDER_TITLE = _(u"Stock Item", default=u"Stock Item")
+STOCK_FOLDER_TITLE = u"Stock Items"
 STOCK_UNITS_ID = "stock_units"
 STOCK_TYPES_ID = "stock_types"
 PURCHASE_ORDERS_ID = "purchase_orders"
 STOCK_BATCHES_ID = "stock_batches"
 LOW_STOCK_ID = "low_stock"
-LOW_STOCK_TITLE = _(u"Low Quantity", default=u"Low Quantity")
-SIDEBAR_DEPTH = 2
-
+LOW_STOCK_TITLE = u"Low Stock"
 USAGE_TRACE_ID = "usage_trace"
-USAGE_TRACE_TITLE = _(u"Usage Trace", default=u"Usage Trace")
+USAGE_TRACE_TITLE = u"Usage Trace"
 USAGE_REPORT_ID = "usage_report"
-USAGE_REPORT_TITLE = _(u"Usage Report", default=u"Usage Report")
+USAGE_REPORT_TITLE = u"Usage Report"
+USAGE_REQUESTS_ID = "usage_requests"
+USAGE_REQUESTS_TITLE = u"Usage Requests"
+SIDEBAR_DEPTH = 2
 
 # 库存使用记录查询界面（两个独立节点，侧边栏按 path 倒序展示，u 开头排在最前）
 USAGE_SECTION_DEFINITIONS = (
     (USAGE_TRACE_ID, "StockUsageTrace", USAGE_TRACE_TITLE),
     (USAGE_REPORT_ID, "StockUsageReport", USAGE_REPORT_TITLE),
 )
+
+# 领用申请单目录（需要电子签名的库存走申请审批，申请单放在这里）
+USAGE_REQUEST_SECTION_DEFINITIONS = (
+    (USAGE_REQUESTS_ID, "StockUsageRequests", USAGE_REQUESTS_TITLE),
+)
+
+# 领用申请必须走电子签名的迁移。esignature 是靠"规则表"驱动的，
+# 缺行会导致迁移被直接执行（没有签名）——所以安装时幂等写入。
+#
+# 中文注释：**submit（发起领用）不需要签名**。需求口径是：
+#   提交申请 -> 直接进入待审核 -> 审核人（非申请人）**双人复核签名**后才会扣减。
+#
+# 双人复核为什么必须写在规则表里：
+#   * 审核人不能是申请人 —— 工作流守则只能看到"当前用户"，所以单人签名时
+#     `disallow_initiator` 就够了；
+#   * "双人"是指签名页上一次性录入两个操作员账号密码（primary + secondary），
+#     其中**第一个账号**是真正执行迁移的人。第二个账号是复核人，
+#     守则完全看不到他，所以只能在签名页按 `disallow_initiator` 校验：
+#     两个账号都不能是申请人，且两个账号必须不同。
+USAGE_REQUEST_SIGNATURE_RULES = (
+    # (transition_id, require_countersign, disallow_initiator)
+    (u"approve", True, True),    # 审核领用：双人复核签名 + 双人/申请人都受限
+    (u"reject", False, True),    # 驳回：单人签名（驳回不扣减，不需要双人）
+)
+
+# 历史上曾经要求签名、现在不该再要求的迁移。安装时要把这些规则**删掉**，
+# 否则老站点升级后"提交申请"仍然会弹出签名页。
+USAGE_REQUEST_UNSIGNED_TRANSITIONS = (u"submit",)
 
 # 库存相关类型的图标（图标名必须是 senaite 图标表里真实存在的，
 # 否则会回退成 icon-not-found —— 即界面上的"问号"图标）。
@@ -53,10 +91,11 @@ TYPE_ICONS = (
 BROKEN_ICON_EXPRS = ("", None, "senaite_theme/icon/folder")
 
 STOCK_CHILDREN = (
-    (STOCK_UNITS_ID, "StockUnits", _(u"Units", default=u"Units")),
-    (STOCK_TYPES_ID, "StockTypes", _(u"Stock Types", default=u"Stock Types")),
-    (PURCHASE_ORDERS_ID, "StockPurchaseOrders", _(u"Purchase Orders", default=u"Purchase Orders")),
-    (STOCK_BATCHES_ID, "StockBatches", _(u"Stock Batches", default=u"Stock Batches")),
+    # 与上面的模块标题同理：存英文 msgid，运行时按语言翻译成中文
+    (STOCK_UNITS_ID, "StockUnits", u"Units"),
+    (STOCK_TYPES_ID, "StockTypes", u"Stock Types"),
+    (PURCHASE_ORDERS_ID, "StockPurchaseOrders", u"Purchase Orders"),
+    (STOCK_BATCHES_ID, "StockBatches", u"Stock Batches"),
 )
 
 
@@ -98,7 +137,62 @@ def run_install_steps(portal):
     setup_permissions(stock_manager)
     setup_sidebar()
     setup_workflows()
+    ensure_unicode_workflow_state_titles()
+    setup_esignature_rules()
     reindex_stock_structure(stock_manager)
+
+
+def ensure_unicode_workflow_state_titles():
+    """把领用申请工作流的"状态标题"归一化成 unicode。
+
+    为什么必须做（踩过的坑）：DCWorkflow 从 XML 导入时，状态标题会以 **UTF-8
+    字节串**（py2 的 str）落库。而 ``senaite.app.listing`` 的
+    ``translate_review_state()`` 会把标题当 msgid 交给 MessageFactory：
+
+        state_title = wf.getTitleForStateOnType(state, portal_type)
+        ts.translate(_(state_title or state), context=self.request)
+
+    py2 下 MessageFactory 收到非 ASCII 字节串会直接抛
+    ``UnicodeDecodeError: 'ascii' codec can't decode byte 0xe5``，表现为
+    **列表接口 500**（页签/表格都刷不出来）。
+
+    上游那个位置不方便改，所以在自己的安装步骤里把标题转成 unicode。
+    幂等：已经是 unicode 就直接跳过。
+    """
+    logger.info("*** Ensure Unicode Workflow State Titles ***")
+    workflow_tool = api.get_tool("portal_workflow")
+    if workflow_tool is None:
+        logger.warn("portal_workflow not found; skip state title fix")
+        return
+    workflow = workflow_tool.getWorkflowById(USAGE_REQUEST_WORKFLOW)
+    if workflow is None:
+        logger.warn("workflow '%s' not found; skip state title fix",
+                    USAGE_REQUEST_WORKFLOW)
+        return
+
+    states = getattr(workflow, "states", None)
+    if states is None:
+        return
+
+    fixed = 0
+    for container_name in ("states", "transitions"):
+        container = getattr(workflow, container_name, None)
+        if container is None:
+            continue
+        for item_id in list(getattr(container, "objectIds", lambda: [])()):
+            item = container.get(item_id)
+            if item is None:
+                continue
+            title = getattr(item, "title", None)
+            if not title or isinstance(title, unicode):
+                continue
+            try:
+                item.title = title.decode("utf-8")
+                fixed += 1
+            except Exception:
+                logger.warn("Could not normalize title of %s '%s'",
+                            container_name, item_id)
+    logger.info("Normalized %s workflow state/transition title(s)", fixed)
 
 
 def setup_type_icons():
@@ -137,6 +231,20 @@ def setup_type_constraints():
 
     ensure_allowed_content_type(types_tool, "Plone Site", "StockManager")
     ensure_allowed_content_type(types_tool, "StockManager", "LowStockSection")
+
+    # 领用申请单目录 + 目录下允许创建申请单
+    for type_name, allowed_type in (
+            ("StockManager", "StockUsageRequests"),
+            ("StockUsageRequests", "StockUsageRequest"),
+    ):
+        if types_tool.getTypeInfo(allowed_type) is None:
+            logger.error(
+                "Skip allowed_content_types for '%s' -> '%s': portal type is "
+                "not registered yet. Please run the maitux.stock profile "
+                "import once more.", type_name, allowed_type)
+            continue
+        ensure_allowed_content_type(types_tool, type_name, allowed_type)
+
     for obj_id, portal_type, title in USAGE_SECTION_DEFINITIONS:
         if types_tool.getTypeInfo(portal_type) is None:
             # 中文注释：本环境的 GenericSetup 步骤依赖图存在历史遗留的环，
@@ -181,8 +289,46 @@ def setup_site_structure(portal):
             ensure_content(stock_manager, portal_type, child_id, title)
 
         ensure_usage_sections(stock_manager)
+        ensure_usage_request_section(stock_manager)
         ensure_low_stock_section(stock_manager)
         return stock_manager
+
+
+def ensure_usage_request_section(stock_manager):
+    """创建领用申请单目录（幂等）。
+
+    与使用记录节点同理：FTI 尚未导入时只记录 error 并跳过，不中断 profile 导入。
+    """
+    logger.info("*** Ensure Stock Usage Request Section ***")
+    types_tool = api.get_tool("portal_types")
+    for obj_id, portal_type, title in USAGE_REQUEST_SECTION_DEFINITIONS:
+        if types_tool is not None and types_tool.getTypeInfo(portal_type) is None:
+            logger.error(
+                "Cannot create '%s': portal type '%s' is not registered yet. "
+                "Re-run the maitux.stock profile import to create it.",
+                obj_id, portal_type)
+            continue
+        ensure_content(stock_manager, portal_type, obj_id, title)
+
+
+def ensure_usage_sections(stock_manager):
+    """创建库存使用记录查询界面的两个节点（幂等）。
+
+    与其它子目录不同，这两个类型的 FTI 是本次新增的，可能因为 GenericSetup
+    步骤依赖图存在环而尚未导入。此时记录明确的 error 日志并跳过，不中断整个
+    profile 导入；再执行一次 profile 导入（或访问 ``@@stock_usage_setup``）即可。
+    """
+    logger.info("*** Ensure Stock Usage Sections ***")
+    types_tool = api.get_tool("portal_types")
+    for obj_id, portal_type, title in USAGE_SECTION_DEFINITIONS:
+        if types_tool is not None and types_tool.getTypeInfo(portal_type) is None:
+            logger.error(
+                "Cannot create '%s': portal type '%s' is not registered yet. "
+                "Re-run the maitux.stock profile import (or visit "
+                "@@stock_usage_setup on the stock manager) to create it.",
+                obj_id, portal_type)
+            continue
+        ensure_content(stock_manager, portal_type, obj_id, title)
 
 
 def migrate_legacy_stock_root_from_setup(portal):
@@ -229,10 +375,38 @@ def ensure_content(container, portal_type, obj_id, title):
 def ensure_title(obj, title):
     if not getattr(obj, "Title", None):
         return
-    if obj.Title() == title:
+    # 中文注释：obj.Title() 返回的是 UTF-8 字节串（py2），而 title 是 unicode，
+    # 直接 == 比较会触发 UnicodeWarning 并且恒为 False，导致标题永远设不上。
+    # 统一用 api.safe_unicode 归一化后再比较。
+    try:
+        current = api.safe_unicode(obj.Title() or u"")
+    except Exception:
+        current = u""
+    wanted = api.safe_unicode(title or u"")
+    if current == wanted:
         return
-    obj.setTitle(title)
-    logger.info("Updated title for %s", api.get_path(obj))
+    try:
+        obj.setTitle(wanted)
+        logger.info("Updated title for %s", api.get_path(obj))
+    except Exception:
+        logger.warn("Could not set title for %s", api.get_path(obj))
+        return
+    # 中文注释：侧边栏/菜单读的是 **catalog 里的 Title 索引**，只 setTitle 不 reindex
+    # 的话菜单会一直显示旧名字（历史上就出现过"改了常量菜单不变"）。
+    try:
+        obj.reindexObject(idxs=["Title", "sortable_title"])
+    except Exception:
+        pass
+    # 兜底：Dexterity 对象没挂 IMultiCatalogBehavior 时 reindexObject() 是空操作
+    # （本模块的容器类型以前就漏了这个 behavior），这里直接对目录做一次 catalog_object。
+    for tool_name in ("portal_catalog", "uid_catalog"):
+        tool = api.get_tool(tool_name)
+        if tool is None:
+            continue
+        try:
+            tool.catalog_object(obj, api.get_path(obj))
+        except Exception:
+            logger.warn("Could not catalog %s in %s", api.get_path(obj), tool_name)
 
 
 def remove_dynamic_section(stock_manager):
@@ -326,26 +500,6 @@ def move_root_stock_items_into_folder(stock_manager, stock_folder):
         logger.info("Skip root stock item migration")
 
 
-def ensure_usage_sections(stock_manager):
-    """创建库存使用记录查询界面的两个节点（幂等）。
-
-    与其它子目录不同，这两个类型的 FTI 是本次新增的，可能因为 GenericSetup
-    步骤依赖图存在环而尚未导入。此时记录明确的 error 日志并跳过，不中断整个
-    profile 导入；再执行一次 profile 导入（或访问 ``@@stock_usage_setup``）即可。
-    """
-    logger.info("*** Ensure Stock Usage Sections ***")
-    types_tool = api.get_tool("portal_types")
-    for obj_id, portal_type, title in USAGE_SECTION_DEFINITIONS:
-        if types_tool is not None and types_tool.getTypeInfo(portal_type) is None:
-            logger.error(
-                "Cannot create '%s': portal type '%s' is not registered yet. "
-                "Re-run the maitux.stock profile import (or visit "
-                "@@stock_usage_setup on the stock manager) to create it.",
-                obj_id, portal_type)
-            continue
-        ensure_content(stock_manager, portal_type, obj_id, title)
-
-
 def ensure_low_stock_section(stock_manager):
     logger.info("*** Ensure Low Stock Section ***")
     if LOW_STOCK_ID in stock_manager:
@@ -360,7 +514,10 @@ def ensure_low_stock_section(stock_manager):
 
 def setup_permissions(stock_manager):
     logger.info("*** Setup Stock Permissions ***")
-    roles = ["LabClerk", "LabManager", "Manager", "Owner"]
+    # 中文注释：InventoryAdministrator（库存管理员）必须在这里，否则它连库存结构都
+    # 看不到——领用审批的复核人正是这个角色，看不到批次就没法审核。
+    roles = ["LabClerk", "LabManager", "InventoryAdministrator",
+             "Manager", "Owner"]
     targets = [
         stock_manager,
         stock_manager.get(STOCK_FOLDER_ID),
@@ -378,6 +535,19 @@ def setup_permissions(stock_manager):
         obj.manage_permission("Access contents information", roles=roles, acquire=0)
         obj.reindexObjectSecurity()
         logger.info("Updated permissions for %s", api.get_path(obj))
+
+    # 领用申请审批目录：**只有审批角色能看到**（这是审批队列，不是普通业务目录）。
+    # 申请人自己仍然能看到"自己那张申请单"——申请单的状态权限映射里给了 Owner
+    # （CMF 会把创建者设为该对象的 Owner），见工作流定义。
+    approval_roles = ["LabManager", "InventoryAdministrator", "Manager", "Owner"]
+    container = stock_manager.get(USAGE_REQUESTS_ID)
+    if container is not None:
+        container.manage_permission("View", roles=approval_roles, acquire=0)
+        container.manage_permission(
+            "Access contents information", roles=approval_roles, acquire=0)
+        container.reindexObjectSecurity()
+        logger.info("Restricted '%s' to approver roles %s",
+                    api.get_path(container), approval_roles)
 
 
 def setup_sidebar():
@@ -406,7 +576,7 @@ def setup_sidebar():
 
 
 def setup_workflows():
-    logger.info("*** Setup StockBatch Workflow ***")
+    logger.info("*** Setup Stock Workflows ***")
     workflow_tool = api.get_tool("portal_workflow")
     if workflow_tool is None:
         raise RuntimeError("portal_workflow tool not found")
@@ -414,6 +584,10 @@ def setup_workflows():
     workflow_tool.setChainForPortalTypes(
         ("StockBatch",), ("senaite_stockbatch_workflow",))
     logger.info("Bound 'senaite_stockbatch_workflow' to 'StockBatch'")
+
+    workflow_tool.setChainForPortalTypes(
+        ("StockUsageRequest",), ("senaite_stockusagerequest_workflow",))
+    logger.info("Bound 'senaite_stockusagerequest_workflow' to 'StockUsageRequest'")
 
     # 兼容当前 SENAITE/Plone 栈：角色映射更新应针对工作流定义或具体对象，
     # 不能对 portal_workflow 工具使用 portal_type 关键字参数。
@@ -466,6 +640,140 @@ def setup_workflows():
                 rolemap_updated)
     logger.info("Synced destroyed workflow state for %s StockBatch object(s)", synced_destroyed)
     logger.info("Synced expired workflow state for %s StockBatch object(s)", synced_expired)
+
+
+def setup_esignature_rules():
+    """把领用申请的签名规则幂等写入 maitux.esignature 的规则表。
+
+    为什么必须自动写：电子签名是靠 (portal_type, workflow_id, transition_id)
+    规则表驱动的。规则缺失时标准工作流入口会**直接执行迁移**——也就是申请会
+    在没有任何签名的情况下被批出去。守卫里有 fail-closed 兜底会拦住这种情况，
+    但那只会在界面上表现为"点了没反应"，所以安装时就把规则补齐。
+
+    规则表在 registry 里（maitux.esignature.policy_rules_json）。
+    本步骤只管理"领用申请"这一个 portal_type 的那几行：新增缺失行、把已存在
+    行的配置**收敛到期望值**（例如把旧的单人签名纠正为双人复核）、删掉不该再
+    要求签名的迁移；其它 portal_type 的规则原样保留。
+    """
+    logger.info("*** Setup Stock Usage Request Signature Rules ***")
+    try:
+        from maitux.esignature.interfaces import (
+            IESignatureControlPanelSettings,
+        )
+        from maitux.esignature.services.rules import dumps_policy_rules
+        from maitux.esignature.services.rules import loads_policy_rules
+        from maitux.esignature.services.rules import normalize_rule
+    except ImportError:
+        logger.warn("maitux.esignature is not available; "
+                    "skip stock usage request signature rules")
+        return
+
+    from plone.registry.interfaces import IRegistry
+    from zope.component import getUtility
+
+    # 中文注释：IRegistry 在 Plone 里通常是**站点级本地工具**，
+    # 没有站点上下文时 getUtility 会抛 ComponentLookupError。
+    # 这里做两级兜底，避免因为取注册表失败而让整个安装步骤挂掉。
+    registry = None
+    try:
+        registry = getUtility(IRegistry)
+    except Exception:
+        registry = getattr(api.get_portal(), "portal_registry", None)
+    if registry is None:
+        logger.warn("Cannot reach the registry; skip stock usage request "
+                    "signature rules")
+        return
+    # 与 esignature 控制面板一致：先确保 registry 记录存在（老站点补齐）
+    try:
+        registry.registerInterface(
+            IESignatureControlPanelSettings, prefix="maitux.esignature")
+    except Exception:
+        pass
+
+    key = "maitux.esignature.policy_rules_json"
+    record = registry.records.get(key)
+    raw = getattr(record, "value", u"[]") if record is not None else u"[]"
+    rules = loads_policy_rules(raw)
+
+    # 1) 先纠正历史配置：删掉不该再要求签名的迁移规则
+    removed = 0
+    kept = []
+    for rule in rules:
+        if (rule.get("portal_type") == USAGE_REQUEST_TYPE
+                and rule.get("transition_id") in USAGE_REQUEST_UNSIGNED_TRANSITIONS):
+            removed += 1
+            continue
+        kept.append(rule)
+    rules = kept
+
+    # 2) 再补齐/纠正需要的规则。
+    #    这里必须"按期望值收敛"而不是"已存在就跳过"：老站点上 approve 那行
+    #    可能还是旧的 require_countersign=False（单人签名），如果只做增量追加，
+    #    改了常量重新安装也不会生效，界面上就表现为"电子签名不是双人的"。
+    managed_keys = ("signature_required", "require_countersign",
+                    "disallow_initiator")
+    desired = {}
+    for rule_spec in USAGE_REQUEST_SIGNATURE_RULES:
+        transition_id, require_countersign, disallow_initiator = rule_spec
+        desired[transition_id] = normalize_rule({
+            "portal_type": USAGE_REQUEST_TYPE,
+            "workflow_id": USAGE_REQUEST_WORKFLOW,
+            "transition_id": transition_id,
+            "signature_required": True,
+            "require_countersign": require_countersign,
+            "disallow_initiator": disallow_initiator,
+            "meaning_required": True,
+            "reason_required": True,
+        })
+
+    added = 0
+    updated = 0
+    kept_rules = []
+    present = set()
+    for rule in rules:
+        if rule.get("portal_type") != USAGE_REQUEST_TYPE:
+            kept_rules.append(rule)
+            continue
+        transition_id = rule.get("transition_id")
+        expected = desired.get(transition_id)
+        if expected is None:
+            # 不是本模块期望管理的迁移，原样保留
+            kept_rules.append(rule)
+            continue
+        present.add(transition_id)
+        # 只覆盖本模块管理的字段，保留用户对 meaning/reason 等其它开关的自定义
+        merged = dict(rule)
+        merged.update(dict(
+            (key, expected[key]) for key in managed_keys))
+        if merged != rule:
+            updated += 1
+        kept_rules.append(merged)
+    rules = kept_rules
+
+    for transition_id in sorted(desired):
+        if transition_id in present:
+            continue
+        rules.append(desired[transition_id])
+        added += 1
+
+    if not added and not removed and not updated:
+        logger.info("Signature rules for '%s' already up to date", USAGE_REQUEST_TYPE)
+        return
+
+    if record is None:
+        try:
+            registry.registerInterface(
+                IESignatureControlPanelSettings, prefix="maitux.esignature")
+        except Exception:
+            pass
+        record = registry.records.get(key)
+    if record is None:
+        logger.error("Cannot write signature rules: registry record '%s' missing", key)
+        return
+
+    record.value = dumps_policy_rules(rules)
+    logger.info("Stock usage request signature rules: +%s added, ~%s updated, "
+                "-%s removed", added, updated, removed)
 
 
 def reindex_stock_structure(stock_manager):

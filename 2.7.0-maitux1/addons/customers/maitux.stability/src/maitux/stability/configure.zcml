@@ -4,11 +4,33 @@
     xmlns:i18n="http://namespaces.zope.org/i18n"
     i18n_domain="maitux.stability">
 
+  <!-- 中文注释：注册 locales 目录，否则本 addon 的 .po/.mo 不会被 zope.i18n 加载，
+       模板里的 i18n:translate 与运行时翻译都会退回英文 msgid（中文站显示英文）。
+       中英双语就是靠这里的目录 + i18n.py 的运行时翻译实现的。 -->
   <i18n:registerTranslations directory="locales" />
 
   <permission
       id="maitux.stability.permissions.AddStabilityPlanTemplate"
       title="maitux.stability: Add Stability Plan Template"
+      />
+
+  <!-- 管理「样品模板 + 自动登样」配置的权限：字段级 + 站点设置页两处共用。
+       id 与 title 都必须 ASCII —— title 会被 Zope 的 addPermission() 直接注册，
+       非 ASCII 在 py2 下会炸（见开发规则 R9b）。 -->
+  <permission
+      id="maitux.stability.permissions.ManageSampleAutomation"
+      title="maitux.stability: Manage Sample Automation"
+      />
+
+  <!-- 管理「方案状态」（暂停 / 恢复 / 终止）的权限：阶段 6a 新增。
+       两处共用同一个权限（与 ManageSampleAutomation 同一套路）：
+         * 工作流层 —— senaite_stability_plan_workflow 的三个流转都拿它当 guard；
+         * 页面层   —— browser/planstatus.py 进表单前再校验一次（双门）。
+       id 与 title 都必须 ASCII（title 会被 Zope 的 addPermission() 直接注册，
+       非 ASCII 在 py2 下会炸，见开发规则 R9b）。 -->
+  <permission
+      id="maitux.stability.permissions.ManagePlanStatus"
+      title="maitux.stability: Manage Plan Status"
       />
 
   <include package=".browser" />
@@ -39,6 +61,15 @@
       provides="bika.lims.interfaces.IWorkflowActionAdapter"
       permission="zope.Public" />
 
+  <!-- 稳定性方案列表页「复制计划」：跳到新建表单并按被复制方案预填 -->
+  <adapter
+      name="workflow_action_copy_plan"
+      for="*
+           zope.publisher.interfaces.browser.IBrowserRequest"
+      factory="maitux.stability.browser.view.WorkflowActionCopyPlanAdapter"
+      provides="bika.lims.interfaces.IWorkflowActionAdapter"
+      permission="zope.Public" />
+
   <adapter
       name="workflow_action_sample_placement"
       for="*
@@ -52,6 +83,36 @@
       for="*
            zope.publisher.interfaces.browser.IBrowserRequest"
       factory="maitux.stability.browser.view.WorkflowActionSyncPlanTasksAdapter"
+      provides="bika.lims.interfaces.IWorkflowActionAdapter"
+      permission="zope.Public" />
+
+  <!-- 阶段 6a：方案列表页 / 方案页上的「暂停 / 恢复 / 终止」按钮。
+       三个适配器只负责"校验 + 跳到 @@plan_status"，真正的校验与写库在
+       browser/planstatus.PlanStatusView 里（与「复制计划」按钮同一套路）。
+       ★ 适配器名必须是 workflow_action_<id>，且列表页按钮的
+         workflow_action_id 要写同一个 <id> —— bika.lims.browser.workflow
+         的 get_action() 读的是 workflow_action_id / workflow_action。 -->
+  <adapter
+      name="workflow_action_pause_plan"
+      for="*
+           zope.publisher.interfaces.browser.IBrowserRequest"
+      factory="maitux.stability.browser.planstatus.WorkflowActionPausePlanAdapter"
+      provides="bika.lims.interfaces.IWorkflowActionAdapter"
+      permission="zope.Public" />
+
+  <adapter
+      name="workflow_action_resume_plan"
+      for="*
+           zope.publisher.interfaces.browser.IBrowserRequest"
+      factory="maitux.stability.browser.planstatus.WorkflowActionResumePlanAdapter"
+      provides="bika.lims.interfaces.IWorkflowActionAdapter"
+      permission="zope.Public" />
+
+  <adapter
+      name="workflow_action_terminate_plan"
+      for="*
+           zope.publisher.interfaces.browser.IBrowserRequest"
+      factory="maitux.stability.browser.planstatus.WorkflowActionTerminatePlanAdapter"
       provides="bika.lims.interfaces.IWorkflowActionAdapter"
       permission="zope.Public" />
 

@@ -1,0 +1,84 @@
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:tal="http://xml.zope.org/namespaces/tal"
+      xmlns:metal="http://xml.zope.org/namespaces/metal"
+      xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+      i18n:domain="maitux.stability">
+  <body>
+
+    <div id="stability-plan-status-panel"
+         class="card mb-3">
+
+      <div class="card-header d-flex align-items-center">
+        <strong i18n:translate="">Plan Status</strong>
+        <!--! 状态徽标：class 用 python: 表达式拼，避免属性指令把旁边的 ml-2
+             覆盖掉。这里用 TAL 注释（叹号开头）而不是普通 HTML 注释：
+             普通注释会原样进页面源码，注释里出现的指令名还会让
+             "有没有未渲染指令"这类检查误报。 -->
+        <span class="ml-2"
+              id="stability-plan-status-badge"
+              tal:attributes="class python:'ml-2 %s' % view.state_class()"
+              tal:content="view/state_title">In Progress</span>
+
+        <div class="ml-auto"
+             tal:condition="view/can_manage">
+          <a class="btn btn-sm btn-outline-warning mr-1"
+             tal:repeat="action view/actions"
+             tal:attributes="href python:view.action_url(action);
+                             title action/help"
+             tal:content="action/title">Pause</a>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div class="alert alert-warning mb-2"
+             tal:condition="python:bool(view.state_notice())">
+          <span tal:content="view/state_notice">notice</span>
+        </div>
+
+        <p class="mb-2 text-muted"
+           tal:condition="view/has_trace">
+          <span i18n:translate="">Last Status Change</span>:
+          <span tal:content="view/status_changed_at">2026-01-01 08:00</span>
+          <span> / </span>
+          <span tal:content="view/status_changed_by">admin</span>
+          <tal:block tal:condition="python:bool(view.status_changed_reason())">
+            <span> / </span>
+            <span tal:content="view/status_changed_reason">reason</span>
+          </tal:block>
+        </p>
+
+        <tal:block tal:condition="python:bool(view.history())">
+          <h5 i18n:translate="">Status History</h5>
+          <table class="table table-sm table-striped mb-0"
+                 id="stability-plan-status-history">
+            <thead>
+              <tr>
+                <th i18n:translate="">Date</th>
+                <th i18n:translate="">Actor</th>
+                <th i18n:translate="">From</th>
+                <th i18n:translate="">To</th>
+                <th i18n:translate="">Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr tal:repeat="entry view/history">
+                <td tal:content="entry/time">2026-01-01 08:00</td>
+                <td tal:content="entry/actor">admin</td>
+                <td tal:content="entry/from_title">In Progress</td>
+                <td tal:content="entry/to_title">Paused</td>
+                <td tal:content="entry/reason">reason</td>
+              </tr>
+            </tbody>
+          </table>
+        </tal:block>
+
+        <p class="text-muted mb-0"
+           tal:condition="python:not view.history()"
+           i18n:translate="">
+          No status change has been recorded yet.
+        </p>
+      </div>
+    </div>
+
+  </body>
+</html>

@@ -1,0 +1,169 @@
+<?xml version="1.0"?>
+<dc-workflow xmlns:i18n="http://xml.zope.org/namespaces/i18n"
+             workflow_id="senaite_stability_plan_workflow"
+             title="Senaite Stability Plan Workflow"
+             description="In progress / Paused / Terminated for stability plans"
+             state_variable="review_state"
+             initial_state="in_progress"
+             manager_bypass="False"
+             i18n:domain="maitux.stability">
+
+  <!--
+  稳定性方案的三态工作流（阶段 6a）。
+
+  为什么是工作流而不是普通字段（需求确认稿 C3）：
+    * 流转会自动产生审计快照（bika.lims.subscribers.auditlog.
+      ObjectTransitionedEventHandler 订阅 IActionSucceededEvent），
+      动作名就是 transition_id，原因进快照的 comments ——
+      "每一次状态变更都有痕迹 + 原因必填"这条需求直接落到平台原生机制上；
+    * 权限可按流转配（站点后台可调，即需求里的"权限可配置"）；
+    * review_state 是现成的目录索引，方案列表按状态筛选、看板按状态过滤
+      都走平台原生能力，不用自己造字段索引。
+
+  ⚠️ 权限映射全部 acquired="True"，与原先绑定的 senaite_one_state_workflow
+     **逐条一致** —— 也就是刻意**不靠工作流权限来冻结**：
+     冻结由 Python 侧的 plan_status.can_modify_plan() 负责
+     （见 browser/edit.py / browser/planstatus.py）。
+     这样升级前后权限行为零变化，切绑定不会意外锁住任何人的编辑权；
+     而且拒绝时的提示由我们自己给，比工作流那句 "Transition not allowed"
+     清楚得多（还能说清"是暂停了还是终止了"）。
+
+  ⚠️ 三个 transition 的 transition_id 必须与
+     maitux.stability.plan_status 的 TRANSITION_* / ALLOWED_TRANSITIONS 一致，
+     否则会出现"按钮在、点了不被工作流接受"。
+  -->
+
+  <!-- PERMISSIONS -->
+  <permission>Access contents information</permission>
+  <permission>Delete objects</permission>
+  <permission>List folder contents</permission>
+  <permission>Modify portal content</permission>
+  <permission>View</permission>
+
+  <!-- 管理方案状态（暂停 / 恢复 / 终止）的权限。
+       与 senaite_deactivable_type_workflow 同一套路：用它当流转的 guard，
+       Python 侧再校验一遍（双门）。 -->
+  <permission>maitux.stability: Manage Plan Status</permission>
+
+  <!-- State: in_progress（新建方案的初始状态）-->
+  <state state_id="in_progress" title="In Progress" i18n:attributes="title">
+    <exit-transition transition_id="pause" />
+    <exit-transition transition_id="terminate" />
+
+    <!-- Transition permissions -->
+    <permission-map name="maitux.stability: Manage Plan Status" acquired="True" />
+
+    <!-- Plone's permissions -->
+    <permission-map name="Access contents information" acquired="True" />
+    <permission-map name="Delete objects" acquired="True" />
+    <permission-map name="List folder contents" acquired="True" />
+    <permission-map name="Modify portal content" acquired="True" />
+    <permission-map name="View" acquired="True" />
+  </state>
+
+  <!-- State: paused（暂停 —— 该方案下一切写操作都被 plan_status 冻结）-->
+  <state state_id="paused" title="Paused" i18n:attributes="title">
+    <exit-transition transition_id="resume" />
+    <exit-transition transition_id="terminate" />
+
+    <!-- Transition permissions -->
+    <permission-map name="maitux.stability: Manage Plan Status" acquired="True" />
+
+    <!-- Plone's permissions -->
+    <permission-map name="Access contents information" acquired="True" />
+    <permission-map name="Delete objects" acquired="True" />
+    <permission-map name="List folder contents" acquired="True" />
+    <permission-map name="Modify portal content" acquired="True" />
+    <permission-map name="View" acquired="True" />
+  </state>
+
+  <!-- State: terminated（终态：没有 exit-transition，即不可恢复、不可再终止）-->
+  <state state_id="terminated" title="Terminated" i18n:attributes="title">
+
+    <!-- Transition permissions -->
+    <permission-map name="maitux.stability: Manage Plan Status" acquired="True" />
+
+    <!-- Plone's permissions -->
+    <permission-map name="Access contents information" acquired="True" />
+    <permission-map name="Delete objects" acquired="True" />
+    <permission-map name="List folder contents" acquired="True" />
+    <permission-map name="Modify portal content" acquired="True" />
+    <permission-map name="View" acquired="True" />
+  </state>
+
+  <!-- Transition: pause（进行中 -> 已暂停）-->
+  <transition transition_id="pause" title="Pause" new_state="paused" trigger="USER" before_script="" after_script="" i18n:attributes="title">
+    <action url="" category="workflow" icon="">Pause</action>
+    <guard>
+      <guard-permission>maitux.stability: Manage Plan Status</guard-permission>
+    </guard>
+  </transition>
+
+  <!-- Transition: resume（已暂停 -> 进行中）-->
+  <transition transition_id="resume" title="Resume" new_state="in_progress" trigger="USER" before_script="" after_script="" i18n:attributes="title">
+    <action url="" category="workflow" icon="">Resume</action>
+    <guard>
+      <guard-permission>maitux.stability: Manage Plan Status</guard-permission>
+    </guard>
+  </transition>
+
+  <!-- Transition: terminate（进行中 / 已暂停 -> 已终止）-->
+  <transition transition_id="terminate" title="Terminate" new_state="terminated" trigger="USER" before_script="" after_script="" i18n:attributes="title">
+    <action url="" category="workflow" icon="">Terminate</action>
+    <guard>
+      <guard-permission>maitux.stability: Manage Plan Status</guard-permission>
+    </guard>
+  </transition>
+
+  <!--
+  标准工作流变量。comments 那条是本需求的关键：它把 state_change 的
+  kwargs['comment'] 存进工作流状态，于是 review_history 里就带上了原因 ——
+  ObjectTransitionedEventHandler 正是从 history[0] 取 action 与 comments 写进快照的。
+  少了它，"原因必填"就只是个界面约束，审计里什么都看不到。
+  -->
+  <variable variable_id="action" for_catalog="False" for_status="True" update_always="True">
+    <description>Previous transition</description>
+    <default>
+      <expression>transition/getId|nothing</expression>
+    </default>
+    <guard>
+    </guard>
+  </variable>
+
+  <variable variable_id="actor" for_catalog="False" for_status="True" update_always="True">
+    <description>The ID of the user who performed the last transition</description>
+    <default>
+      <expression>user/getId</expression>
+    </default>
+    <guard>
+    </guard>
+  </variable>
+
+  <variable variable_id="comments" for_catalog="False" for_status="True" update_always="True">
+    <description>Comment about the last transition</description>
+    <default>
+      <expression>python:state_change.kwargs.get('comment', '')</expression>
+    </default>
+    <guard>
+    </guard>
+  </variable>
+
+  <variable variable_id="review_history" for_catalog="False" for_status="False" update_always="False">
+    <description>Provides access to workflow history</description>
+    <default>
+      <expression>state_change/getHistory</expression>
+    </default>
+    <guard>
+    </guard>
+  </variable>
+
+  <variable variable_id="time" for_catalog="False" for_status="True" update_always="True">
+    <description>When the previous transition was performed</description>
+    <default>
+      <expression>state_change/getDateTime</expression>
+    </default>
+    <guard>
+    </guard>
+  </variable>
+
+</dc-workflow>

@@ -158,9 +158,6 @@ msgstr "采购订单"
 msgid "Quantity"
 msgstr "数量"
 
-msgid "Quantity Ordered must be a number (decimals allowed)"
-msgstr "Quantity Ordered 必须是数字（可含小数点）"
-
 msgid "Remarks"
 msgstr "备注"
 
@@ -533,8 +530,626 @@ msgstr "分装"
 msgid "operation_stocktake"
 msgstr "盘存"
 
+msgid "E-Signature"
+msgstr "电子签名"
+
+msgid "Two-person"
+msgstr "双人"
+
+msgid "Two-Person Electronic Signature Required"
+msgstr "需要进行双人电子签名"
+
+msgid "At least one selected batch belongs to a stock item configured to require a two-person electronic signature. Two different operators must each enter their own account and password on this page. The stock is deducted only after both credentials are verified in a single submission."
+msgstr "所选批次中至少有一个属于「领用需双人电子签名」的库存。必须由两名不同的操作员在本页各自输入自己的账号和密码；两个凭据在同一次提交中全部校验通过后，才会扣减库存。"
+
+msgid "Allowed roles for the second reviewer:"
+msgstr "可担任第二复核人的角色："
+
+msgid "Electronic Signature"
+msgstr "电子签名"
+
+msgid "First Operator"
+msgstr "第一操作员"
+
+msgid "First Operator Password"
+msgstr "第一操作员密码"
+
+msgid "Always the currently logged-in operator who performs the deduction."
+msgstr "始终是当前登录的操作员本人，即实际执行扣减的人。"
+
+msgid "Second Reviewer"
+msgstr "第二复核人"
+
+msgid "Second Reviewer Password"
+msgstr "第二复核人密码"
+
+msgid "Must be a different account from the first operator."
+msgstr "必须与第一操作员是不同的账号。"
+
+msgid "Meaning"
+msgstr "签名含义"
+
+msgid "What this signature authorizes, for example: consume reagent for a routine test."
+msgstr "本次签名所授权的操作，例如：领用试剂用于常规检测。"
+
+msgid "Reason"
+msgstr "签名理由"
+
+msgid "Business reason, stored in the signature record and audit trail."
+msgstr "业务理由，会写入签名记录与审计追踪。"
+
+msgid "Request Stock Usage"
+msgstr "申请领用"
+
+msgid "These items require an approval workflow"
+msgstr "所选物品需要审批流程"
+
+msgid "At least one selected batch belongs to a stock item that requires electronic signatures. The stock cannot be consumed directly: a usage request must be raised and signed first, then reviewed and signed by a different person, and only then is the stock deducted."
+msgstr "所选批次中至少有一个属于需要电子签名的库存。此类库存不能直接领用：必须先提交领用申请并签名，再由另一位不同的人审核签名，之后才会扣减库存。"
+
+msgid "Approval"
+msgstr "审批"
+
+msgid "Required"
+msgstr "需审批"
+
+msgid "Usage Request"
+msgstr "领用申请"
+
+msgid "Purpose"
+msgstr "领用用途"
+
+msgid "Why this stock is requested. The reviewer will see this text together with the requested quantities."
+msgstr "申请该库存的原因。审核人会连同申请数量一起看到这段说明。"
+
+msgid "After submitting you will be asked to sign electronically as the applicant. The stock is deducted only after a different person reviews and signs the request."
+msgstr "提交后系统会要求你以申请人身份进行电子签名；只有在另一位不同的人审核签名通过后，才会扣减库存。"
+
+msgid "Submit Request and Sign"
+msgstr "提交申请并签名"
+
+msgid "Applicant"
+msgstr "申请人"
+
+msgid "Submitted On"
+msgstr "提交时间"
+
+msgid "Reviewer"
+msgstr "审核人"
+
+msgid "Reviewed On"
+msgstr "审核时间"
+
+msgid "Rejection Reason"
+msgstr "驳回原因"
+
+msgid "Requested Items"
+msgstr "申请明细"
+
+msgid "No items"
+msgstr "没有明细"
+
+msgid "Signature Trail"
+msgstr "签名留痕"
+
+msgid "Step"
+msgstr "环节"
+
+msgid "Signer"
+msgstr "签名人"
+
+msgid "Signed At"
+msgstr "签名时间"
+
+msgid "No signature yet"
+msgstr "尚未签名"
+
+msgid "This request cannot be approved right now"
+msgstr "当前无法审核通过"
+
+msgid "Approve and Sign"
+msgstr "审核通过并签名"
+
+msgid "Reject and Sign"
+msgstr "驳回并签名"
+
+msgid "Withdraw"
+msgstr "撤回"
+
+msgid "Back to list"
+msgstr "返回列表"
+
+msgid "Draft"
+msgstr "草稿"
+
+msgid "Pending Review"
+msgstr "待审核"
+
+msgid "Approved"
+msgstr "已审核"
+
+msgid "Rejected"
+msgstr "已驳回"
+
+msgid "Cancelled"
+msgstr "已取消"
+
+msgid "Submit for Review"
+msgstr "发起领用"
+
+msgid "Approve"
+msgstr "审核通过"
+
+msgid "Reject"
+msgstr "驳回"
+
+msgid "Stock Usage Requests"
+msgstr "领用申请"
+
+msgid "Request No."
+msgstr "申请单号"
+
+msgid "Requested"
+msgstr "申请数量"
+
+msgid "All"
+msgstr "全部"
+
+msgid "Select one request, then approve or reject it."
+msgstr "请只勾选一条申请，然后审核通过或驳回。"
+
+msgid "Pending Request"
+msgstr "待审核申请"
+
+msgid "Review Usage Request"
+msgstr "审核领用"
+
+msgid "Pending Usage Request"
+msgstr "待审核领用申请"
+
+msgid "Open and Review"
+msgstr "打开并审核"
+
+msgid "No usage request is waiting for your review."
+msgstr "没有等待你审核的领用申请。"
+
+msgid "Please select only one batch: usage requests are reviewed one at a time."
+msgstr "请只勾选一个批次：领用申请一次只能审核一条。"
+
+msgid "Submit Request"
+msgstr "提交申请"
+
+msgid "At least one selected batch belongs to a stock item that requires approval. The stock cannot be consumed directly: submitting this form raises a usage request that goes to a reviewer. The stock is deducted only after a different person reviews and signs the request."
+msgstr "所选批次中至少有一个属于需要审批的库存。此类库存不能直接领用：提交本表单会生成一张领用申请单并送交审核人；只有在另一位不同的人审核签名通过后，才会扣减库存。"
+
+msgid "After submitting, the request goes to the reviewer queue as pending review. The stock is deducted only after a different person reviews and signs it."
+msgstr "提交后申请进入待审核队列；只有在另一位不同的人审核签名通过后，才会扣减库存。"
+
+msgid "Usage request submitted for review."
+msgstr "领用申请已提交，等待审核。"
+
+msgid "The usage request was created but could not be submitted. Please open it and submit it again."
+msgstr "领用申请已创建但未能提交，请打开该申请单点“提交审核”重试。"
+
+msgid "Countersigner"
+msgstr "复核人"
+
+msgid "Withdraw Request"
+msgstr "撤回申请"
+
+msgid "Request"
+msgstr "申请信息"
+
+msgid "Approval Trail"
+msgstr "审批信息"
+
+msgid "Approver"
+msgstr "审核人"
+
+msgid "Approved On"
+msgstr "审核时间"
+
+msgid "Approve Comment"
+msgstr "审核意见"
+
+msgid "Stock Inventory"
+msgstr "库存管理"
+
+msgid "Stock Items"
+msgstr "库存主数据"
+
+msgid "Low Stock"
+msgstr "低库存"
+
 msgid "Usage Trace"
 msgstr "使用记录追溯"
 
 msgid "Usage Report"
 msgstr "对照品使用记录"
+
+msgid "Usage Requests"
+msgstr "领用申请审批"
+
+msgid "Approval Records"
+msgstr "审批记录"
+
+msgid "Full audit log (with field value changes)"
+msgstr "完整审计日志（含字段变更对比）"
+
+msgid "Action"
+msgstr "动作"
+
+msgid "Time"
+msgstr "时间"
+
+msgid "Details"
+msgstr "详情"
+
+msgid "No records yet"
+msgstr "暂无记录"
+
+msgid "Split Stock Batches"
+msgstr "分装库存批次"
+
+msgid "Stock Take"
+msgstr "库存盘点"
+
+msgid "Tick one request, then approve or reject it."
+msgstr "勾选一条申请，然后审核通过或驳回。"
+
+msgid "stockusage_all"
+msgstr "全部"
+
+msgid "stockusage_batch_detail"
+msgstr "明细"
+
+msgid "stockusage_batch_number"
+msgstr "厂家批号 / 批次编号"
+
+msgid "stockusage_batch_number_only"
+msgstr "批号 / 批次编号"
+
+msgid "stockusage_batch_status"
+msgstr "批次状态"
+
+msgid "stockusage_col_from_batch"
+msgstr "来源批次"
+
+msgid "stockusage_col_operation"
+msgstr "操作类型"
+
+msgid "stockusage_col_operation_date"
+msgstr "操作时间"
+
+msgid "stockusage_col_operator"
+msgstr "操作人"
+
+msgid "stockusage_col_quantity"
+msgstr "数量"
+
+msgid "stockusage_col_remarks"
+msgstr "备注"
+
+msgid "stockusage_consume_return_total"
+msgstr "领用合计 / 归还合计"
+
+msgid "stockusage_current_amount"
+msgstr "当前数量"
+
+msgid "stockusage_date_from"
+msgstr "起始时间"
+
+msgid "stockusage_date_to"
+msgstr "截止时间"
+
+msgid "stockusage_destination"
+msgstr "批次去向"
+
+msgid "stockusage_enter_filter"
+msgstr "请输入「库存编号」或「厂家批号」后点击查询。"
+
+msgid "stockusage_expiry"
+msgstr "有效期"
+
+msgid "stockusage_export_csv"
+msgstr "导出 CSV（按当前查询条件）"
+
+msgid "stockusage_first_last_use"
+msgstr "首次使用 / 最近使用"
+
+msgid "stockusage_include_worksheets"
+msgstr "包含关联工作表去向（需遍历工作表，数据量大时较慢）"
+
+msgid "stockusage_linked_worksheets"
+msgstr "关联工作表去向（使用该批次的工作表）"
+
+msgid "stockusage_location"
+msgstr "存放位置"
+
+msgid "stockusage_lot_label"
+msgstr "厂家批号："
+
+msgid "stockusage_material_name"
+msgstr "物料名称："
+
+msgid "stockusage_material_name_only"
+msgstr "物料名称"
+
+msgid "stockusage_next_page"
+msgstr "下一页"
+
+msgid "stockusage_no_batch"
+msgstr "没有匹配的库存批次，请调整查询条件。"
+
+msgid "stockusage_no_records"
+msgstr "该批次暂无使用记录"
+
+msgid "stockusage_none"
+msgstr "无"
+
+msgid "stockusage_none_short"
+msgstr "无"
+
+msgid "stockusage_page_size"
+msgstr "每页条数"
+
+msgid "stockusage_prev_page"
+msgstr "上一页"
+
+msgid "stockusage_report_no_rows"
+msgstr "没有匹配的使用记录，请调整查询条件。"
+
+msgid "stockusage_reset"
+msgstr "重置"
+
+msgid "stockusage_search"
+msgstr "查询"
+
+msgid "stockusage_split_targets"
+msgstr "分装去向（由本批次分装出去的批次）"
+
+msgid "stockusage_stock_number"
+msgstr "库存编号（LIMS）"
+
+msgid "stockusage_stock_number_label"
+msgstr "库存编号："
+
+msgid "stockusage_stock_number_only"
+msgstr "库存编号"
+
+msgid "stockusage_stock_type"
+msgstr "库存类型"
+
+msgid "stockusage_stock_type_only"
+msgstr "库存类型"
+
+msgid "stockusage_supplier"
+msgstr "供应商"
+
+msgid "stockusage_supplier_only"
+msgstr "供应商"
+
+msgid "stockusage_worksheets_skipped"
+msgstr "本次查询未反查工作表（可在上方勾选后重查）"
+
+msgid "Stock Usage Trace"
+msgstr "库存使用记录追溯"
+
+msgid "Usage Query and Export"
+msgstr "使用记录查询与导出"
+
+msgid "No."
+msgstr "序号"
+
+msgid "Material Name"
+msgstr "物料名称"
+
+msgid "Manufacturer Lot / Batch No."
+msgstr "厂家批号 / 批次编号"
+
+msgid "Lot / Batch No."
+msgstr "批号 / 批次编号"
+
+msgid "Batch Status"
+msgstr "批次状态"
+
+msgid "Created"
+msgstr "创建"
+
+msgid "Usage approved"
+msgstr "领用审核通过"
+
+msgid "Usage rejected"
+msgstr "领用被驳回"
+
+msgid "Expired"
+msgstr "过期"
+
+msgid "Destroyed"
+msgstr "销毁"
+
+msgid "Edited"
+msgstr "编辑"
+
+msgid "Consumed"
+msgstr "领用"
+
+msgid "Returned"
+msgstr "归还"
+
+msgid "Split"
+msgstr "分装"
+
+msgid "Adjusted"
+msgstr "调整"
+
+msgid "Stock take"
+msgstr "盘存"
+
+msgid "{} batch(es) matched; page {} / {}."
+msgstr "命中批次 {} 个；第 {} / {} 页。"
+
+msgid "Usage records ({})"
+msgstr "使用记录（{} 条）"
+
+msgid "Page {} / {}"
+msgstr "第 {} / {} 页"
+
+msgid "(Manufacturer lot {}; remaining {}; {})"
+msgstr "（厂家批号 {}；剩余 {}；{}）"
+
+msgid "(Status {}; created {})"
+msgstr "（状态 {}；创建 {}）"
+
+msgid "From date “{}” is not recognised; this filter was ignored."
+msgstr "起始时间“{}”无法识别，本次查询已忽略该条件。"
+
+msgid "To date “{}” is not recognised; this filter was ignored."
+msgstr "截止时间“{}”无法识别，本次查询已忽略该条件。"
+
+msgid "The from date is later than the to date; the result is empty."
+msgstr "起始时间晚于截止时间，本次查询结果为空。"
+
+msgid "{} record(s); {} batch(es); total consumed {}; total returned {}; page {} / {}. "
+msgstr "记录 {} 条；涉及批次 {} 个；领用合计 {}；归还合计 {}；第 {} / {} 页。"
+
+msgid "stockusage_report_desc1"
+msgstr "按起止时间、库存编号、批号、物料名称、供应商查询并导出使用记录（对应「对照品使用记录」交付项）。"
+
+msgid "stockusage_report_desc2"
+msgstr "批号一栏同时匹配「厂家批号」与「批次编号」；起止时间针对记录的操作时间，留空表示不限。"
+
+msgid "stockusage_report_desc3"
+msgstr "导出内容与当前查询结果完全一致。"
+
+msgid "stockusage_trace_desc1"
+msgstr "按 LIMS 库存编号、厂家批号查询批次去向与使用情况，实现从批号到使用记录的追溯。"
+
+msgid "stockusage_trace_desc2"
+msgstr "批号一栏同时匹配「厂家批号」与「批次编号」，支持模糊查询。"
+
+msgid "Available"
+msgstr "可用"
+
+msgid "Inactive"
+msgstr "停用"
+
+msgid "Expiry Reminder (days before expiry)"
+msgstr "到期提醒（提前天数）"
+
+msgid "Number of days before a batch expiry date at which the stock batch listing starts highlighting the row in yellow. Expired batches are always highlighted in red. Use 0 to disable the reminder."
+msgstr "批次的到期日进入「到期前 N 天」时，库存批次列表会把该行标黄；已过期的批次始终标红。填 0 表示关闭提醒。"
+
+msgid "Already expired"
+msgstr "已过期"
+
+msgid "{0} day(s) to expiry"
+msgstr "剩余 {0} 天"
+
+msgid "Batch Default Expiry Date"
+msgstr "批次默认到期日"
+
+msgid "Default expiry date proposed when creating a new batch of this stock. It is only a convenience default: the expiry date is stored per batch and the batch value always wins (expiry reminders and usage reports read the batch expiry)."
+msgstr "新建该物料批次时预填的到期日。这里只是「默认值」：到期日按批次存储，始终以批次上的值为准（到期提醒与使用记录查询都读批次到期日）。"
+
+msgid "batch is low in quantity:"
+msgstr "个批次处于低量："
+
+msgid "batches are low in quantity:"
+msgstr "个批次处于低量："
+
+msgid "Quantity Ordered must be a number (decimals allowed)"
+msgstr "订购数量必须是数字（可含小数点）"
+
+msgid "Missing portal types: {0}. Please reinstall maitux.stock from the Add-ons control panel first."
+msgstr "缺少内容类型：{0}。请先在“附加组件”控制面板重新安装 maitux.stock。"
+
+msgid "Created: {0}"
+msgstr "已创建：{0}"
+
+msgid "Already present: {0}"
+msgstr "已存在：{0}"
+
+msgid "Consume Requires Two-Person E-Signature"
+msgstr "领用需双人电子签名"
+
+msgid "When enabled, consuming any batch of this stock requires two different operators to sign electronically on the same page before the stock is deducted."
+msgstr "启用后，领用该物料的任意批次都需要两名不同的操作员在同一页面完成电子签名，签名通过后才会扣减库存。"
+
+msgid "Active"
+msgstr "启用"
+
+msgid "Add"
+msgstr "新增"
+
+msgid "Applicant Name"
+msgstr "申请人姓名"
+
+msgid "Batch Number"
+msgstr "批号"
+
+msgid "Batch UID"
+msgstr "批次 UID"
+
+msgid "Batch is destroyed"
+msgstr "批次已销毁"
+
+msgid "Batch is expired and can only be destroyed"
+msgstr "批次已过期，只能销毁"
+
+msgid "Consume"
+msgstr "领用"
+
+msgid "Filled in automatically when the request is rejected."
+msgstr "驳回时自动填写。"
+
+msgid "Number"
+msgstr "编号"
+
+msgid "Order Date"
+msgstr "下单日期"
+
+msgid "Order Details"
+msgstr "订单明细"
+
+msgid "Order Lines"
+msgstr "订单行"
+
+msgid "Order No."
+msgstr "订单编号"
+
+msgid "Purchase Order Number"
+msgstr "采购订单编号"
+
+msgid "Purchaser"
+msgstr "采购人"
+
+msgid "Quantity Ordered"
+msgstr "订购数量"
+
+msgid "Reviewer Name"
+msgstr "审核人姓名"
+
+msgid "Reviewer who approved the request (empty for direct consume)."
+msgstr "审核通过该申请的操作员（直接领用时为空）。"
+
+msgid "Second Operator"
+msgstr "第二操作员"
+
+msgid "Stock usage request that authorized this deduction."
+msgstr "授权本次扣减的领用申请单。"
+
+msgid "Stocktake"
+msgstr "盘存"
+
+msgid "Tax Rate"
+msgstr "税率"
+
+msgid "Title"
+msgstr "标题"
+
+msgid "Unit Price"
+msgstr "单价"
+
+msgid "Why this stock is requested; visible to the reviewer."
+msgstr "申请该库存的用途，审核人可见。"

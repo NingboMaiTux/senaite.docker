@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<!-- Uninstall removes the browser layer: the ELN fields stop being part of
+     the sample schema and the viewlet disappears. Values already stored on
+     samples stay as attributes and come back when the add-on is re-installed. -->
+<layers>
+  <layer
+      name="maitux.elnlink"
+      remove="True" />
+</layers>

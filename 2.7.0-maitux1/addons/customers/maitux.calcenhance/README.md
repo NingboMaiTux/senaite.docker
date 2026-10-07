@@ -2,13 +2,328 @@
 
 为 SENAITE LIMS 的计算公式（Calculation）模块增加三种新的 Interim Field 控件类型，支持 HPLC 含量测定、装量差异、杂质含量等复杂计算场景。
 
-**版本：** 1.15.0
+**版本：** 1.18.0
 **兼容：** SENAITE 2.x（实测 2.7.0 / Plone 5.2 / Python 2.7）
 
 > **关于 `ISSUES.md`**：本文多处写着「详见 `ISSUES.md` ISSUE-0xx」，但**该文件
 > 不在本仓库里**（2026-09-03 核实，git 全历史也没有提交记录）。那些
 > `ISSUE-0xx` 编号仍可作为问题标识使用，但**不要指望在本包目录下找到对应文档**。
 > 若有人手上留着这份台账，值得补进仓库。
+
+---
+
+<!-- BEGIN functions-table：由 tools/gen_function_table.py 从 src/maitux/calcenhance/functions.json 生成，勿手改 -->
+
+## 函数总表（引擎 1.19.0，96 个函数）
+
+下面这张表由 `src/maitux/calcenhance/functions.json`（引擎函数清单）**生成**，本 README 其余各节是按版本写的更新概要。
+
+- **机械可核**：函数名、在哪张表（✓）、数组路径 —— 与 `patches.py` 每次核对，漂了就在流水线（`calcfuncs.py --check`）、单测（`tests/test_function_manifest.py`）和实例日志（`function manifest mismatch`）三处报错。
+- **人定、门禁核不了**：返回形状、参数、用途、since —— 出处见 `Docs/Cal增加/maitux.calcenhance-函数清单-基线对账.md` §1b。定错了**不会报错**。
+- 返回形状指函数在**列表引擎**（calculatedlist）里返回什么：`scalar` 吃整列（或多个值），恒返回一个值；`column` 恒返回 list（每行一格，或行空间那一列）；`elementwise` 一个值进一个值出，或 list 进逐个 list 出 —— 形状跟着参数走；`opaque` 静态定不了，取决于源字段（LOOKUP / LOOKUP2）。
+- 参数写成 `名字:kind`，`[…]` 可省、`*` 可变参；kind 见清单 `kind_vocab`。
+
+| 函数 | calculated | calculatedlist | 返回形状 | 数组路径 | 参数 | 用途 | since |
+|---|:---:|:---:|---|:---:|---|---|---|
+| `abs` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `APPEND` |  | ✓ | column | ✓ | lst:column, value:literal | 跨AS聚合、行空间 | 1.10.0 |
+| `avg` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：x:column | 整列统计、平均 | 1.0.0 |
+| `AVG_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、平均 | 1.5.0 |
+| `BAND` | ✓ | ✓ | elementwise |  | value:scalar, low:scalar, high:scalar, inside:scalar | 限值判定 | 1.5.0 |
+| `BASELINE_BYlist` |  | ✓ | column | ✓ | values:column, sequence:column, *keys:column | 分组统计、基线比较 | 1.7.0 |
+| `ceil` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `COALESCE` | ✓ | ✓ | elementwise | ✓ | 标量：*values:scalar ／ 列表：*cols:column | 缺失回退 | 1.2.0 |
+| `COUNT_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、计数 | 1.1.0 |
+| `COUNT_VALUES_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、计数 | 1.5.0 |
+| `DISTINCT_AVG` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、平均 | 1.15.0 |
+| `DISTINCT_COUNT` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、计数 | 1.15.0 |
+| `DISTINCT_MAX` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、最大值 | 1.15.0 |
+| `DISTINCT_MIN` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、最小值 | 1.15.0 |
+| `DISTINCT_RANGE` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、极差 | 1.15.0 |
+| `DISTINCT_RSD` |  | ✓ | scalar | ✓ | values:column, key_array:column | 去重统计、RSD | 1.15.0 |
+| `DISTINCT_SEQlist` |  | ✓ | column | ✓ | *key_arrays:column | 去重统计、序号 | 1.15.0 |
+| `EARLIEST_TIME` |  | ✓ | scalar |  | source_kw:as_name, field_kw:field_name | 时间、跨AS取值 | 1.17.0 |
+| `exp` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `floor` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `FORMAT` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 格式化 | 1.1.0 |
+| `GATE` | ✓ | ✓ | elementwise |  | value:scalar, threshold:scalar, below:scalar | 限值判定 | 1.5.0 |
+| `GROUP_AVG` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、平均 | 1.0.0 |
+| `GROUP_AVG_TOPlist` |  | ✓ | column | ✓ | values:column, reports:column, *key_arrays:column | 分组统计、最高档、平均 | 1.17.0 |
+| `GROUP_AVGlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、平均 | 1.0.0 |
+| `GROUP_CI_HIGH` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、置信区间 | 1.5.0 |
+| `GROUP_CI_HIGHlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、置信区间 | 1.1.0 |
+| `GROUP_CI_LOW` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、置信区间 | 1.5.0 |
+| `GROUP_CI_LOWlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、置信区间 | 1.1.0 |
+| `GROUP_COUNTlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、计数 | 1.1.0 |
+| `GROUP_MAX` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、最大值 | 1.0.0 |
+| `GROUP_MAXlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、最大值 | 1.0.0 |
+| `GROUP_MIN` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、最小值 | 1.0.0 |
+| `GROUP_MINlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、最小值 | 1.0.0 |
+| `GROUP_REPORT_TOPlist` |  | ✓ | column | ✓ | values:column, *key_arrays:column | 分组统计、最高档 | 1.15.0 |
+| `GROUP_RSDlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、RSD | 1.1.0 |
+| `GROUP_STDEVlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、标准差 | 1.0.0 |
+| `GROUP_SUM` |  | ✓ | scalar | ✓ | values:column, *keys:column | 整列统计、求和 | 1.0.0 |
+| `GROUP_SUMlist` |  | ✓ | column | ✓ | values:column, *keys:column | 分组统计、求和 | 1.0.0 |
+| `INDEX_BY` | ✓ | ✓ | scalar |  | target_arr:column, key_arr:column, match_val:scalar | 按键查找 | 1.0.0 |
+| `INDEX_BY_GROUP` |  | ✓ | column | ✓ | target_arr:column, key_arr:column, match_val:scalar, group_arr:column | 按键查找 | 1.14.0 |
+| `INTERCEPT` | ✓ | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.0.0 |
+| `INTERCEPT_CI_HIGH_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `INTERCEPT_CI_LOW_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `INTERCEPT_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.0.0 |
+| `INTERCEPT_SE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、标准误 | 1.5.0 |
+| `len` | ✓ | ✓ | scalar |  | s:column | 整列统计、计数 | 1.0.0 |
+| `log` | ✓ | ✓ | elementwise |  | x:scalar, [base:scalar] | 数学运算 | 1.0.0 |
+| `log10` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `LOOKUP` | ✓ | ✓ | opaque |  | source_kw:as_name, target_kw:field_name, key_kw:field_name, key_val:scalar, [default:literal] | 跨AS取值 | 1.0.0 |
+| `LOOKUP2` | ✓ | ✓ | opaque |  | source_kw:as_name, target_kw:field_name, key1_kw:field_name, key1_val:scalar, key2_kw:field_name, key2_val:scalar, [default:literal] | 跨AS取值 | 1.15.0 |
+| `max` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：iterable:column | 整列统计、最大值 | 1.0.0 |
+| `min` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：iterable:column | 整列统计、最小值 | 1.0.0 |
+| `pow` | ✓ | ✓ | elementwise |  | x:scalar, y:scalar, [z:scalar] | 数学运算 | 1.0.0 |
+| `RESULT_NUM` |  | ✓ | elementwise |  | value:scalar, [name:scalar], [main_name:literal] | 数值化 | 1.1.0 |
+| `RESULT_STATUS` |  | ✓ | column | ✓ | values:column, [loq:scalar], [lod:scalar] | 限值判定 | 1.0.0 |
+| `ROUND` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.1.0 |
+| `round` | ✓ | ✓ | elementwise |  | number:scalar, [ndigits:literal] | 修约 | 1.0.0 |
+| `ROUND_DOWN` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.9.0 |
+| `ROUND_EVEN` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.1.0 |
+| `ROUND_UP` | ✓ | ✓ | elementwise |  | val:scalar, [digits:literal] | 修约 | 1.8.0 |
+| `RSD_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、RSD | 1.0.0 |
+| `RSQ` | ✓ | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.0.0 |
+| `RSQ_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.0.0 |
+| `SHIFT` |  | ✓ | column | ✓ | values:column, [offset:literal] | 相邻行 | 1.3.0 |
+| `SLOPE` | ✓ | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.0.0 |
+| `SLOPE_CI_HIGH_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `SLOPE_CI_LOW_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、置信区间 | 1.5.0 |
+| `SLOPE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.0.0 |
+| `SLOPE_SE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归、标准误 | 1.5.0 |
+| `sqrt` | ✓ | ✓ | elementwise |  | x:scalar | 数学运算 | 1.0.0 |
+| `SSE` |  | ✓ | scalar |  | y:column, x:column | 线性回归 | 1.1.0 |
+| `SSE_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、线性回归 | 1.1.0 |
+| `stdev` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：x:column | 整列统计、标准差 | 1.0.0 |
+| `STDEV_ROWS` |  | ✓ | column | ✓ | *cols:column | 逐行统计、标准差 | 1.0.0 |
+| `sum` | ✓ | ✓ | scalar |  | 标量：*args:scalar ／ 列表：iterable:column, [start:scalar] | 整列统计、求和 | 1.0.0 |
+| `TIME_ELAPSED_HOURS` |  | ✓ | column | ✓ | times:column, [digits:literal], [base:scalar] | 时间 | 1.1.0 |
+| `XAGG_AVG` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、平均 | 1.11.0 |
+| `XAGG_AVG2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、平均 | 1.14.0 |
+| `XAGG_AVG_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、平均 | 1.12.0 |
+| `XAGG_COUNT` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、计数 | 1.11.0 |
+| `XAGG_COUNT2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、计数 | 1.14.0 |
+| `XAGG_COUNT_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、计数 | 1.12.0 |
+| `XAGG_KEYS` |  | ✓ | column | ✓ | field_kw:field_name, *source_kws:as_name | 跨AS聚合、行空间 | 1.10.0 |
+| `XAGG_KEYS2` |  | ✓ | column | ✓ | key1_kw:field_name, key2_kw:field_name, part:literal, *source_kws:as_name | 跨AS聚合、行空间 | 1.14.0 |
+| `XAGG_KEYS_WHERE2` |  | ✓ | column | ✓ | key1_kw:field_name, key2_kw:field_name, part:literal, all_sources:as_name, filter_kw:field_name, threshold:literal, filtered_sources:as_name | 跨AS聚合、行空间 | 1.14.0 |
+| `XAGG_MAX` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、最大值 | 1.11.0 |
+| `XAGG_MAX2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、最大值 | 1.14.0 |
+| `XAGG_MAX_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、最大值 | 1.12.0 |
+| `XAGG_MIN` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、最小值 | 1.11.0 |
+| `XAGG_MIN2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、最小值 | 1.14.0 |
+| `XAGG_MIN_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、最小值 | 1.12.0 |
+| `XAGG_NTH2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, sort_kw:field_name, nth:literal, *source_kws:as_name | 跨AS聚合、取第n份 | 1.14.0 |
+| `XAGG_RSD` |  | ✓ | column | ✓ | value_kw:field_name, key_kw:field_name, row_keys:column, *source_kws:as_name | 跨AS聚合、RSD | 1.11.0 |
+| `XAGG_RSD2` |  | ✓ | column | ✓ | value_kw:field_name, key1_kw:field_name, key2_kw:field_name, row_keys1:column, row_keys2:column, *source_kws:as_name | 跨AS聚合、RSD | 1.14.0 |
+| `XAGG_RSD_OFSUM` |  | ✓ | scalar | ✓ | value_kw:field_name, group_kw:field_name, key_kw:field_name, whitelist_kw:as_name, *source_kws:as_name | 跨AS聚合、先求和再统计、RSD | 1.12.0 |
+
+另有内部名 `_Fixed`：两张表里都注册了、公式作者不写它（清单里 `internal: true`），不列在上表。
+
+<!-- END functions-table -->
+
+### ★ 加函数的纪律：同一个 commit 里登记清单
+
+往两张函数表（标量引擎 `safe_globals` / 列表引擎 `_SAFE`）加、删、改名一个函数，
+或者改 `_ARRAY_FN_RE`，**必须在同一个 commit 里**：
+
+1. 改 `src/maitux/calcenhance/functions.json`（名字、`tables`、`array_path`，以及人定的
+   `shape` / `params` / `purpose` / `since`；`purpose` 只能用文件顶部 `purpose_vocab` 里的词）；
+2. 重跑 `python tools/gen_function_table.py`，让上面的总表跟上；
+3. 跑 `tests/test_function_manifest.py`（容器里 `python`，见 `tests/harness.py` 顶部）。
+
+不登记的后果不是「文档旧了」，是三处一起红：流水线的
+`calcfuncs.py --check` ABORT、`test_function_manifest.py` 失败、实例日志每次重启打一条
+`maitux: function manifest mismatch`。**但 shape / params / purpose 写错不会红**
+（代码里没有等价物，门禁核不了）—— 这几格要给出处（代码行号或 harness 用例）。
+
+---
+
+## 1.19.0 更新概要（2026-09-28）
+
+两件事，互不相干，只是同一个版本一起出：**进样时间现在认斜杠写法**（行为变更，
+配置要知道），**函数清单给每个字段参数标了它读自哪一组源**（纯元数据，
+任何一格计算结果都不变）。
+
+| 改了什么 | 在哪 |
+|---|---|
+| 时间解析多认斜杠：安捷伦工作站的 `3/25/2025 3:17:45 PM`（月/日/年 + 12 小时制）与中文 Excel 的 `2026/5/12 20:13`（年/月/日）。两位年 `3/5/25` 仍然不认 | `patches.py` 的 `_TIME_SLASH_RE` / `_parse_dt` / `_dt_from_parts` |
+| 清单里每个 `kind=field_name` 参数多两格：`reads_from`（这个字段读自哪几个 `as_name` 参数）、`absent_ok`（源 AS 上可以没有这一列） | `functions.json`（22 个带源 AS 的函数、56 个字段参数） |
+| 单测：斜杠日期 8 条（含 12:xx AM/PM、歧义日、两位年、时区标签混用） | `tests/test_engine.py` 的 `test_slash_dates_t14` |
+
+### ★ 行为变更：进样时间认斜杠了（配置需要知道）
+
+`TIME_ELAPSED_HOURS` 和 `EARLIEST_TIME` 原先只认连字符与英文月名。实验人员把
+色谱工作站里的 `Injection date` 原样粘进来 —— 那是 `3/25/2025 3:17:45 PM` ——
+于是整列 `---`，而且**不报错**：格子里明明是个正经时间，只有实例日志里有一行。
+残留溶剂 20260921 评审的「0 点峰面积取不到」就是这么来的（T14）。
+
+月/日 还是 日/月，按**四位年在哪一头**定，不按值猜：
+
+| 写法 | 读作 | 谁写成这样 |
+| ---- | ---- | ---------- |
+| `2026/5/12 20:13` | 年/月/日 | 中文 Excel、中文区域设置 |
+| `3/25/2025 3:17:45 PM` | 月/日/年 | ★ 安捷伦工作站（美式 + 12 小时制） |
+| `25/3/2025 10:00` | 日/月/年 | 首位 >12，只剩这一种读法 |
+| `3/5/2025 10:00` | 月/日/年（= 3 月 5 日） | 两个数都 ≤12，按安捷伦口径读，并在日志里说一句 |
+| `3/5/25 10:00` | **不认** | 两位年：世纪和顺序都得猜，而猜错的日期看着也是个正常日期 |
+
+时区规则一个字没改：`(GMT +08:00)` 这类**括号尾巴仍然不认**，采集那一步就把它截掉；
+同一列里「有的行带标签、有的不带」照旧整列拒算（ISSUE-007，跨夏令时相减不成立）。
+
+> 这一条落地之后，源表 / 评审表 / 对照表里那句「进样时间请写连字符」就可以撤了 ——
+> 但要等这版引擎真的跑起来。本包在 `addons/customers/` 下是 bind-mount，
+> `docker restart maituxlimslatest` 即生效，不用重建镜像。
+
+流水线侧（不在本包、在 `.claude` 个人仓库）：`check_semantic.py` 的 B 节改读
+`reads_from` / `absent_ok`，多源函数（`XAGG_*_OFSUM` / `XAGG_KEYS_WHERE2`）的字段
+从「整个不核」变成「按组核」；回归自测从 9 条加到 13 条。
+
+---
+
+## 1.18.0 更新概要（2026-09-25）
+
+**加的是引擎函数的机器可读清单，不改任何函数的行为。** 任何一格计算结果都不变。
+
+| 改了什么 | 在哪 |
+|---|---|
+| 引擎函数清单：96 个函数 + 1 个内部名，每个登记在哪张表、返回形状、走不走数组路径、参数、用途、since | `src/maitux/calcenhance/functions.json` |
+| 引擎首次求值时拿**真表**与清单比对（每进程每张表一次，只报不拦）：一致打 INFO `function manifest ok`，不一致打 ERROR `function manifest mismatch`，读不到清单打一条 WARN，计算照常 | `patches.py` 的 `_manifest_selfcheck` |
+| 单测：清单 ↔ 出货 `patches.py` 的文本级核对，逐名断言（392 项） | `tests/test_function_manifest.py` |
+| README 顶部的函数总表（生成物）与生成脚本（带 `--check`） | 上方总表、`tools/gen_function_table.py` |
+
+流水线侧（不在本包、在 `.claude` 个人仓库）：`calcfuncs.py` 是读清单的唯一入口；
+`check_v10.py` 第 7 节、`check_semantic.py` C 节改读清单（删掉了手抄的函数正则）；
+新增 `check_capability.py`（拆解流水线 §6.3：源表公式用到的函数 ⊆ 清单）。
+
+---
+
+## 1.17.0 更新概要（2026-09-24）
+
+需求与口径：`Docs/Cal增加/修约与显示口径.md`、`Docs/Cal增加/maitux.calcenhance-修约位数随值传递-需求与方案.md`；
+切片与验收证据：同目录 `…-修约位数随值传递-Backlog.md`。新函数来源：有关物质 20260923 轮裁决 §6。
+
+### ★ 行为变更：`ROUND` 家族现在自己保住位数（公式一个字不用改）
+
+`ROUND` / `ROUND_EVEN` / `ROUND_UP` / `ROUND_DOWN` 以前返回普通 float，公式里写的
+`digits` 在那一刻就丢了。现在返回一个**记得自己几位小数的数**：
+
+| 公式 | 以前显示 | 现在显示 |
+| ---- | -------- | -------- |
+| `ROUND_EVEN(1609.4, 0)` | `1609.0` | `1609` |
+| `ROUND_EVEN(3.1, 3)` | `3.1` | `3.100` |
+| `ROUND_EVEN(0.04, 3)` | `0.04` | `0.040` |
+| `BASELINE_BYlist([g_area],…)`（手输 `"1609"`）| `1609.0` | `1609`（原样搬运）|
+
+- 它仍然是**数**：比较、排序、`> 限度` 判定都照常；**参与运算后就是普通数**，位数不传染 ——
+  修约值再算一次，位数由外层新的 `ROUND` 决定
+- **修约过的 CalculatedList 列落库成定位数文本**（`["1609", "3.100"]`）；
+  **没修约的列逐字节不变**（仍是 JSON 数字，精度不丢）
+- 纯搬运（`LOOKUP` / `LOOKUP2` / `INDEX_BY_GROUP` / `BASELINE_BYlist` / `COALESCE` / `GROUP_MAX/MIN` /
+  `GROUP_REPORT_TOPlist` / 跨 AS 的 `XAGG_NTH2` …）把源里的写法原样带过来：手输 `"0.10"` 取回来还是 `0.10`
+- **`RESULT_STATUS` 的数字格带着位数透传**：`RESULT_STATUS([imp_pct_round], …)`（先修约、再分档）
+  的报告值显示 `0.10` / `97.00`，标签照旧 —— 裁决 H5「尾数是 0 也需要显示」就是这一条
+- **匹配键按值、不按位数**：手输的键列 `"1"` 与计算出来的 `1.0` 仍然能匹配上
+- **不再需要为了显示拆 `_disp` / `_calc` 两个字段、也不用在外面套 `FORMAT`**。
+  见下文「[ROUND / ROUND_EVEN / FORMAT](#round--round_even--format--修约与格式化)」
+
+**上线后要知道的三件事**
+
+1. **全站修约列的显示会统一变一次**（`digits=0` 去掉 `.0`、`digits≥2` 补齐尾随零）。
+   这是本次的目的，不是 bug。`digits=1` 的列多数看不出变化
+2. **首次重算时，这些列的落库文本会被改写一次**（数值不变），审计里会出现一批
+   「只改了写法」的记录。之后再算就稳定了（同样输入 → 同样字节）
+3. `INNOCARE.LabelAndReport` 的 `DataReport.pt` 直接打印落库的 JSON 原文：
+   以前是 `[1609.0, 1484.0]`，现在是 `["1609", "1484"]`（多了引号）。
+   那是该模板自己的既有缺陷，已另立任务
+
+### 新增函数（2 个）
+
+| 函数 | 用途 |
+| ---- | ---- |
+| `GROUP_AVG_TOPlist(值列, 报告值列, 键1[, 键2…])` | 同组**只取最高档那几针**求平均（平均单杂新口径，裁决 Q1-A）|
+| `EARLIEST_TIME(源AS, "字段")` | 另一个 AS 那一列的**最早时间**，作 `TIME_ELAPSED_HOURS` 的 base（裁决 Q3）|
+
+详见「[`GROUP_AVG_TOPlist` —— 只取最高档求平均](#group_avg_toplist--只取最高档求平均)」、
+「[`EARLIEST_TIME` —— 从所选那一段的最早进样起算](#earliest_time--从所选那一段的最早进样起算)」。
+
+### 函数表规模
+
+| | 条目 | = 常量 | + 函数 | + 内部 |
+| -- | ---- | ---- | ---- | ---- |
+| CalculatedList `_SAFE` | **100** | 3 | **96** | 1 |
+| 标量 `safe_globals` | **33** | 3 | 29 | 1 |
+
+较 v1.16.0：CalculatedList 97 -> 100（2 个新函数 + `_Fixed`），标量 32 -> 33（`_Fixed`）。
+`_Fixed` **不是给公式用的函数**：CalculatedList 引擎把整列按 `repr()` 内联进公式再求值，
+修约过的数 `repr` 出来是 `_Fixed(1609.0, 0)`，表里要有这个名字才能还原回来。
+
+不需要重建镜像（customers 层 bind-mount，`docker restart` 即可生效）。
+
+---
+
+## 1.16.0 更新概要（2026-09-24）
+
+问题与证据：`Docs/保存性能及重新计算/证据-代码路径与实测.md` §12。
+
+### 修复：跨分析传播会按字段写入顺序静默算错
+
+旧的传播是**深度优先 + visited 集合**：一次写入里每个分析最多被求值一次，而且是从源分析
+**自己的求值中途**出发的。一个分析若在它最后一个上游变化**之前**就被求值，之后不会再被求值。
+实测（lims-dev / AA260914015）：`imp_sys_suit` 一行 7 个字段保存，按生产环境的真实写入顺序，
+`imp_ip_stat` 有 4 个字段停在旧输入上（第 4 位有效数字，无报错无日志）；`imp_std_weigh` 按正序写也会错。
+
+现在是**结算循环**（worklist，`_settle`）：
+
+- 某分析读的东西一变就（重新）入队，允许重复访问 —— 所以它一定在最后一个上游变化**之后**再算一次，
+  结束状态就是不动点，**与字段写入顺序无关**；
+- 只在一个分析**算完之后**才向下游传播，只比较它**对外可读**的部分（可交叉引用字段 + Result）；
+- 下游识别一次建好整棵样品树的索引（`_TreeIndex`）：字面 LOOKUP/XAGG 源、运行时选源的 LOOKUP（保守）、
+  以及 interim 公式里的 `[AS关键字]`（读对方 Result，旧扫描不认识这一条）；
+- 每个分析访问次数有上限（`_MAX_SETTLE_VISITS`），真正互相依赖又不收敛时停下并打 warn。
+
+### 变更：已提交 / 已核验的分析不再被传播改写
+
+**与旧版行为相反**（旧版刻意不跳过，见下文「限制」一节的沿革）。上游变化时，结算循环只改
+**工作流仍允许编辑结果**的分析（`senaite_analysis_workflow` 在 registered / unassigned / assigned
+授予「Field: Edit Analysis Result」，to_be_verified 之后谁都没有）。判断看对象上的权限映射，
+**不看当前用户** —— 下游改不改不能取决于谁点了保存。被跳过的分析会打一行 INFO 日志列出来。
+
+理由：已提交/已核验的结果是签过字的记录，绕过流转在背后改写它，正是合规审计要抓的那类变更。
+上游在提交之后才变，走 retract → retest 这条受控路径。
+
+### 性能：一行保存只结算一次
+
+`senaite.app.listing` 的 `ajax_set_fields` 原来逐字段跑全链路（求值 + 整树传播 + 结果重算）。
+现在同一请求内的字段**先全部落库、最后结算一次**（`_apply_save_queue`；`ajax_set_fields` 的函数体
+按上游原样复制，只换掉循环，启动时校验上游函数体指纹，对不上就拒绝打补丁、退回逐字段 —— 结果一样，只是慢）。
+
+零写入探针实测（不含 commit）：
+
+| 场景 | 旧：逐字段（生产顺序） | 新：一行一次结算 |
+| ---- | ---- | ---- |
+| `imp_sys_suit` 7 字段 | 18.2–19.0s，❌ 4 处 | **1.2–1.3s**，✅ |
+| `imp_linearity` 11 字段 | 17.2s，✅ | **0.5s**，✅ |
+| `imp_std_weigh` 6 字段 | 1.5–1.8s（正序 ❌ 4 处）| **0.6–0.7s**，✅ |
+
+### ⚠️ 审计粒度变了
+
+传播产生的**中间态**不再各记一条审计快照。一行保存结束时，每个值变了的分析**恰好一条**快照，
+记录的是最终值。实测（同上两组，auditjournal 行数 = SENAITE 快照数）：
+
+| 场景 | 旧 | 新 |
+| ---- | ---- | ---- |
+| `imp_sys_suit` 7 字段 | 38 条（下游每个 2–6 条，其中 `imp_ip_stat` 3 条且最终值是错的）| **9 条**（每个变化的分析 1 条）|
+| `imp_std_weigh` 6 字段 | 7 条 | **4 条** |
+
+真实保存复核（WS-006，AA260914015 的 `imp_sys_suit` 一行 7 格）：`ajax_set_fields` 1.43s（不含 commit），
+9 个分析变化、audit_journal **9 行**，存储结果即不动点（再整树重算无任何变化）。
+
+不需要重建镜像（customers 层 bind-mount，`docker restart` 即可生效）。
 
 ---
 
@@ -721,8 +1036,9 @@ imp_rf_lookup = LOOKUP("imp_std_weigh", "imp_rf", "imp_name", [imp_name], "---")
 
 - 只能读取勾选了 Cross-ref 的 Interim Field
 - 源测定数据不存在时，LOOKUP 抛出异常但不阻断保存（公式容错）；匹配失败时若传了第 5 个参数 `默认值` 则返回该值，否则同样抛异常（均不阻断保存）
-- 源测定的 Cross-ref 字段保存后，引擎会自动重算引用它的分析，保证 LOOKUP 结果不滞后
-- 重算传播会跳过已 retract / reject / retest 的分析（与原生 `get_dependents()` 一致），但**不跳过已提交或已核验的分析**——与原生行为一致，避免样品内出现"对照品已更新、部分结果仍按旧值"的不一致
+- 源测定的 Cross-ref 字段保存后，引擎会自动重算引用它的分析（及其下游，直到整棵样品树不再变化），保证 LOOKUP 结果不滞后、且与字段写入顺序无关（v1.16.0）
+- 重算传播会跳过已 retract / reject / retest 的分析（与原生 `get_dependents()` 一致），**也跳过已提交或已核验的分析**（v1.16.0 起；工作流不再允许编辑结果的分析一律不改，日志 INFO 列出被跳过的分析）。
+  - 沿革：v1.15.0 及以前**刻意不跳过**已提交/已核验的分析（理由是避免样品内出现"对照品已更新、部分结果仍按旧值"的不一致）。v1.16.0 改为不改写签过字的记录：上游在提交之后才变化时，这种不一致会出现，应走 retract → retest 处理
 
 ---
 
@@ -996,13 +1312,15 @@ bin/instance restart
 | `GROUP_REPORT_TOPlist(v,k1[,k2…])` | 每组最高档报告值，只在首行       | `GROUP_REPORT_TOPlist([imp_report],[imp_name],[imp_pct_group])` |
 | `DISTINCT_RSD/RANGE/MAX/MIN/AVG/COUNT(v,k)` | 先去重再统计（标量）    | `DISTINCT_RSD([imp_total],[g_sample_id])` |
 | `LOOKUP2(源,取值,键1,值1,键2,值2[,默认])` | 双键跨 AS 取值              | `LOOKUP2("imp_rec_weigh","imp_weigh","imp_name",[imp_name],"imp_spike_level",[imp_spike_level])` |
-| `ROUND(x,n)`                    | 四舍五入，返回**数值**               | `ROUND([A], 3)`                         |
-| `ROUND_EVEN(x,n)`               | 四舍六入五留双（GB/T 8170），**数值** | `ROUND_EVEN([A], 3)`                    |
-| `ROUND_UP(x,n)`                 | 远离零只进不舍，**数值**             | `ROUND_UP([A], 1)`                      |
-| `ROUND_DOWN(x,n)`               | 朝零只舍不进，**数值**               | `ROUND_DOWN([A], 1)`                    |
+| `ROUND(x,n)`                    | 四舍五入，返回**数值（带位数，v1.17）** | `ROUND([A], 3)`                         |
+| `ROUND_EVEN(x,n)`               | 四舍六入五留双（GB/T 8170），**数值（带位数）** | `ROUND_EVEN([A], 3)` → `3.100`  |
+| `ROUND_UP(x,n)`                 | 远离零只进不舍，**数值（带位数）**   | `ROUND_UP([A], 1)`                      |
+| `ROUND_DOWN(x,n)`               | 朝零只舍不进，**数值（带位数）**     | `ROUND_DOWN([A], 1)`                    |
 | `FORMAT(x,n)`                   | 定位数格式化保留尾随零，返回**字符串** | `FORMAT([A], 4)` → `"0.0400"`        |
 | `TIME_ELAPSED_HOURS(t,n=1)`     | 距数组内最早时间的小时差（数组）     | `TIME_ELAPSED_HOURS([inj_time], 1)`     |
 | `GROUP_AVGlist(v,*k)`           | 按组平均（广播）                     | `GROUP_AVGlist([val],[grp])`            |
+| `GROUP_AVG_TOPlist(v,rep,*k)`   | 按组**只取最高档那几针**平均（广播，v1.17）| `GROUP_AVG_TOPlist([pct],[report],[grp])` |
+| `EARLIEST_TIME(src,"f")`        | 另一 AS 那一列的最早时间（原文，v1.17），作 `TIME_ELAPSED_HOURS` 第三参 | `EARLIEST_TIME([src], "imp_inj_time")` |
 | `GROUP_STDEVlist(v,*k)`         | 按组标准差（广播）                   | `GROUP_STDEVlist([val],[grp])`          |
 | `GROUP_SUMlist(v,*k)`           | 按组求和（广播）                     | `GROUP_SUMlist([val],[grp])`            |
 | `GROUP_MAXlist(v,*k)`           | 按组最大值（广播）                   | `GROUP_MAXlist([val],[grp])`            |
@@ -2134,7 +2452,11 @@ RESULT_STATUS(值数组, [LOQ阈值], [LOD阈值]) → 数值与字符串的混�
 1. **下游可以计算了。** 旧版整列是字符串，进不了 `list_arrays`，
    任何下游公式都无法引用；现在数值元素可参与计算 —— 这是总杂求和
    （`RESULT_NUM` → `GROUP_SUMlist`）能成立的前提。
-2. **尾随零不再自动补。** 需要固定位数展示的字段，**外面套一层 `FORMAT`**：
+2. **尾随零不再自动补。** 需要固定位数展示的字段，**外面套一层 `FORMAT`**
+   （★ v1.17.0 起更简单：**先修约、再分档** —— `RESULT_STATUS` 对数值原样透传，
+   所以源列是 `ROUND_EVEN([imp_pct], 4)` 时，`RESULT_STATUS([imp_pct_round], …)` 的数字格
+   本身就显示 `0.0400`，标签格照旧是 `＜0.05%` / `ND`。**反过来套不行**：
+   `ROUND_EVEN(RESULT_STATUS(…), 4)` 会把标签修约成 `---`。下面是当时的写法）：
 
 ```
 # 展示字段：恢复 4 位小数
@@ -2245,6 +2567,39 @@ imp_seq = DISTINCT_SEQlist([imp_name], [imp_pct_group])      # AS-12 双键
 两个都是数组路径函数，返回整列，**必须单独占一个字段**。内联进别的表达式
 （`[x] * DISTINCT_SEQlist(...)`）会把整条公式推上数组路径，那里它是 list 乘 list，
 `TypeError` 把整列刷成 `---`，只在日志留一行 —— 与 `BASELINE_BYlist` 同一个坑。
+
+---
+
+## GROUP_AVG_TOPlist —— 只取最高档求平均
+
+```
+GROUP_AVG_TOPlist(值列, 报告值列, 键1[, 键2…]) → 数值数组（组内每行相同，广播）
+```
+
+平均单杂的口径（有关物质 20260923 裁决 Q1 勾 A）：同一个杂质的几针里
+
+1. 有报告值 **≥报告限**（报告值是数字）的 → **只平均这几针**
+2. 否则有 **≥积分限**（报告值是「＜x%」）的 → 只平均这几针
+3. **全是 ND** → 全部针参与
+
+平均的是**值列**（未修约的检测杂质原值），平均完再在外面修约：
+
+```
+# AS-10 单键
+imp_avg_single = ROUND_EVEN(GROUP_AVG_TOPlist([imp_pct_num],[imp_report],[imp_pct_group]), 4)
+# AS-12 双键
+imp_avg_single = ROUND_EVEN(GROUP_AVG_TOPlist([imp_pct_num],[imp_report],[imp_name],[imp_pct_group]), 4)
+```
+
+例：6 针报告值 `0.06 / 0.05 / ＜0.05% / ＜0.05% / ND / ND` → 只平均前两针的检测杂质。
+
+- **分档与 `GROUP_REPORT_TOPlist` 是同一份**（数字 > 「＜x%」> ND > 没数据），组键归一也同一份 ——
+  「哪一档最高」两列不可能各说各的
+- **边界 `≥` 由报告值那一列决定**：`RESULT_STATUS` 里等于报告限的那针已经是数字，自然进最高档
+- 一组里没有任何一针认得出档次（全空 / 全 `---`）→ 该组 `---`，**不是 0**
+- **`GROUP_AVGlist` 做不了这件事**：它平均整组所有针，最高档之外的针会把平均拉低，
+  而且拉低多少取决于 ND 针的检测杂质恰好是几 —— 一个看着合理的错数
+- 数组路径函数，**单独占一个字段**
 
 ---
 
@@ -2410,25 +2765,42 @@ rec_n     = GROUP_COUNTlist([rec], [level])    # → 2    ← 报表上要能看
 
 | 函数 | 返回 | 修约方式 |
 | ---- | ---- | -------- |
-| `ROUND(val, digits)` | **数值** | 四舍五入（round-half-up），逢五一律进位 |
-| `ROUND_EVEN(val, digits)` | **数值** | 四舍六入五留双（round-half-even），GB/T 8170 / 中国药典 |
+| `ROUND(val, digits)` | **数值（带位数）** | 四舍五入（round-half-up），逢五一律进位 |
+| `ROUND_EVEN(val, digits)` | **数值（带位数）** | 四舍六入五留双（round-half-even），GB/T 8170 / 中国药典 |
 | `FORMAT(val, digits)` | **字符串** | 同 `ROUND` 的方向，但**保留尾随零** |
 
-两者只在「正好一半」（被舍位为 5 且其后全 0）时不同：
+两者只在「正好一半」（被舍位为 5 且其后全 0）时不同（右边是**显示**，v1.17.0 起）：
 
 ```
 ROUND(1.25, 1)       → 1.3        ROUND_EVEN(1.25, 1)  → 1.2   （2 是偶数，五留双）
-ROUND(2.5, 0)        → 3.0        ROUND_EVEN(2.5, 0)   → 2.0
-                                  ROUND_EVEN(3.5, 0)   → 4.0
-ROUND_EVEN(1.35, 1)  → 1.4
+ROUND(2.5, 0)        → 3          ROUND_EVEN(2.5, 0)   → 2
+                                  ROUND_EVEN(3.5, 0)   → 4
+ROUND_EVEN(1.35, 1)  → 1.4        ROUND_EVEN(3.1, 3)   → 3.100
 FORMAT(0.04, 4)      → "0.0400"   FORMAT(2, 3)         → "2.000"
 ```
 
-### 为什么必须拆出 `FORMAT`
+### ★ v1.17.0 起：`ROUND` 自己保位数，展示不必再套 `FORMAT`
+
+**`ROUND` 家族的结果记得公式里写的 `digits`**：`ROUND_EVEN(x, 3)` 碰上 `3.1` 显示 `3.100`、
+`ROUND(x, 0)` 显示 `1609` 而不是 `1609.0`。它**仍然是数** —— 比较、排序、`> 限度`
+判定、`[a]/[b]*100` 都照常；**一参与运算就变回普通数**（位数不传染），所以
+`ROUND_EVEN(ROUND(x,3)/2, 1)` 显示几位只看外层的 `1`。
+
+落库：修约过的 CalculatedList 列存成定位数文本（`["1609", "3.100"]`），读回时还原位数；
+没修约的列仍是 JSON 数字、逐字节不变。标量 Calculated 本来就存文本，同样生效。
+
+**所以下面「展示归展示、计算归计算」那套拆字段的写法已经不需要了**：一个
+`ROUND_EVEN([x], 4)` 字段既能显示 `0.0400`、也能被下游引用。`FORMAT` 仍然可用，
+场景收窄到「就是要一个字符串」（比如拼进文本）。
+
+> 下面两小节是 v1.17.0 之前的背景，**保留作记录**。其中「`FORMAT` 的结果不能被下游引用」
+> 那句说得过宽（口径文档 §3.3 已记为文档口径问题），**本版未订正**，待单独核实后再改。
+
+### 为什么当初必须拆出 `FORMAT`（v1.17.0 之前）
 
 制药行业对有效数字有强制要求，而 `0.04` 与 `0.0400` 表达的精度不同。
-`ROUND` 返回数值 —— 数值没有「尾随零」这个概念，`0.0400` 存成数值就是 `0.04`。
-所以展示用 `FORMAT`（字符串，零保住了），计算用 `ROUND`（数值，可继续参与运算）。
+v1.17.0 之前 `ROUND` 返回普通数值 —— 普通数值没有「尾随零」这个概念，`0.0400` 存成数值就是 `0.04`。
+所以当时展示用 `FORMAT`（字符串，零保住了），计算用 `ROUND`（数值，可继续参与运算）。
 
 ### ⚠️ `FORMAT` 的结果不能被下游引用
 
@@ -2448,8 +2820,9 @@ imp_total = GROUP_SUMlist([imp_pct_disp], [sid])
 
 ### 修约的是你填的那个十进制数
 
-内部用 `Decimal(repr(值))` 而不是 `Decimal(浮点值)` —— 后者修约的是浮点二进制
+内部用 `Decimal(float.__repr__(值))` 而不是 `Decimal(浮点值)` —— 后者修约的是浮点二进制
 展开。这样保证修约对象是**分析员实际填进去的那个十进制数**。
+（v1.17.0 起写成 `float.__repr__` 而不是 `repr`：带位数的修约值 `repr` 出来是构造式，不是数字。）
 
 ### 也可以套在数组函数外面
 
@@ -2457,7 +2830,7 @@ imp_total = GROUP_SUMlist([imp_pct_disp], [sid])
 很自然的写法可用：
 
 ```
-rec_avg_r = ROUND(GROUP_AVGlist([rec], [level]), 1)     # → [102.3, 102.3, ...]
+rec_avg_r = ROUND(GROUP_AVGlist([rec], [level]), 1)     # → ["102.3", "102.3", ...]（v1.17.0 起落库为文本）
 rec_rsd_f = FORMAT(GROUP_RSDlist([rec], [level]), 2)    # → ["5.89", "5.89", ...]
 r2_r      = ROUND(RSQ_ROWS(...), 4)                     # → [1.0]
 ```
@@ -2594,15 +2967,16 @@ check the entered times.
 基准时间无法解析时**整列返回 `---`**，而不是悄悄退回「数组内最早时间」：
 
 ```
-TIME_ELAPSED_HOURS: base u'2026/5/12 20:13' is not a parsable timestamp
+TIME_ELAPSED_HOURS: base u'5/12/26 20:13' is not a parsable timestamp
 -- refusing to fall back to the array minimum
 ```
 
 你明确指定了基准却读不出来，这时候换一个 t0 会算出一组**看着合理但口径
 错误**的数。答不上来就说答不上来。
 
-**最常见的触发原因就是斜杠日期**（见上文格式表）。基准字段来自别的分析时，
-那个源字段的格式同样要是连字符。
+1.19.0 之前**最常见的触发原因就是斜杠日期**；现在斜杠认了，剩下的常见形态是
+两位年和带括号的时区尾巴（见上文格式表）。基准字段来自别的分析时，
+那个源字段同样要是认得出的写法。
 
 ### 时区规则对基准同样生效
 
@@ -2616,11 +2990,39 @@ TIME_ELAPSED_HOURS: base u'2026/5/12 20:13' is not a parsable timestamp
 
 ---
 
+## EARLIEST_TIME —— 从所选那一段的最早进样起算
+
+```
+EARLIEST_TIME(源AS, "字段") → 源 AS 那一列里最早的时间（原文）
+```
+
+**只作 `TIME_ELAPSED_HOURS` 的第三个参数（base）用**：
+
+```
+# 供试品溶液稳定性-2/-3：时间点(h) 从「稳定性来源」下拉所选那一段的最早进样起算
+imp_stab2_time = TIME_ELAPSED_HOURS([imp_stab2_inj_time], 1,
+                                    EARLIEST_TIME([imp_stab2_source], "imp_inj_time"))
+```
+
+- 源 AS 可以写字面量 `"imp_stability_cold"`，也可以写字段引用（下拉的值），与 `LOOKUP([src], …)` 同款。
+  源段的那个字段要勾 **cross_referenceable**
+- 时间的解析与 `TIME_ELAPSED_HOURS` 是**同一套**（见下一节）。源列里**有一格认不出来**
+  （比如两位年 `5/12/26 20:13`）→ **整列 `---`**：少读一格就可能少了真正最早的那一针
+- 源段一个进样时间都没有 / 下拉没选 → **整列 `---`，不回退到本段自己的最早时间**
+- 失败时本次写入的公式失败汇总日志里会留名（与 LOOKUP 取不到源同一条路）
+- 改了源段的进样时间，读它的 AS 会被重算（与动态源 `LOOKUP` 同一套依赖传播）
+
+> ⚠️ **不要让它单独占一个字段再引用。** 它失败时靠「报错」让整列变 `---`；
+> 单独占字段的话那一格是 `---`，而 `TIME_ELAPSED_HOURS` 收到 `---` 的 base
+> 会按「没给 base」**回退到本列最早时间** —— 正是这里要拒绝的那个静默回退。
+
+---
+
 ## TIME_ELAPSED_HOURS 接受的时间格式
 
-**只认两种写法。斜杠日期（`2026/5/13 20:47`）不被识别** ——
-这是中文 Excel 和 Windows 中文区域设置的默认格式，从色谱工作站或 Excel
-复制粘贴过来通常就是它，所以这是最常见的一个坑。
+**1.19.0 起认三类写法：连字符、斜杠、英文月名。** 斜杠是中文 Excel 与色谱
+工作站的默认格式 —— 从前不认它，是这里最常见的一个坑（整列 `---` 且不报错）。
+现在认了，但**两位年仍然不认**，见下面「不能用的」。
 
 ### 可以用的
 
@@ -2634,12 +3036,20 @@ TIME_ELAPSED_HOURS: base u'2026/5/12 20:13' is not a parsable timestamp
 | 连字符 + 时区标签 | `2026-05-13 20:47:30 CST` | |
 | **英文月份名** | `May 13, 2026 8:47:00 PM CST` | SENAITE 渲染 datetime 的样子 |
 | 英文月份缩写 | `May 13 2026 20:47` | 逗号、AM/PM、时区均可省略 |
+| **斜杠 年/月/日** | `2026/5/13 20:47` | 1.19.0 起；中文 Excel 的默认格式 |
+| **斜杠 月/日/年** | `3/25/2025 3:17:45 PM` | 1.19.0 起；★ 安捷伦工作站原样粘贴 |
+| 斜杠 日/月/年 | `25/3/2025 10:00` | 首位 >12 时无歧义，也认 |
+
+> 四位年在前就是年/月/日；四位年在后按**月/日/年**读（安捷伦口径）。
+> `3/5/2025` 两个数都 ≤12，按 3 月 5 日读并在日志里说一句 —— 要表达 5 月 3 日，
+> 写 `2025-05-03`。
 
 ### 不能用的
 
 | 形式 | 例 | 结果 |
 | ---- | -- | ---- |
-| **斜杠日期** | `2026/5/13 20:47` | **无法识别 -> 整列 `---`** |
+| **两位年** | `3/5/25 10:00` | **无法识别 -> 那一格 `---`**（世纪与月/日顺序都得猜） |
+| 括号里的时区 | `3/25/2025 3:17 PM (GMT +08:00)` | 无法识别 —— 采集那一步把尾巴截掉 |
 | 只有日期没有时间 | `2026-05-13` | 无法识别 |
 | 中文日期 | `2026年5月13日 20:47` | 无法识别 |
 | 中文月份名 | `5月 13, 2026` | 月份名表只有英文缩写 |

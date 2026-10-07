@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 from bika.lims import api
+from maitux.stock import stockMessageFactory as _
 from bika.lims.browser.workflow import RequestContextAware
 from bika.lims.interfaces import IWorkflowActionUIDsAdapter
 from zope.interface import implements
-
-from maitux.stock import _
 
 
 class WorkflowActionStockBatchConsumeAdapter(RequestContextAware):

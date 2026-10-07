@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <object name="StockBatch" meta_type="Dexterity FTI"
         i18n:domain="maitux.stock"
         xmlns:i18n="http://xml.zope.org/namespaces/i18n"
@@ -33,7 +33,8 @@
     <element value="plone.app.referenceablebehavior.referenceable.IReferenceable" />
     <!-- 中文注释：必须启用多目录行为，否则 senaite 的 CatalogMultiplexProcessor
          会拒绝为 StockBatch 做目录索引（reindexObject 变成空操作），
-         导致批次列表/低库存/到期同步/分装候选都查不到新建批次。 -->
+         导致批次列表/低库存/到期同步/分装候选都查不到新建批次。
+         与 Stock/StockUnit/StockType 保持一致。 -->
     <element value="bika.lims.interfaces.IMultiCatalogBehavior"/>
   </property>
 

@@ -54,6 +54,52 @@ Interim Fields** 汇总成一张中间表，`zh` / `en` 两列由**人工**填�
 | `state_changed_on` | 同步 | 状态变更时间（仅创建 / 状态变化时写） |
 | `last_sync_by` | 同步 | 触发者（写入是提权执行的，这是唯一可用的归因） |
 | `note` | 人工 | 备注 |
+| `acq_enabled` / `acq_source_sample` / `acq_pick` / `acq_decimals` / `acq_length` / `acq_injection` / `acq_peaks` / `acq_rt` / `acq_peak_indexes` / `acq_row_key` / `acq_slot` / `acq_drop_rt` | **人工** | 报告导入映射（见 §1.3）。同步**不碰**，默认全部为空/未勾选 |
+
+### 1.3 报告导入映射列（`acq_*`，由仪器采集侧消费）
+
+这 12 列是给 `maitux.instrument_acquisition` 的**报告落位**用的配置：
+
+| 列 | 含义 |
+|---|---|
+| `acq_enabled`（报告导入目标位） | 勾选 = 该公式字段是落位目标位；只有勾选的行会被采集侧读取 |
+| `acq_source_sample`（来源 SampleName） | 报告正文里供数的 SampleName（`STD-1` / `SYS` …），只认正文、不认文件名 |
+| `acq_pick`（取值规则） | 受控下拉：`main_peak.area` / `peaks.area` / `peaks.rt` / `peaks.resolution` / `peaks.sn` / `peaks.area_sum` / `peaks.name` |
+| `acq_decimals`（写法） | 受控下拉：空（原样）/ 0 / 1 / 2 / 3 位小数 |
+| `acq_length`（期望长度） | 该字段应有的针数/峰数；不符即跳过（0 = 不校验） |
+| `acq_injection`（第 N 针） | 只取该来源的第 N 针（0 = 全部针按序拼接） |
+| `acq_peaks`（取前 N 峰） | 每针只取前 N 个峰（0 = 全部峰） |
+| `acq_rt`（目标 RT(min)） | 只保留 RT 落在「目标 ± 0.5 min」窗口内的峰（0 = 不筛） |
+| `acq_peak_indexes`（峰序号清单） | 只保留这些峰序号（如 `3,6,7,8,15,16`；空 = 不筛） |
+| `acq_row_key`（行键列） | 峰级「多列同行」：用该数组列出目标列的槽位连续块（如 `g_sample_id`） |
+| `acq_slot`（行槽位） | 要写的槽位取值，与「来源 SampleName」**按位置一一对应**的逗号清单 |
+| `acq_drop_rt`（排除 RT） | 剔除站点不存的小峰（RT 落在任一值 ±0.5 min 内；空 = 不剔） |
+
+> 填了 `acq_slot`（行槽位）时，「来源 SampleName」必须是等长的逗号清单（按位置对应）；
+> 填了 `acq_row_key`（行键列）却没填行槽位（或反之）会被点名拒绝。同一行槽位重复配置同样被拒。
+
+> 后四列是**筛选维度**：`acq_injection` 选针；`acq_peaks` / `acq_rt` / `acq_peak_indexes` 筛峰
+> （采集侧由 `report_import.select_peaks` 统一处理，筛峰顺序固定：**峰序号 → RT 窗口 → 取前 N 峰**）。
+
+> `peaks.name` 是**唯一一条字符串规则**（其余都是数值）：取该针全部峰的峰名、按峰序。
+> 报告里 Peak Name **空白**（未命名杂质）→ 落位写「未知杂质」，且**必须占位**
+> （不能跳过）—— 峰级数组按峰序一一对应，少一个值就会让槽位长度校验拒绝整段、
+> 或让「期望长度」闸门整行跳过。常量定义在采集侧 `report_targets.UNKNOWN_IMPURITY`。
+
+三条与 `zh` / `en` **不同**的语义，改动前务必知道：
+
+1. **只写当前行**（`zh` / `en` 是按 `calc_keyword` 批量写兄弟行的）。
+   理由：同一个 calc keyword 在不同分析上的来源不同 —— 实测 `g_rt` 有 8 行，
+   `imp_sys_separation` 用 `SYS`、`imp_chrom` / `imp_repeat` 用供试品、
+   `imp_stability_*` 用稳定性样品；若按批量语义改一次，会把别的分析的来源改错。
+   实现见 `config.ACQUISITION_FIELDS` 与 `datamanagers/glossaryentry.py`（`BATCHED_FIELDS` 只有 `zh`/`en`）。
+2. **列表页里这 5 列只读展示**，编辑走该行的 `@@edit`（点 Analysis Keyword 链接）。
+   列表搜索框可以用 `报告导入目标位` 一词筛出全部已配置行。
+3. **同步不写它们**（种子字段只有行键与 `category`，之后仅动 `sync_state`），
+   所以站点重跑同步不会冲掉配置。
+
+> 词表（`acq_pick` / `acq_decimals`）在 `vocabularies.py` 里定义，采集侧
+> `report_targets.py` 里有一份**对应的取值清单**；两边是同一套取值，改一处要同步另一处。
 
 列表页还有两个**只读参考列**，它们**不入库**，每轮同步从站点快照现取：
 

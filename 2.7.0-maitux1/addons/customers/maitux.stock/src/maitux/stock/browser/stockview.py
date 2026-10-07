@@ -44,8 +44,9 @@ class StockView(BrowserView):
                 ref = self.resolve_by_uid(u)
                 title = api.get_title(ref) if api.is_object(ref) else u""
             if title:
-                # 中文注释：中文标题可能是 utf8 字节串，直接与 unicode 一起 join
-                # 时 Py2 会按 ASCII 解码而抛 UnicodeDecodeError（库存详情页 500）。
+                # 中文注释：api.get_title 对中文标题可能返回 utf8 字节串，直接与
+                # unicode 一起 join 时 Py2 会按 ASCII 解码而抛 UnicodeDecodeError
+                # （表现为库存详情页 500）。这里统一成 unicode。
                 titles.append(api.safe_unicode(title))
         return u", ".join(titles)
 

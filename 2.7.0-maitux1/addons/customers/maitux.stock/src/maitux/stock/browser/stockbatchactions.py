@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from bika.lims import api
 
-from maitux.stock import _
+from maitux.stock import stockMessageFactory as _
 from maitux.stock.stockbatchexpiry import REVIEW_STATE_DESTROYED
 from maitux.stock.stockbatchexpiry import REVIEW_STATE_EXPIRED
 from maitux.stock.stockbatchexpiry import get_review_state
@@ -14,14 +14,22 @@ ACTION_RETURN = "stockbatch_return"
 ACTION_DESTROY = "stockbatch_destroy"
 ACTION_STOCKTAKE = "stockbatch_stocktake"
 ACTION_PRINT = "stockbatch_print"
+# 审核领用申请：入口在批次这一侧（审核人点对应批次去审核）。
+# 注意：它**不**放进 ALL_ACTION_IDS / ACTIVE_ACTION_IDS —— 因为它不取决于批次状态，
+# 而取决于"该批次上有没有等待本人审核的领用申请"，由列表视图动态追加。
+ACTION_REVIEW_USAGE = "stockbatch_review_usage"
 
+# 中文注释：动作标题必须是 **Message（本包域）**，不能是纯字符串。
+# 这些标题会进 SENAITE 列表的 JSON，由 senaite.app.listing 的 @translate
+# 装饰器按 Message 自带的域翻译；纯字符串会被原样透传 —— 中文站就显示英文。
 ACTION_TITLES = {
-    ACTION_CONSUME: _(u"listing_action_consume", default=u"Consume"),
-    ACTION_SPLIT: _(u"listing_action_split", default=u"Split"),
-    ACTION_RETURN: _(u"listing_action_return", default=u"Return"),
-    ACTION_DESTROY: _(u"listing_action_destroy", default=u"Destroy"),
-    ACTION_STOCKTAKE: _(u"listing_action_stocktake", default=u"Stocktake"),
-    ACTION_PRINT: _(u"listing_action_print", default=u"Print Labels"),
+    ACTION_CONSUME: _(u"Consume"),
+    ACTION_SPLIT: _(u"Split"),
+    ACTION_RETURN: _(u"Return"),
+    ACTION_DESTROY: _(u"Destroy"),
+    ACTION_STOCKTAKE: _(u"Stocktake"),
+    ACTION_PRINT: _(u"Print Labels"),
+    ACTION_REVIEW_USAGE: _(u"Review Usage Request"),
 }
 
 ACTION_CSS_CLASSES = {
@@ -31,6 +39,7 @@ ACTION_CSS_CLASSES = {
     ACTION_DESTROY: u"btn btn-danger",
     ACTION_STOCKTAKE: u"btn btn-primary",
     ACTION_PRINT: u"btn btn-outline-secondary",
+    ACTION_REVIEW_USAGE: u"btn btn-info",
 }
 
 ALL_ACTION_IDS = (

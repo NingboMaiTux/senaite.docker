@@ -25,8 +25,14 @@
     <type type_id="StabilityPlanTemplate">
       <bound-workflow workflow_id="senaite_deactivable_type_workflow"/>
     </type>
+    <!-- 稳定性方案：阶段 6a 起改绑三态工作流（进行中 / 已暂停 / 已终止）。
+         原来是 senaite_one_state_workflow（单状态 active）—— 那时方案没有
+         "状态"可言。工作流定义见
+         profiles/default/workflows/senaite_stability_plan_workflow/definition.xml。
+         ⚠️ 换绑定的同时必须给存量方案补状态（新工作流下它们没有状态记录），
+         见 setuphandlers.ensure_plan_workflow_state()。 -->
     <type type_id="StabilityPlan">
-      <bound-workflow workflow_id="senaite_one_state_workflow"/>
+      <bound-workflow workflow_id="senaite_stability_plan_workflow"/>
     </type>
     <type type_id="StabilityTimepointTask">
       <bound-workflow workflow_id="senaite_one_state_workflow"/>

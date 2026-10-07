@@ -89,6 +89,10 @@ class IInstrumentParsingTemplateSchema(model.Schema):
 
     script_file = NamedBlobFile(
         title=_(u"title_instrumentparsingtemplate_script", default=u"Parser Script File"),
+        description=_(u"desc_instrumentparsingtemplate_script",
+                      default=u"支持 .js / .py：.js 走 node 子进程执行 parse(text)；"
+                              u".py 进程内执行 parse(payload)，payload 为带坐标的"
+                              u"抽取结果（PDF 报告解析用 .py）"),
         required=False,
     )
 
@@ -136,8 +140,8 @@ class IInstrumentParsingTemplateSchema(model.Schema):
         if not f:
             return
         filename = getattr(f, "filename", "") or ""
-        if filename and not filename.lower().endswith(".js"):
-            raise Invalid(_(u"Please upload a .js JavaScript file"))
+        if filename and not filename.lower().endswith((".js", ".py")):
+            raise Invalid(_(u"Please upload a .js or .py script file"))
 
 
 @implementer(IInstrumentParsingTemplate, IInstrumentParsingTemplateSchema, IDeactivable, IHaveInstrument)

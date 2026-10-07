@@ -1,4 +1,4 @@
-﻿<configure
+<configure
     xmlns="http://namespaces.zope.org/zope"
     xmlns:browser="http://namespaces.zope.org/browser">
 
@@ -68,6 +68,23 @@
       permission="zope2.View"
       layer="senaite.core.interfaces.ISenaiteCore"/>
 
+  <!-- 稳定性方案的编辑页：覆盖 senaite.core 给 IDexterityContent 注册的 「edit」。
+       注册的 for 是更具体的 IStabilityPlan，与原生注册不冲突（不需要 overrides）。
+       用途：保存前拦下"删除进行中/已完成的时间点行"。见 browser/edit.py。
+
+       ⚠️ permission 必须用 zope2.View，**不能**写 cmf.ModifyPortalContent：
+       本包走 package-includes/*-configure.zcml（site.zcml 第 15 行）加载，
+       而 cmf.* 权限由 Products.CMFCore 在第 16 行 five:loadProducts 时才注册，
+       这里 protectClass 会直接 ComponentLookupError(**Zope 起不来**)。
+       与同文件里 sample_placement / link_sample / create_sample 一致：
+       页面用通用可用权限，**真正的编辑权限在 StabilityPlanEditView 里二次校验**。 -->
+  <browser:page
+      for="maitux.stability.interfaces.IStabilityPlan"
+      name="edit"
+      class=".edit.StabilityPlanEditView"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"/>
+
   <browser:page
       for="maitux.stability.interfaces.IStabilityPlans"
       name="folder_view"
@@ -82,6 +99,14 @@
       permission="zope2.View"
       layer="senaite.core.interfaces.ISenaiteCore"/>
 
+  <!-- 「复制计划」新建表单的预填数据（与 plan_template_defaults 同一套路） -->
+  <browser:page
+      for="maitux.stability.interfaces.IStabilityPlans"
+      name="plan_copy_defaults"
+      class=".view.PlanCopyDefaultsView"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"/>
+
   <browser:page
       for="maitux.stability.interfaces.IStabilityPlans"
       name="task_board"
@@ -89,7 +114,19 @@
       permission="zope2.View"
       layer="senaite.core.interfaces.ISenaiteCore"/>
 
-  <!-- 椤甸潰娉ㄥ唽浣跨敤閫氱敤鍙敤鏉冮檺锛屽叿浣撶紪杈戞潈闄愬湪Python閫昏緫閲屼簩娆℃牎楠?-->
+  <!-- 稳定性自动登样站点设置页（Site Setup → Products 的入口见
+       profiles/default/controlpanel.xml）。
+       权限只写 zope2.View，真正的校验在 StabilityAutomationSettingsView.can_manage()
+       里二次完成 —— 本包有 package-includes slug，cmf.* 权限写在这里会让 Zope 起不来
+       （见 browser/controlpanel.py 的模块注释与开发规则 R1 订正）。 -->
+  <browser:page
+      for="Products.CMFPlone.interfaces.IPloneSiteRoot"
+      name="stability-automation-controlpanel"
+      class=".controlpanel.StabilityAutomationSettingsView"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"/>
+
+  <!-- 页面注册使用通用可用权限，具体编辑权限在 Python 逻辑里二次校验 -->
   <browser:page
       for="maitux.stability.interfaces.IStabilityPlans"
       name="sample_placement"
@@ -97,17 +134,64 @@
       permission="zope2.View"
       layer="senaite.core.interfaces.ISenaiteCore"/>
 
+  <!-- 0 点关联往期样品（阶段 3）：候选页 + 关联动作。
+       2026-09-29：原先的 @@link_sample（全站样品下拉）已被本视图取代 ——
+       看板的「关联已有样品」与登样页零点行的按钮都指向这里（唯一实现）。 -->
   <browser:page
       for="maitux.stability.interfaces.IStabilityPlans"
-      name="link_sample"
-      class=".view.LinkSampleView"
+      name="zero_point_candidates"
+      class=".zeropoint.ZeroPointCandidatesView"
       permission="zope2.View"
       layer="senaite.core.interfaces.ISenaiteCore"/>
 
+  <!-- 创建样品（按**该时间点行的样品模板**及其检验项建样）。
+       2026-09-29 需求订正：明细行上不再有「检验标准 / 分析套餐」，
+       所以原先按标准/套餐建样的 @@create_sample 已删除，
+       看板的「创建样品」按钮直接指向本视图（模板驱动的唯一实现）。 -->
   <browser:page
       for="maitux.stability.interfaces.IStabilityPlans"
-      name="create_sample"
-      class=".view.CreateSampleView"
+      name="generate_sample"
+      class=".samplegen.GenerateSamplesView"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"/>
+
+  <!-- 到期自动登样的**定时入口**（阶段 4）：供外部 cron 高频调用，
+       由视图读站点配置 auto_create_time 决定是否到点（crontab 不写死时刻）。
+       通用可用权限 zope2.View：本包有 package-includes slug，cmf.* 权限不能写在这里
+       （开发规则 R1）；真正的门在 Python 侧（要求 ManageSampleAutomation）。 -->
+  <browser:page
+      for="maitux.stability.interfaces.IStabilityPlans"
+      name="generate_due_stability_samples"
+      class=".generation.GenerateDueSamplesView"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"/>
+
+  <!-- 「撤销登样」（阶段 4）：行级动作 + 必填原因；权限同样在 Python 侧二次校验
+       （ManageSampleAutomation），与自动登样开关"权限可配置"是同一个权限。 -->
+  <browser:page
+      for="maitux.stability.interfaces.IStabilityPlans"
+      name="revoke_sample"
+      class=".revoke.RevokeSampleView"
+      permission="zope2.View"
+      layer="senaite.core.interfaces.ISenaiteCore"/>
+
+  <!-- 阶段 6d：`@@void_point`（行级「作废时间点」动作页）**已撤掉** ——
+       用户 2026-09-30 明确要求："作废这个功能还是不要吧，这个界面的删除改成
+       状态删除就行了，有审计最终追溯"。
+       现在删除只有一条路径：**方案编辑页删行** = 状态删除（写 voided_* 标记、
+       行保留、留审计），且编辑页不再显示已废弃的行（用看板的「已废弃」筛选查）。
+       判据与写库逻辑没动（timepoints/voiding/plan_status），只是不再有单独入口。 -->
+
+  <!-- 方案状态动作页（阶段 6a）：暂停 / 恢复 / 终止，三者共用一页，
+       靠 ?transition=pause|resume|terminate 区分。
+       注册在**方案对象**上（不是列表容器）—— 状态属于方案本身。
+       permission 只写 zope2.View：本包有 package-includes slug，cmf.* 权限
+       在这里会让 Zope 起不来（开发规则 R1）；真正的门在
+       PlanStatusView.can_manage() 里（要求 ManagePlanStatus）。 -->
+  <browser:page
+      for="maitux.stability.interfaces.IStabilityPlan"
+      name="plan_status"
+      class=".planstatus.PlanStatusView"
       permission="zope2.View"
       layer="senaite.core.interfaces.ISenaiteCore"/>
 

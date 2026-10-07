@@ -20,6 +20,7 @@ from Products.Five.browser import BrowserView
 from Products.Five.browser.pagetemplatefile import ViewPageTemplateFile
 from senaite.app.listing.adapters.workflow import ListingWorkflowTransition
 from senaite.core.browser.listing.workflow.sample import SampleReceiveWorkflowTransition
+from six import string_types
 from six.moves.urllib.parse import urlencode
 from zope.component.hooks import setSite
 from zope.event import notify
@@ -37,6 +38,7 @@ from maitux.esignature.interfaces import IReAuthenticationProvider
 from maitux.esignature.services.policy import SignaturePolicyResolver
 from maitux.esignature.services.reauth import PasReAuthenticationProvider
 from maitux.esignature.services.signflow import authenticate_countersign_users
+from maitux.esignature.services.signflow import check_signers_against_initiator
 from maitux.esignature.storage.store import SignatureRecordStore
 
 
@@ -81,6 +83,30 @@ def build_receive_redirect_url(context, back_url):
 
 def is_ajax_request(request):
     return request.getHeader("X-Requested-With") == "XMLHttpRequest"
+
+
+def as_user_id(value):
+    """把任意字段值安全地转成用户 id 文本（兼容 py2 的 str/unicode）。
+
+    表单字段可能取到列表（同名参数同时出现在查询串和表单里），此时取第一个
+    非空项，而不是让调用方拿到一个 list 去和字符串比较。
+    """
+    if value is None:
+        return u""
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            item = as_user_id(item)
+            if item:
+                return item
+        return u""
+    if isinstance(value, bytes):
+        try:
+            value = value.decode("utf-8")
+        except Exception:
+            return u""
+    if not isinstance(value, string_types):
+        return u""
+    return value.strip()
 
 
 def redirect_response(request, redirect_url):
@@ -517,11 +543,34 @@ class SignaturePromptView(BrowserView):
             return self.handle_submit()
         return self.index()
 
+    def request_value(self, name, default=None):
+        """取请求参数，遇到"同名参数同时出现在 URL 和表单里"的情况取第一个。
+
+        这是踩过的坑。Zope 的 ``request.get(name)`` 在同一个名字既出现在查询串
+        又出现在表单里时会返回**列表**。签名页的 URL 本身就带
+        ``?transition_id=approve&redirect_url=...``，而表单里又有同名的隐藏
+        字段；如果测试脚本（或任何带查询串提交的表单）直接 POST 到那个 URL，
+        ``transition_id`` 就成了 ``["approve", "approve"]``：
+          * 规则表按字符串匹配，于是**匹配不到任何规则** -> signature_required
+            变成 False，页面提示"未配置电子签名"；
+          * ``redirect_url`` 变成列表，``response.redirect(list)`` 直接抛
+            TypeError（500）。
+        正常浏览器提交（表单 action 不带查询串）不会触发，但这里做兜底，
+        让视图对两种提交方式都成立。
+        """
+        value = self.request.get(name, default)
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                if item not in (None, ""):
+                    return item
+            return default
+        return value
+
     def transition_id(self):
-        return self.request.get("transition_id", "verify")
+        return self.request_value("transition_id", "verify") or "verify"
 
     def redirect_url(self):
-        return self.request.get("redirect_url") or api.get_url(self.context)
+        return self.request_value("redirect_url") or api.get_url(self.context)
 
     def target_uids(self):
         """UIDs this one signature act authorises.
@@ -563,6 +612,41 @@ class SignaturePromptView(BrowserView):
     def require_countersign(self):
         return bool(self.policy().get("require_countersign"))
 
+    # 需要校验"签名人不能是发起人"时，用这些字段找发起人。
+    # 顺序是：先看业务字段（例如领用申请单的 applicant），再回落到 Zope 的 Creator。
+    INITIATOR_FIELD_NAMES = ("applicant", "initiator_user_id")
+
+    def initiator_user_id(self):
+        """返回单据发起人（申请人）的 user id。"""
+        for name in self.INITIATOR_FIELD_NAMES:
+            value = as_user_id(getattr(self.context, name, None))
+            if value:
+                return value
+        creator = getattr(self.context, "Creator", None)
+        if callable(creator):
+            try:
+                return as_user_id(creator())
+            except Exception:
+                return u""
+        return u""
+
+    def disallow_initiator(self):
+        """规则表里的职责分离开关：签名人不得为单据发起人。"""
+        return bool(self.policy().get("disallow_initiator"))
+
+    def check_signers_against_initiator(self, signer_user_ids):
+        """校验签名人（可能有两人）都不是发起人；返回错误消息或 None。
+
+        单人签名时工作流守卫已经能拦住"自己审自己"，但**双人复核**的第二个
+        账号是在同一个页面里提交的，守卫只看得到当前登录用户，看不到复核人。
+        所以这个校验必须由签名页来做，并且对两个账号都要做。
+        """
+        return check_signers_against_initiator(
+            signer_user_ids,
+            self.initiator_user_id(),
+            enabled=self.disallow_initiator(),
+        )
+
     def signature_store(self):
         return SignatureRecordStore(api.get_portal())
 
@@ -594,17 +678,17 @@ class SignaturePromptView(BrowserView):
         return self.policy().get("meaning") or u""
 
     def form_reason(self):
-        return self.request.get("reason") or (
+        return self.request_value("reason") or (
             self.pending_countersign() and self.pending_countersign().get("reason")
         ) or ""
 
     def form_primary_user_id(self):
         """回填第一操作员账号，便于校验失败后用户直接修正。"""
-        return (self.request.get("primary_user_id") or "").strip()
+        return (self.request_value("primary_user_id") or "").strip()
 
     def form_secondary_user_id(self):
         """回填第二操作员账号，便于校验失败后用户直接修正。"""
-        return (self.request.get("secondary_user_id") or "").strip()
+        return (self.request_value("secondary_user_id") or "").strip()
 
     def ensure_workflow_skin(self):
         """确保当前请求具备完整的 workflow guard 上下文。"""
@@ -644,7 +728,7 @@ class SignaturePromptView(BrowserView):
 
     def skip_transition_check(self):
         """对于已由工作流入口确认过的动作，允许跳过二次 guard 检查。"""
-        value = self.request.get("skip_transition_check", "")
+        value = self.request_value("skip_transition_check", "")
         return str(value).lower() in ("1", "true", "yes", "on")
 
     def handle_submit(self):
@@ -658,13 +742,13 @@ class SignaturePromptView(BrowserView):
             )
             return self.request.response.redirect(self.redirect_url())
 
-        password = self.request.get("password", "")
+        password = self.request_value("password", "")
         # From the policy, not the form: the meaning states the signer's role
         # towards the record and is configured per rule, so the signer cannot
         # reword it -- which is the whole point of moving it out of a free
         # text box.
         meaning = self.policy_meaning().strip()
-        reason = self.request.get("reason", "").strip()
+        reason = self.request_value("reason", "").strip()
 
         # ⚠ 这道闸对「需要签名的 transition」而言是自相矛盾的，因此每个入口都传
         # skip_transition_check=True 把它跳过。不要"好心"打开它。
@@ -708,16 +792,32 @@ class SignaturePromptView(BrowserView):
             return self.index()
 
         user_id = self.current_user_id()
+
+        # 先做"签名人不能是发起人"的校验，再去验密码。
+        # 顺序很重要：认证失败在某些后端策略下是有代价的（计数/锁定），
+        # 不该让用户在必然被拒的情况下先白输一遍密码。
+        if policy.get("require_countersign"):
+            submitted_signers = [
+                as_user_id(self.request.get("primary_user_id")),
+                as_user_id(self.request.get("secondary_user_id")),
+            ]
+        else:
+            submitted_signers = [user_id]
+        initiator_error = self.check_signers_against_initiator(submitted_signers)
+        if initiator_error:
+            self.context.plone_utils.addPortalMessage(initiator_error, "error")
+            return self.index()
+
         provider = self.reauth_provider()
         countersign_result = None
         if policy.get("require_countersign"):
             # 双人复核改为同页一次性录入两个账号密码，不再走“先挂起再二次进入”的旧流程。
             countersign_result = authenticate_countersign_users(
                 provider,
-                self.request.get("primary_user_id", ""),
-                self.request.get("primary_password", ""),
-                self.request.get("secondary_user_id", ""),
-                self.request.get("secondary_password", ""),
+                self.request_value("primary_user_id", ""),
+                self.request_value("primary_password", ""),
+                self.request_value("secondary_user_id", ""),
+                self.request_value("secondary_password", ""),
                 request_context=self.request,
             )
             if not countersign_result.get("authenticated"):

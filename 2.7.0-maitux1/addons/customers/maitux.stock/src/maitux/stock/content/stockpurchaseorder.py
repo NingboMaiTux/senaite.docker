@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from decimal import Decimal
 
+from maitux.stock import stockMessageFactory as _
 from plone.supermodel import model
 from plone.autoform import directives
 from senaite.core.catalog import SETUP_CATALOG
@@ -14,7 +15,6 @@ from z3c.form.widget import FieldWidget
 from zope import schema
 from zope.interface import implementer
 
-from maitux.stock import _
 from maitux.stock.interfaces import IStockPurchaseOrder
 from maitux.stock.z3cform.widgets.datetimeseconds import DatetimeSecondsWidget
 from maitux.stock.z3cform.widgets.purchaseorderlines import PurchaseOrderLinesWidgetFactory
@@ -42,25 +42,25 @@ class IStockPurchaseOrderLineSchema(model.Schema):
         },
     )
     stock = UIDReferenceField(
-        title=_(u"listing_po_line_column_stock", default=u"Stock"),
+        title=_(u"Stock"),
         allowed_types=("Stock", ),
         multi_valued=False,
         required=True,
     )
 
     supplier = schema.Choice(
-        title=_(u"listing_po_line_column_supplier", default=u"Supplier"),
+        title=_(u"Supplier"),
         vocabulary="maitux.stock.vocabularies.suppliers",
         required=False,
     )
 
     batch_number = schema.TextLine(
-        title=_(u"listing_po_line_column_batch_number", default=u"Batch Number"),
+        title=_(u"Batch Number"),
         required=False,
     )
 
     quantity_ordered = schema.Decimal(
-        title=_(u"listing_po_line_column_quantity_ordered", default=u"Quantity Ordered"),
+        title=_(u"Quantity Ordered"),
         required=True,
         min=Decimal("0.01"),
     )
@@ -78,24 +78,24 @@ class IStockPurchaseOrderLineSchema(model.Schema):
         },
     )
     unit = UIDReferenceField(
-        title=_(u"listing_po_line_column_unit", default=u"Unit"),
+        title=_(u"Unit"),
         allowed_types=("StockUnit", ),
         multi_valued=False,
         required=False,
     )
 
     unit_price = schema.Decimal(
-        title=_(u"listing_po_line_column_unit_price", default=u"Unit Price"),
+        title=_(u"Unit Price"),
         required=False,
     )
 
     batch = schema.TextLine(
-        title=_(u"listing_po_line_column_batch", default=u"Batch"),
+        title=_(u"Batch"),
         required=False,
     )
 
     tax_rate = schema.Decimal(
-        title=_(u"listing_po_line_column_tax_rate", default=u"Tax Rate"),
+        title=_(u"Tax Rate"),
         required=False,
     )
 
@@ -103,7 +103,7 @@ class IStockPurchaseOrderLineSchema(model.Schema):
 class IStockPurchaseOrderSchema(model.Schema):
     model.fieldset(
         "base_info",
-        label=_(u"listing_po_fieldset_base_info", default=u"Base Information"),
+        label=_(u"Base Information"),
         fields=[
             "purchase_order_number",
             "purchaser",
@@ -115,30 +115,30 @@ class IStockPurchaseOrderSchema(model.Schema):
 
     model.fieldset(
         "order_details",
-        label=_(u"listing_po_fieldset_order_details", default=u"Order Details"),
+        label=_(u"Order Details"),
         fields=[
             "order_lines",
         ],
     )
 
     purchase_order_number = schema.TextLine(
-        title=_(u"listing_po_column_number", default=u"Purchase Order Number"),
+        title=_(u"Purchase Order Number"),
         required=True,
     )
 
     purchaser = schema.TextLine(
-        title=_(u"listing_po_column_purchaser", default=u"Purchaser"),
+        title=_(u"Purchaser"),
         required=False,
     )
 
     directives.widget("order_date", StockPurchaseOrderDateWidgetFactory)
     order_date = DatetimeField(
-        title=_(u"listing_po_column_order_date", default=u"Order Date"),
+        title=_(u"Order Date"),
         required=True,
     )
 
     status = schema.Choice(
-        title=_(u"listing_po_column_status", default=u"Status"),
+        title=_(u"Status"),
         values=(
             u"draft",
             u"submitted",
@@ -150,13 +150,13 @@ class IStockPurchaseOrderSchema(model.Schema):
     )
 
     remarks = schema.Text(
-        title=_(u"listing_po_column_remarks", default=u"Remarks"),
+        title=_(u"Remarks"),
         required=False,
     )
 
     directives.widget("order_lines", PurchaseOrderLinesWidgetFactory)
     order_lines = DataGridField(
-        title=_(u"listing_po_column_order_lines", default=u"Order Lines"),
+        title=_(u"Order Lines"),
         required=False,
         value_type=DataGridRow(schema=IStockPurchaseOrderLineSchema),
         default=[],

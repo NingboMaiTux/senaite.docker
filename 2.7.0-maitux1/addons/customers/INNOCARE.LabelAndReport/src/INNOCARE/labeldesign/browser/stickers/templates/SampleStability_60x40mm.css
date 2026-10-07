@@ -1,0 +1,159 @@
+/* 60x40mm 稳定性样品标签（横版，8 个字段：比常规样品标签多 3 行）。
+   内容随 .label 的根字号自适应：下面所有尺寸都用 em，改根字号即可整体缩放。 */
+.stickers {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  width: 100% !important;
+  clear: both !important;
+  padding: 10px 0 !important;
+}
+
+.sticker {
+  display: inline-block !important;
+  width: 60mm !important;
+  height: 40mm !important;
+  margin: 2mm !important;
+  padding: 0 !important;
+  vertical-align: top !important;
+  border: none !important;
+  background: none !important;
+}
+
+.sticker .label {
+  /* 根字号（约 7.4pt）：全标签唯一缩放旋钮，其余尺寸均为 em */
+  font-size: 2.6mm !important;
+  line-height: 1.02 !important;
+  width: 60mm !important;
+  height: 40mm !important;
+  border: 0.5pt solid #222 !important;
+  border-radius: 1.5mm !important;
+  padding: 0.33em 0.42em !important;
+  display: block !important;
+  box-sizing: border-box !important;
+  background: #fff !important;
+  overflow: hidden !important;
+  /* 服务端渲染（容器内）用真实存在的简体 Noto，避免落到日文 JP 回退；
+     客户端预览仍会回落到 Windows 的 SimHei / 微软雅黑 */
+  font-family: "Noto Sans CJK SC", "Source Han Sans SC", "Noto Sans SC", "SimHei", "Microsoft YaHei UI", "Microsoft JhengHei", "Microsoft YaHei", "PMingLiU", Arial, sans-serif !important;
+  color: #000 !important;
+  text-rendering: geometricPrecision !important;
+}
+
+.sticker .label-top {
+  display: table !important;
+  margin: 0 auto !important;
+  min-height: 4.5em !important;
+}
+
+.sticker .label-content {
+  width: 100% !important;
+  margin-top: 0 !important;
+}
+
+.sticker .label-header {
+  display: table-cell !important;
+  vertical-align: middle !important;
+  padding-left: 0.45em !important;
+  text-align: center !important;
+}
+
+.sticker .label-separator {
+  width: 100% !important;
+  border-bottom: 1pt solid #000 !important;
+  margin-top: 0.1em !important;
+  margin-bottom: 0.15em !important;
+}
+
+.sticker .label-title {
+  display: inline-block !important;
+  font-size: 1.45em !important;
+  font-weight: 900 !important;
+  color: #000 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  white-space: nowrap !important;
+  text-align: center !important;
+  letter-spacing: 0.05mm !important;
+}
+
+.sticker .label-table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  table-layout: fixed !important;
+}
+
+.sticker .label-table td {
+  /* 8 行比常规标签多 3 行，行距只能给到最小；行高由内容自适应，避免固定行高在 PDF 中溢出 */
+  padding: 0.05em 0 !important;
+  vertical-align: middle !important;
+  line-height: 1.02 !important;
+}
+
+.sticker .lbl-label {
+  color: #000 !important;
+  width: 5.6em !important;
+  font-size: 0.93em !important;
+  font-weight: 900 !important;
+  white-space: nowrap !important;
+  letter-spacing: 0 !important;
+}
+
+.sticker .lbl-value {
+  /* 字段值字号最大，热敏打印下再叠加 Bold 会笔画粘连，这里降到 Regular；
+     需要强调时靠字号/行距，而不是靠加粗 */
+  font-weight: 500 !important;
+  color: #000 !important;
+  word-break: break-word !important;
+  font-size: 1.06em !important;
+  letter-spacing: 0.01mm !important;
+}
+
+.sticker .qrcode {
+  display: table-cell !important;
+  vertical-align: middle !important;
+  width: 4.4em !important;
+  height: 4.4em !important;
+  overflow: hidden !important;
+  border: 0.3pt solid #000 !important;
+  padding: 0 !important;
+  background: #fff !important;
+}
+
+.sticker .qrcode img,
+.sticker .qrcode canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+}
+
+/* 打印适配：锁定纸张尺寸为 60x40mm，避免浏览器/PDF 默认 A4 导致缩放 */
+@page {
+  size: 60mm 40mm;
+  margin: 0;
+}
+
+@media print {
+  html,
+  body {
+    width: 60mm;
+    height: 40mm;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* 预览用的居中与留白，打印时去掉 */
+  .stickers {
+    padding: 0 !important;
+    align-items: flex-start !important;
+  }
+
+  .sticker {
+    /* PDF 链路里 .sticker 是 inline-block，行盒的基线留白会让每页溢出，
+       末尾多出一张空白页；打印时改 block 即可与标签张数一一对应 */
+    display: block !important;
+    margin: 0 !important;
+    page-break-after: always;
+  }
+}
